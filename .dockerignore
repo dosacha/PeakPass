@@ -1,0 +1,17 @@
+node_modules
+npm-debug.log
+dist
+.git
+.gitignore
+README.md
+docs
+load-test
+terraform
+.vscode
+.idea
+.DS_Store
+coverage
+.env
+.env.local
+*.log
+.docker

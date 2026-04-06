@@ -1,0 +1,19 @@
+FROM node:18-alpine
+
+WORKDIR /app
+
+# 네이티브 모듈 빌드 도구 설치
+RUN apk add --no-cache python3 make g++
+
+# 패키지 파일 복사
+COPY package*.json ./
+
+# 의존성 설치
+RUN npm ci
+
+# 소스 복사
+COPY . .
+
+EXPOSE 3000
+
+CMD ["npm", "run", "dev"]

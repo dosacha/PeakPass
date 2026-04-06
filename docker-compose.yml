@@ -1,0 +1,85 @@
+version: '3.8'
+
+services:
+  # PostgreSQL 데이터베이스
+  postgres:
+    image: postgres:16-alpine
+    container_name: peakpass-postgres
+    environment:
+      POSTGRES_USER: peakpass
+      POSTGRES_PASSWORD: peakpass
+      POSTGRES_DB: peakpass
+      POSTGRES_INITDB_ARGS: "-c log_statement=all -c log_min_duration_statement=100"
+    ports:
+      - "5433:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U peakpass -d peakpass"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - peakpass-net
+
+  # Redis 캐시
+  redis:
+    image: redis:7-alpine
+    container_name: peakpass-redis
+    command: redis-server --appendonly yes --loglevel notice
+    ports:
+      - "6380:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - peakpass-net
+
+  # 애플리케이션
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile.dev
+    container_name: peakpass-app
+    environment:
+      NODE_ENV: development
+      LOG_LEVEL: debug
+      DATABASE_URL: postgresql://peakpass:peakpass@postgres:5432/peakpass
+      REDIS_URL: redis://redis:6379
+      DB_HOST: postgres
+      DB_PORT: 5432
+      DB_USER: peakpass
+      DB_PASSWORD: peakpass
+      DB_NAME: peakpass
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      PORT: 3000
+      DB_POOL_MIN: 2
+      DB_POOL_MAX: 10
+    ports:
+      - "3000:3000"
+    volumes:
+      - .:/app
+      - /app/node_modules
+      - /app/dist
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    command: >
+      sh -c "npm run migrate:up && npm run seed && npm run dev"
+    networks:
+      - peakpass-net
+
+volumes:
+  postgres_data:
+  redis_data:
+
+networks:
+  peakpass-net:
+    driver: bridge

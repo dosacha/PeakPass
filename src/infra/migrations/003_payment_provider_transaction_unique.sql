@@ -1,0 +1,3 @@
+CREATE UNIQUE INDEX IF NOT EXISTS idx_payment_records_provider_transaction_id_unique
+ON payment_records(provider_transaction_id)
+WHERE provider_transaction_id IS NOT NULL;
