@@ -143,3 +143,6 @@ docs/INTERVIEW_PRACTICE_4_STEPS.md
 docs/INTERVIEW_STORIES.md
 docs/PORTFOLIO_DOCUMENTATION.md
 docs/TECHNICAL_QA.md
+
+.env.prod
+docker-compose.prod.yml
