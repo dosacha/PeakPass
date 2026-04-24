@@ -1,5 +1,10 @@
 # PeakPass
 
+**Live demo:** https://peak-pass.com · `/health` · `/ready`  
+**Stack:** TypeScript · Fastify · Apollo GraphQL · PostgreSQL 16 · Redis 7 · Docker Compose · Nginx · AWS EC2 · Let's Encrypt
+
+실시간 티켓 발급 서비스의 핵심 흐름(Reservation → Payment → Ticket issuance)을 단일 서비스 수준에서 재현한 학습용 백엔드 모노레포입니다.
+
 ## 프로젝트 성격
 
 **개인 학습 프로젝트입니다.** 실제 운영 트래픽에서 검증된 시스템이 아니며, "티켓팅 도메인의 정합성/멱등성 문제를 코드로 설명 가능한 수준까지 끌고 가는 것"을 목표로 작성했습니다.
@@ -13,6 +18,17 @@
 - `POST /checkouts`, `POST /reservations`는 body의 `userId`를 신뢰. 실제 환경에서는 JWT subject와 대조하거나 body userId를 제거하고 인증 주체에서 파생해야 함
 - Webhook 서명 검증은 `WEBHOOK_SIGNING_SECRET`이 설정된 경우 HMAC-SHA256으로 수행함. 커스텀 JSON parser가 raw body(Buffer)를 보존해 Provider 원본 바이트에 대한 서명을 검증하며, 타임스탬프 헤더 기반 replay-window 검증은 후속 보강 과제
 - Redis idempotency lock은 처리 중 중복 진입을 줄이는 조정 계층이며, Redis 장애 시 PostgreSQL unique 제약이 최종 데이터 무결성 방어선
+
+## 배포 구성
+
+현재 데모는 AWS EC2(t3.small, 서울 리전) 단일 노드에 Docker Compose로 전체 스택을 올린 구성입니다.
+
+- Nginx가 80/443에서 요청을 받아 `127.0.0.1:3000` 앱 컨테이너로 프록시
+- Postgres/Redis는 외부 포트 미노출, 같은 Docker 네트워크에서만 접근
+- Let's Encrypt 인증서 자동 갱신 (certbot systemd timer)
+- Route 53 + Elastic IP로 고정 도메인(`peak-pass.com`) 연결
+
+`terraform/` 디렉토리에는 ECS Fargate + RDS + ElastiCache 기반의 프로덕션급 구성을 별도로 코드화해 두었습니다. 실제 AWS apply는 수행하지 않고 `terraform fmt`·`terraform validate`까지 검증했습니다. 현 데모 구성과 Terraform 구성의 차이는 "학습 데모 단일 노드" 대 "프로덕션 분산 구성"의 대비로 의도된 것입니다.
 
 ## 프로젝트 목표
 
