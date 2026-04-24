@@ -33,7 +33,7 @@ resource "aws_cloudwatch_log_group" "ecs" {
 # ECS Task Definition
 resource "aws_ecs_task_definition" "app" {
   family                   = var.app_name
-  network_mode             = "awsvpc"  # Required for Fargate
+  network_mode             = "awsvpc" # Required for Fargate
   requires_compatibilities = ["FARGATE"]
   cpu                      = var.container_cpu
   memory                   = var.container_memory
@@ -62,7 +62,7 @@ resource "aws_ecs_task_definition" "app" {
       },
       {
         name  = "PORT"
-        value = var.container_port
+        value = tostring(var.container_port)
       },
       {
         name  = "ENABLE_RATE_LIMITING"
@@ -82,7 +82,7 @@ resource "aws_ecs_task_definition" "app" {
       },
       {
         name  = "REDIS_URL"
-        value = "redis://${aws_elasticache_cluster.redis.cache_nodes[0].address}:${aws_elasticache_cluster.redis.port}"
+        value = "redis://${aws_elasticache_replication_group.redis.primary_endpoint_address}:${aws_elasticache_replication_group.redis.port}"
       }
     ]
 
@@ -164,12 +164,12 @@ resource "aws_appautoscaling_policy" "ecs_policy_cpu" {
   service_namespace  = aws_appautoscaling_target.ecs_target.service_namespace
 
   target_tracking_scaling_policy_configuration {
-    target_value       = 70.0  # Scale up when CPU > 70%
+    target_value = 70.0 # Scale up when CPU > 70%
     predefined_metric_specification {
       predefined_metric_type = "ECSServiceAverageCPUUtilization"
     }
-    scale_down_cooldown = 300  # 5 min
-    scale_up_cooldown   = 60   # 1 min
+    scale_in_cooldown  = 300 # 5 min
+    scale_out_cooldown = 60  # 1 min
   }
 }
 
@@ -182,12 +182,12 @@ resource "aws_appautoscaling_policy" "ecs_policy_memory" {
   service_namespace  = aws_appautoscaling_target.ecs_target.service_namespace
 
   target_tracking_scaling_policy_configuration {
-    target_value       = 80.0  # Scale up when memory > 80%
+    target_value = 80.0 # Scale up when memory > 80%
     predefined_metric_specification {
       predefined_metric_type = "ECSServiceAverageMemoryUtilization"
     }
-    scale_down_cooldown = 300
-    scale_up_cooldown   = 60
+    scale_in_cooldown  = 300
+    scale_out_cooldown = 60
   }
 }
 
@@ -209,17 +209,6 @@ resource "aws_cloudwatch_metric_alarm" "ecs_task_count" {
     ClusterName = aws_ecs_cluster.main.name
     ServiceName = aws_ecs_service.app.name
   }
-}
-
-# Outputs
-output "ecs_cluster_name" {
-  value       = aws_ecs_cluster.main.name
-  description = "ECS cluster name"
-}
-
-output "ecs_service_name" {
-  value       = aws_ecs_service.app.name
-  description = "ECS service name"
 }
 
 output "ecs_cluster_arn" {

@@ -33,25 +33,25 @@ resource "aws_db_instance" "postgres" {
   password = var.db_password
 
   # Network
-  db_subnet_group_name            = aws_db_subnet_group.main.name
-  vpc_security_group_ids          = [aws_security_group.rds.id]
-  publicly_accessible             = false
-  multi_az                         = true  # High availability
+  db_subnet_group_name   = aws_db_subnet_group.main.name
+  vpc_security_group_ids = [aws_security_group.rds.id]
+  publicly_accessible    = false
+  multi_az               = true # High availability
 
   # Storage
-  storage_type          = "gp3"
-  storage_encrypted     = true
-  iops                  = 3000
+  storage_type      = "gp3"
+  storage_encrypted = true
+  iops              = 3000
 
   # Backups
   backup_retention_period = var.db_backup_retention_days
-  backup_window          = "03:00-04:00"  # UTC
-  maintenance_window     = "mon:04:00-mon:05:00"  # UTC
-  copy_tags_to_snapshot  = true
+  backup_window           = "03:00-04:00"         # UTC
+  maintenance_window      = "mon:04:00-mon:05:00" # UTC
+  copy_tags_to_snapshot   = true
 
   # Monitoring
   monitoring_interval             = var.enable_detailed_monitoring ? 60 : 0
-  monitoring_role_arn             = try(aws_iam_role.rds_monitoring.arn, "")
+  monitoring_role_arn             = var.enable_detailed_monitoring ? aws_iam_role.rds_monitoring[0].arn : null
   enabled_cloudwatch_logs_exports = ["postgresql"]
 
   # Deletion protection
@@ -69,7 +69,7 @@ resource "aws_db_instance" "postgres" {
   }
 
   lifecycle {
-    ignore_changes = [password]  # Prevent recreation on password change
+    ignore_changes = [password] # Prevent recreation on password change
   }
 }
 
@@ -144,7 +144,7 @@ resource "aws_cloudwatch_metric_alarm" "db_storage" {
   namespace           = "AWS/RDS"
   period              = 3600
   statistic           = "Average"
-  threshold           = 5368709120  # 5GB in bytes
+  threshold           = 5368709120 # 5GB in bytes
   alarm_description   = "Alert when DB storage < 5GB"
   alarm_actions       = var.alarm_email != "" ? [aws_sns_topic.alarms[0].arn] : []
 

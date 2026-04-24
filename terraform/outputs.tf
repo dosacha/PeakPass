@@ -50,18 +50,18 @@ output "database_username" {
 
 # Redis
 output "redis_endpoint" {
-  value       = aws_elasticache_cluster.redis.cache_nodes[0].address
+  value       = aws_elasticache_replication_group.redis.primary_endpoint_address
   description = "Redis cluster endpoint"
 }
 
 output "redis_port" {
-  value       = aws_elasticache_cluster.redis.port
+  value       = aws_elasticache_replication_group.redis.port
   description = "Redis port"
   sensitive   = false
 }
 
 output "redis_cluster_id" {
-  value       = aws_elasticache_cluster.redis.cluster_id
+  value       = aws_elasticache_replication_group.redis.id
   description = "Redis cluster ID"
 }
 
@@ -111,20 +111,20 @@ output "database_url" {
 }
 
 output "redis_url" {
-  value       = "redis://${aws_elasticache_cluster.redis.cache_nodes[0].address}:${aws_elasticache_cluster.redis.port}"
+  value       = "redis://${aws_elasticache_replication_group.redis.primary_endpoint_address}:${aws_elasticache_replication_group.redis.port}"
   description = "Redis connection URL"
 }
 
 # Summary
 output "summary" {
   value = {
-    application  = "http://${aws_lb.main.dns_name}"
-    database     = "${aws_db_instance.postgres.address}:${aws_db_instance.postgres.port}"
-    redis        = "${aws_elasticache_cluster.redis.cache_nodes[0].address}:${aws_elasticache_cluster.redis.port}"
-    region       = var.aws_region
-    environment  = var.environment
-    cluster      = aws_ecs_cluster.main.name
-    service      = aws_ecs_service.app.name
+    application = "http://${aws_lb.main.dns_name}"
+    database    = "${aws_db_instance.postgres.address}:${aws_db_instance.postgres.port}"
+    redis       = "${aws_elasticache_replication_group.redis.primary_endpoint_address}:${aws_elasticache_replication_group.redis.port}"
+    region      = var.aws_region
+    environment = var.environment
+    cluster     = aws_ecs_cluster.main.name
+    service     = aws_ecs_service.app.name
   }
   description = "Infrastructure summary"
 }

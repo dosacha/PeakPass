@@ -8,8 +8,8 @@ resource "aws_lb" "main" {
   security_groups    = [aws_security_group.alb.id]
   subnets            = aws_subnet.public[*].id
 
-  enable_deletion_protection = false
-  enable_http2               = true
+  enable_deletion_protection       = false
+  enable_http2                     = true
   enable_cross_zone_load_balancing = true
 
   tags = {
@@ -38,7 +38,7 @@ resource "aws_lb_target_group" "ecs" {
   stickiness {
     type            = "lb_cookie"
     enabled         = true
-    cookie_duration = 86400  # 24 hours
+    cookie_duration = 86400 # 24 hours
   }
 
   tags = {
@@ -98,7 +98,7 @@ resource "aws_cloudwatch_metric_alarm" "alb_response_time" {
   namespace           = "AWS/ApplicationELB"
   period              = 300
   statistic           = "Average"
-  threshold           = 1  # 1 second
+  threshold           = 1 # 1 second
   alarm_description   = "Alert when ALB response time > 1s"
   alarm_actions       = var.alarm_email != "" ? [aws_sns_topic.alarms[0].arn] : []
 

@@ -10,7 +10,7 @@ variable "environment" {
   description = "Environment name (dev, staging, prod)"
   type        = string
   default     = "prod"
-  
+
   validation {
     condition     = contains(["dev", "staging", "prod"], var.environment)
     error_message = "Environment must be dev, staging, or prod."
@@ -46,7 +46,7 @@ variable "db_engine_version" {
 variable "db_instance_class" {
   description = "RDS instance type"
   type        = string
-  default     = "db.t3.micro"  # Change to db.t3.small+ for production
+  default     = "db.t3.micro" # Change to db.t3.small+ for production
 }
 
 variable "db_allocated_storage" {
@@ -71,7 +71,7 @@ variable "db_name" {
   description = "Database name"
   type        = string
   default     = "peakpass"
-  
+
   validation {
     condition     = length(var.db_name) > 0 && length(var.db_name) <= 63
     error_message = "Database name must be 1-63 characters."
@@ -89,7 +89,7 @@ variable "db_password" {
   description = "Database master password (min 8 chars, alphanumeric +symbols)"
   type        = string
   sensitive   = true
-  
+
   validation {
     condition     = length(var.db_password) >= 8
     error_message = "Database password must be at least 8 characters."
@@ -106,14 +106,14 @@ variable "redis_engine_version" {
 variable "redis_node_type" {
   description = "Redis node type"
   type        = string
-  default     = "cache.t3.micro"  # Change to cache.t3.small+ for production
+  default     = "cache.t3.micro" # Change to cache.t3.small+ for production
 }
 
 variable "redis_num_cache_clusters" {
   description = "Number of Redis cache nodes (1-6, >1 enables automatic failover)"
   type        = number
   default     = 2
-  
+
   validation {
     condition     = var.redis_num_cache_clusters >= 1 && var.redis_num_cache_clusters <= 6
     error_message = "Number of cache clusters must be 1-6."

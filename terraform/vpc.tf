@@ -47,7 +47,7 @@ resource "aws_subnet" "public" {
   count                   = length(var.availability_zones)
   vpc_id                  = aws_vpc.main.id
   cidr_block              = "10.0.${count.index + 1}.0/24"
-  availability_zone      = var.availability_zones[count.index]
+  availability_zone       = var.availability_zones[count.index]
   map_public_ip_on_launch = true
 
   tags = {
@@ -71,9 +71,9 @@ resource "aws_nat_gateway" "main" {
 
 # Private Subnets (one per AZ)
 resource "aws_subnet" "private" {
-  count              = length(var.availability_zones)
-  vpc_id             = aws_vpc.main.id
-  cidr_block         = "10.0.${count.index + 11}.0/24"
+  count             = length(var.availability_zones)
+  vpc_id            = aws_vpc.main.id
+  cidr_block        = "10.0.${count.index + 11}.0/24"
   availability_zone = var.availability_zones[count.index]
 
   tags = {
@@ -87,8 +87,8 @@ resource "aws_route_table" "public" {
   vpc_id = aws_vpc.main.id
 
   route {
-    cidr_block      = "0.0.0.0/0"
-    gateway_id      = aws_internet_gateway.main.id
+    cidr_block = "0.0.0.0/0"
+    gateway_id = aws_internet_gateway.main.id
   }
 
   tags = {
@@ -123,12 +123,6 @@ resource "aws_route_table_association" "private" {
   count          = length(aws_subnet.private)
   subnet_id      = aws_subnet.private[count.index].id
   route_table_id = aws_route_table.private[count.index].id
-}
-
-# Outputs for use in other modules
-output "vpc_id" {
-  value       = aws_vpc.main.id
-  description = "VPC ID"
 }
 
 output "public_subnet_ids" {

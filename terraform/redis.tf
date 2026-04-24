@@ -16,28 +16,30 @@ resource "aws_elasticache_subnet_group" "main" {
   }
 }
 
-# ElastiCache Redis Cluster
-resource "aws_elasticache_cluster" "redis" {
-  cluster_id                   = "${var.app_name}-redis"
-  engine                       = "redis"
-  engine_version               = var.redis_engine_version
-  node_type                    = var.redis_node_type
-  num_cache_nodes              = var.redis_num_cache_clusters
-  parameter_group_name         = aws_elasticache_parameter_group.redis.name
-  port                         = 6379
-  subnet_group_name            = aws_elasticache_subnet_group.main.name
-  security_group_ids           = [aws_security_group.redis.id]
-  
+# ElastiCache Redis Replication Group
+resource "aws_elasticache_replication_group" "redis" {
+  replication_group_id = "${var.app_name}-redis"
+  description          = "Redis replication group for ${var.app_name}"
+  engine               = "redis"
+  engine_version       = var.redis_engine_version
+  node_type            = var.redis_node_type
+  num_cache_clusters   = var.redis_num_cache_clusters
+  parameter_group_name = aws_elasticache_parameter_group.redis.name
+  port                 = 6379
+  subnet_group_name    = aws_elasticache_subnet_group.main.name
+  security_group_ids   = [aws_security_group.redis.id]
+
   # High availability
-  automatic_failover_enabled   = var.redis_automatic_failover_enabled
-  
+  automatic_failover_enabled = var.redis_automatic_failover_enabled
+  multi_az_enabled           = var.redis_num_cache_clusters > 1
+
   # Backups
-  snapshot_retention_limit     = var.redis_snapshot_retention_limit
-  snapshot_window              = "03:00-05:00"  # UTC
-  
+  snapshot_retention_limit = var.redis_snapshot_retention_limit
+  snapshot_window          = "03:00-05:00" # UTC
+
   # Maintenance
-  maintenance_window           = "mon:05:00-mon:06:00"  # UTC
-  
+  maintenance_window = "mon:05:00-mon:06:00" # UTC
+
   # Logging
   log_delivery_configuration {
     destination      = aws_cloudwatch_log_group.redis_slow_log.name
@@ -45,12 +47,11 @@ resource "aws_elasticache_cluster" "redis" {
     log_format       = "json"
     log_type         = "slow-log"
   }
-  
+
   # Encryption
-  at_rest_encryption_enabled   = true
-  transit_encryption_enabled   = false  # Requires AUTH token (optional for prod)
-  auth_token                   = ""
-  
+  at_rest_encryption_enabled = true
+  transit_encryption_enabled = false # Requires AUTH token (optional for prod)
+
   tags = {
     Name = "${var.app_name}-redis"
   }
@@ -63,17 +64,17 @@ resource "aws_elasticache_parameter_group" "redis" {
 
   parameter {
     name  = "maxmemory-policy"
-    value = "allkeys-lru"  # Evict least recently used when memory full
+    value = "allkeys-lru" # Evict least recently used when memory full
   }
 
   parameter {
     name  = "timeout"
-    value = "300"  # Close idle connections after 5 mins
+    value = "300" # Close idle connections after 5 mins
   }
 
   parameter {
     name  = "tcp-keepalive"
-    value = "60"  # Keepalive every 60 seconds
+    value = "60" # Keepalive every 60 seconds
   }
 
   tags = {
@@ -106,7 +107,7 @@ resource "aws_cloudwatch_metric_alarm" "redis_cpu" {
   alarm_actions       = var.alarm_email != "" ? [aws_sns_topic.alarms[0].arn] : []
 
   dimensions = {
-    CacheClusterId = aws_elasticache_cluster.redis.cluster_id
+    ReplicationGroupId = aws_elasticache_replication_group.redis.id
   }
 }
 
@@ -125,7 +126,7 @@ resource "aws_cloudwatch_metric_alarm" "redis_memory" {
   alarm_actions       = var.alarm_email != "" ? [aws_sns_topic.alarms[0].arn] : []
 
   dimensions = {
-    CacheClusterId = aws_elasticache_cluster.redis.cluster_id
+    ReplicationGroupId = aws_elasticache_replication_group.redis.id
   }
 }
 
@@ -144,22 +145,6 @@ resource "aws_cloudwatch_metric_alarm" "redis_evictions" {
   alarm_actions       = var.alarm_email != "" ? [aws_sns_topic.alarms[0].arn] : []
 
   dimensions = {
-    CacheClusterId = aws_elasticache_cluster.redis.cluster_id
+    ReplicationGroupId = aws_elasticache_replication_group.redis.id
   }
-}
-
-# Outputs
-output "redis_endpoint" {
-  value       = aws_elasticache_cluster.redis.cache_nodes[0].address
-  description = "Redis primary endpoint address"
-}
-
-output "redis_port" {
-  value       = aws_elasticache_cluster.redis.port
-  description = "Redis port"
-}
-
-output "redis_cluster_id" {
-  value       = aws_elasticache_cluster.redis.cluster_id
-  description = "Redis cluster ID"
 }
