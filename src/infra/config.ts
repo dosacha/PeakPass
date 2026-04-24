@@ -30,6 +30,7 @@ const envSchema = z.object({
   // 외부 서비스 설정
   PAYMENT_SERVICE_URL: z.string().url().default('https://api.payment-provider.example.com'),
   PAYMENT_API_KEY: z.string().default('test-key-change-in-production'),
+  WEBHOOK_SIGNING_SECRET: z.string().optional(),
   
   // 기능 플래그
   ENABLE_RATE_LIMITING: z.coerce.boolean().default(true),

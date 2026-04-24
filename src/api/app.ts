@@ -42,6 +42,9 @@ export async function createApp() {
     logger.info({ requestId: request.id, method: request.method, url: request.url }, 'Request started');
   });
 
+  const { webhookSignatureMiddleware } = await import('./middleware/webhook-signature');
+  fastify.addHook('preHandler', webhookSignatureMiddleware);
+
   const { jwtAuthMiddleware } = await import('./middleware/auth');
   fastify.addHook('preHandler', jwtAuthMiddleware);
 

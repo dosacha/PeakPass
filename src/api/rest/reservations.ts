@@ -3,11 +3,19 @@ import { ReservationService } from '@/core/services/reservation.service';
 import { CreateReservationSchema } from '@/core/models/reservation';
 import { getLogger } from '@/infra/logger';
 
+/**
+ * NOTE (known limitation):
+ *   This route currently trusts `userId` from the request body.
+ *   In a real deployment, the authenticated subject (JWT `sub`) should
+ *   be cross-checked against `input.userId`. Tracked in README
+ *   "Limitations". See also src/api/rest/checkouts.ts.
+ */
+
 export async function registerReservationRoutes(app: FastifyInstance) {
   const logger = getLogger();
   const reservationService = new ReservationService();
 
-  app.post<{ Body: any }>('/reservations', async (request, reply) => {
+  app.post<{ Body: unknown }>('/reservations', async (request, reply) => {
     const input = CreateReservationSchema.parse(request.body);
     const reservation = await reservationService.createReservation(input);
 

@@ -10,11 +10,9 @@
 
 인지하고 있는 구조적 한계입니다. 실제 운영 환경 적용 시 보강이 필요한 항목:
 
-- 프로덕션 checkout 라우트에 Serialization Failure(40001) 재시도 로직이 누락되어 있음. 통합 테스트에는 포함되어 있음 (`runCheckoutWithRetry`)
-- Idempotency 미들웨어의 cache-check → process → cache-store가 원자적이지 않아, 거의 동시에 도달하는 동일 키 요청 race에 취약. `SET NX EX` 기반 처리 중 락 도입이 적절한 개선 방향
-- webhook Provider HMAC 서명 검증 미구현. 실제 연동 시 필수 보강
-- `POST /checkouts`, `POST /reservations`는 body의 `userId`를 신뢰. 실제 환경에서는 JWT subject와 대조 필요
-- 유닛 테스트 커버리지 부족 (통합 테스트 위주로 작성됨)
+- `POST /checkouts`, `POST /reservations`는 body의 `userId`를 신뢰. 실제 환경에서는 JWT subject와 대조하거나 body userId를 제거하고 인증 주체에서 파생해야 함
+- Webhook 서명 검증은 `WEBHOOK_SIGNING_SECRET`이 설정된 경우 HMAC-SHA256으로 수행함. 타임스탬프 헤더 기반 replay-window 검증은 후속 보강 과제
+- Redis idempotency lock은 처리 중 중복 진입을 줄이는 조정 계층이며, Redis 장애 시 PostgreSQL unique 제약이 최종 데이터 무결성 방어선
 
 ## 프로젝트 목표
 
@@ -172,6 +170,8 @@ curl -X POST http://localhost:3000/webhooks/payments/settlement \
   -H "Idempotency-Key: 33333333-4444-5555-6666-777777777777" \
   -d '{"orderId":"ORDER_ID","providerTransactionId":"txn-settle-001","status":"settled"}'
 ```
+
+`WEBHOOK_SIGNING_SECRET`이 설정된 환경에서는 요청 body의 HMAC-SHA256 hex digest를 `X-Webhook-Signature` 헤더로 함께 보내야 한다.
 
 이 시점의 기대 상태:
 

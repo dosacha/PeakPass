@@ -1,4 +1,8 @@
-import { initPostgresPool, closePostgresPool, serializableTransaction } from '@/infra/postgres/client';
+import {
+  initPostgresPool,
+  closePostgresPool,
+  serializableTransactionWithRetry,
+} from '@/infra/postgres/client';
 import { loadConfig } from '@/infra/config';
 import { initLogger } from '@/infra/logger';
 import { v4 as uuid } from 'uuid';
@@ -12,42 +16,16 @@ type CheckoutInput = {
   idempotencyKey: string;
 };
 
-function isRetriableTransactionError(err: unknown): boolean {
-  const code = (err as { code?: string } | null)?.code;
-  return code === '40001' || code === '40P01';
-}
-
-describe('동시성 테스트', () => {
+describe('concurrency integration tests', () => {
   let pool: Awaited<ReturnType<typeof initPostgresPool>>;
 
   async function clearTestData() {
+    await pool.query('DELETE FROM tickets');
+    await pool.query('DELETE FROM payment_records');
     await pool.query('DELETE FROM orders');
     await pool.query('DELETE FROM reservations');
     await pool.query('DELETE FROM events');
     await pool.query('DELETE FROM users');
-  }
-
-  async function runCheckoutWithRetry(
-    checkoutService: CheckoutService,
-    input: CheckoutInput,
-    maxAttempts = 3,
-  ): Promise<void> {
-    let lastError: unknown = new Error('체크아웃 처리 실패');
-
-    for (let attempt = 0; attempt < maxAttempts; attempt++) {
-      try {
-        await serializableTransaction((client) => checkoutService.checkout(input, client));
-        return;
-      } catch (err) {
-        lastError = err;
-
-        if (!isRetriableTransactionError(err) || attempt === maxAttempts - 1) {
-          throw err;
-        }
-      }
-    }
-
-    throw lastError;
   }
 
   beforeAll(async () => {
@@ -69,7 +47,7 @@ describe('동시성 테스트', () => {
   });
 
   it(
-    'SERIALIZABLE 트랜잭션으로 초과 판매 방지 확인',
+    'prevents overselling under concurrent serializable checkouts',
     async () => {
       const eventId = uuid();
       const tierId = uuid();
@@ -84,7 +62,7 @@ describe('동시성 테스트', () => {
         `,
         [
           eventId,
-          '동시성 테스트 이벤트',
+          'Concurrency test event',
           startsAt,
           endsAt,
           3,
@@ -92,7 +70,7 @@ describe('동시성 테스트', () => {
           JSON.stringify([
             {
               id: tierId,
-              name: '일반',
+              name: 'General',
               price: 50,
               quantity: 3,
             },
@@ -112,7 +90,7 @@ describe('동시성 테스트', () => {
             [
               userId,
               `user-${userId.slice(0, 8)}@test.com`,
-              `테스트 사용자 ${userId.slice(0, 4)}`,
+              `Test user ${userId.slice(0, 4)}`,
             ],
           ),
         ),
@@ -130,7 +108,9 @@ describe('동시성 테스트', () => {
             idempotencyKey: uuid(),
           };
 
-          return runCheckoutWithRetry(checkoutService, input);
+          return serializableTransactionWithRetry((client) =>
+            checkoutService.checkout(input, client),
+          );
         }),
       );
 

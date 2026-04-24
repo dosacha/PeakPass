@@ -13,6 +13,7 @@ export const REDIS_TTL = {
   INVENTORY_COUNT: 60,
   // 멱등성 키: 24시간
   IDEMPOTENCY_KEY: 86400,
+  IDEMPOTENCY_LOCK: 30,
   // 레이트 리미팅 윈도우: 1분
   RATE_LIMIT_WINDOW: 60,
 } as const;
@@ -138,7 +139,7 @@ export async function checkRateLimit(
  */
 export async function setIdempotencyResult(
   idempotencyKey: string,
-  result: Record<string, any>,
+  result: Record<string, unknown>,
   ttlSeconds: number = 24 * 60 * 60,
 ): Promise<void> {
   const redis = getRedis();
@@ -158,7 +159,7 @@ export async function setIdempotencyResult(
  */
 export async function getIdempotencyResult(
   idempotencyKey: string,
-): Promise<Record<string, any> | null> {
+): Promise<Record<string, unknown> | null> {
   const redis = getRedis();
   const key = redisKeys.idempotencyKey(idempotencyKey);
 
@@ -166,10 +167,35 @@ export async function getIdempotencyResult(
     const data = await redis.get(key);
     if (!data) return null;
     logger.debug({ idempotencyKey }, 'Idempotency hit (cached result)');
-    return safeJsonParse(data, null);
+    return safeJsonParse<Record<string, unknown> | null>(data, null);
   } catch (err) {
     logger.warn({ err }, 'Failed to get idempotency result');
     return null;
+  }
+}
+
+export async function tryAcquireIdempotencyLock(
+  idempotencyKey: string,
+  ttlSeconds: number = REDIS_TTL.IDEMPOTENCY_LOCK,
+): Promise<boolean> {
+  const redis = getRedis();
+  const key = redisKeys.idempotencyLock(idempotencyKey);
+  const result = await redis.set(key, 'processing', {
+    NX: true,
+    EX: ttlSeconds,
+  });
+
+  return result === 'OK';
+}
+
+export async function releaseIdempotencyLock(idempotencyKey: string): Promise<void> {
+  const redis = getRedis();
+  const key = redisKeys.idempotencyLock(idempotencyKey);
+
+  try {
+    await redis.del(key);
+  } catch (err) {
+    logger.warn({ err, idempotencyKey }, 'Failed to release idempotency lock');
   }
 }
 

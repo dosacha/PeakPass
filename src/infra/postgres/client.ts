@@ -110,4 +110,48 @@ export async function serializableTransaction<T>(
   }
 }
 
+const RETRIABLE_TRANSACTION_CODES = new Set(['40001', '40P01']);
+
+export function isRetriableTransactionError(err: unknown): boolean {
+  const code = (err as { code?: string } | null)?.code;
+  return !!code && RETRIABLE_TRANSACTION_CODES.has(code);
+}
+
+export async function serializableTransactionWithRetry<T>(
+  callback: (client: PoolClient) => Promise<T>,
+  options: { maxAttempts?: number; baseDelayMs?: number } = {},
+): Promise<T> {
+  const maxAttempts = options.maxAttempts ?? 3;
+  const baseDelayMs = options.baseDelayMs ?? 20;
+  const logger = getLogger();
+  let lastError: unknown = new Error('serializableTransactionWithRetry: no attempt executed');
+
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    try {
+      return await serializableTransaction(callback);
+    } catch (err) {
+      lastError = err;
+
+      if (!isRetriableTransactionError(err) || attempt === maxAttempts) {
+        throw err;
+      }
+
+      const delayMs = baseDelayMs * Math.pow(2, attempt - 1) * (0.5 + Math.random());
+      logger.warn(
+        {
+          attempt,
+          maxAttempts,
+          code: (err as { code?: string }).code,
+          delayMs: Math.round(delayMs),
+        },
+        'Serialization conflict, retrying transaction',
+      );
+
+      await new Promise((resolve) => setTimeout(resolve, delayMs));
+    }
+  }
+
+  throw lastError;
+}
+
 export type { PoolClient, QueryResult };

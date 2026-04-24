@@ -1,66 +1,114 @@
 import { FastifyRequest, FastifyReply } from 'fastify';
 import { getLogger } from '@/infra/logger';
-import { getIdempotencyResult, setIdempotencyResult } from '@/infra/redis/commands';
+import {
+  getIdempotencyResult,
+  setIdempotencyResult,
+  tryAcquireIdempotencyLock,
+} from '@/infra/redis/commands';
 
 const logger = getLogger();
+const IN_PROGRESS_RECHECK_DELAY_MS = 100;
 
-// 중복 요청 방지 미들웨어
-// Redis에 저장된 멱등성 키 기준 중복 감지
+function getIdempotencyHeader(request: FastifyRequest): string | undefined {
+  const header = request.headers['idempotency-key'];
+  const value = Array.isArray(header) ? header[0] : header;
+  return value && value.trim().length > 0 ? value.trim() : undefined;
+}
+
+function getCachedStatusCode(cachedResult: Record<string, unknown>): number {
+  return typeof cachedResult.statusCode === 'number' ? cachedResult.statusCode : 201;
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function sendCachedResult(
+  reply: FastifyReply,
+  idempotencyKey: string,
+  cachedResult: Record<string, unknown>,
+) {
+  logger.info(
+    { idempotencyKey },
+    'Duplicate idempotent request detected, returning cached result',
+  );
+
+  return reply.code(getCachedStatusCode(cachedResult)).send(cachedResult.body);
+}
+
 export async function idempotencyMiddleware(
   request: FastifyRequest,
   reply: FastifyReply,
 ) {
-  // POST 요청만
   if (request.method !== 'POST') {
     return;
   }
 
-  // 멱등성이 필요한 엔드포인트만
   if (!request.url.includes('/checkouts') && !request.url.includes('/webhooks')) {
     return;
   }
 
-  const idempotencyKey = request.headers['idempotency-key'] as string;
+  const idempotencyKey = getIdempotencyHeader(request);
 
   if (!idempotencyKey) {
-    // 체크아웃 엔드포인트는 멱등성 키 필수
     if (request.url.includes('/checkouts')) {
       return reply.code(400).send({
         error: {
           code: 'MISSING_IDEMPOTENCY_KEY',
-          message: 'Idempotency-Key 헤더 필수',
+          message: 'Idempotency-Key header is required',
         },
       });
     }
+
     return;
   }
 
-  // 이전 요청 결과 확인
   const cachedResult = await getIdempotencyResult(idempotencyKey);
-
   if (cachedResult) {
-    logger.info(
-      { idempotencyKey, requestId: request.id },
-      '중복 요청 감지, 캐시된 결과 반환',
-    );
-
-    return reply.code(cachedResult.statusCode || 201).send(cachedResult.body);
+    return sendCachedResult(reply, idempotencyKey, cachedResult);
   }
 
-  // 처리 중인 요청으로 표시
-  // 엔드포인트 처리 후 결과 저장 (후크 통해)
+  let lockAcquired: boolean;
+  try {
+    lockAcquired = await tryAcquireIdempotencyLock(idempotencyKey);
+  } catch (err) {
+    logger.warn(
+      { err, idempotencyKey },
+      'Failed to acquire idempotency lock; continuing without Redis lock',
+    );
+    request.idempotencyKey = idempotencyKey;
+    return;
+  }
+
+  if (!lockAcquired) {
+    await sleep(IN_PROGRESS_RECHECK_DELAY_MS);
+
+    const completedResult = await getIdempotencyResult(idempotencyKey);
+    if (completedResult) {
+      return sendCachedResult(reply, idempotencyKey, completedResult);
+    }
+
+    logger.info({ idempotencyKey }, 'Idempotent request is already processing');
+    return reply.code(409).send({
+      error: {
+        code: 'IDEMPOTENCY_IN_PROGRESS',
+        message: 'Request with this Idempotency-Key is already processing',
+      },
+    });
+  }
+
   request.idempotencyKey = idempotencyKey;
+  request.idempotencyLockAcquired = true;
 }
 
-/**
- * 성공 응답 후 Redis에 결과 저장하는 도우미
- * 멱등성을 지원하는 엔드포인트에서 사용
- */
-export function storeIdempotencyResult(result: any, statusCode: number, idempotencyKey?: string) {
+export async function storeIdempotencyResult(
+  result: unknown,
+  statusCode: number,
+  idempotencyKey?: string,
+): Promise<void> {
   if (!idempotencyKey) return;
 
-  // 24시간 동안 Redis에 저장
-  setIdempotencyResult(
+  await setIdempotencyResult(
     idempotencyKey,
     {
       statusCode,
@@ -68,13 +116,12 @@ export function storeIdempotencyResult(result: any, statusCode: number, idempote
       storedAt: new Date().toISOString(),
     },
     24 * 60 * 60,
-  ).catch((err) => {
-    logger.warn({ err }, 'Failed to store idempotency result');
-  });
+  );
 }
 
 declare module 'fastify' {
   interface FastifyRequest {
     idempotencyKey?: string;
+    idempotencyLockAcquired?: boolean;
   }
 }

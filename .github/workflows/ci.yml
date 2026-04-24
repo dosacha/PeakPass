@@ -53,11 +53,44 @@ jobs:
       - name: TypeScript check
         run: npm run build
 
-      - name: Run tests
+      - name: Apply DB migrations
         env:
-          DATABASE_URL: postgresql://peakpass:peakpass@localhost:5432/peakpass
-          REDIS_URL: redis://localhost:6379
+          NODE_ENV: test
+          DB_HOST: localhost
+          DB_PORT: '5432'
+          DB_USER: peakpass
+          DB_PASSWORD: peakpass
+          DB_NAME: peakpass
+        run: npm run migrate:up
+
+      - name: Run unit tests with coverage
+        env:
+          NODE_ENV: test
         run: npm test -- --coverage
+
+      - name: Run integration tests (concurrency)
+        env:
+          NODE_ENV: test
+          DB_HOST: localhost
+          DB_PORT: '5432'
+          DB_USER: peakpass
+          DB_PASSWORD: peakpass
+          DB_NAME: peakpass
+          REDIS_HOST: localhost
+          REDIS_PORT: '6379'
+        run: npm run test:concurrency
+
+      - name: Run integration tests (redis)
+        env:
+          NODE_ENV: test
+          DB_HOST: localhost
+          DB_PORT: '5432'
+          DB_USER: peakpass
+          DB_PASSWORD: peakpass
+          DB_NAME: peakpass
+          REDIS_HOST: localhost
+          REDIS_PORT: '6379'
+        run: npm run test:redis
 
       - name: Upload coverage
         uses: codecov/codecov-action@v3

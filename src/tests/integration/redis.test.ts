@@ -7,6 +7,8 @@ import {
   checkRateLimit,
   setIdempotencyResult,
   getIdempotencyResult,
+  tryAcquireIdempotencyLock,
+  releaseIdempotencyLock,
   setInventoryCount,
   getInventoryCount,
 } from '@/infra/redis/commands';
@@ -144,6 +146,23 @@ describe('Redis 통합 테스트', () => {
       expect(cachedResult?.orderId).toBe(orderResult.orderId);
       expect(cachedResult?.totalAmount).toBe(orderResult.totalAmount);
       expect(cachedResult?.ticketCount).toBe(orderResult.ticketCount);
+    });
+
+    it('allows only one in-flight idempotency lock holder', async () => {
+      const idempotencyKey = uuid();
+
+      const firstAcquire = await tryAcquireIdempotencyLock(idempotencyKey, 5);
+      const secondAcquire = await tryAcquireIdempotencyLock(idempotencyKey, 5);
+
+      expect(firstAcquire).toBe(true);
+      expect(secondAcquire).toBe(false);
+
+      await releaseIdempotencyLock(idempotencyKey);
+
+      const acquireAfterRelease = await tryAcquireIdempotencyLock(idempotencyKey, 5);
+      expect(acquireAfterRelease).toBe(true);
+
+      await releaseIdempotencyLock(idempotencyKey);
     });
   });
 
