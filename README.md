@@ -11,7 +11,7 @@
 인지하고 있는 구조적 한계입니다. 실제 운영 환경 적용 시 보강이 필요한 항목:
 
 - `POST /checkouts`, `POST /reservations`는 body의 `userId`를 신뢰. 실제 환경에서는 JWT subject와 대조하거나 body userId를 제거하고 인증 주체에서 파생해야 함
-- Webhook 서명 검증은 `WEBHOOK_SIGNING_SECRET`이 설정된 경우 HMAC-SHA256으로 수행함. 타임스탬프 헤더 기반 replay-window 검증은 후속 보강 과제
+- Webhook 서명 검증은 `WEBHOOK_SIGNING_SECRET`이 설정된 경우 HMAC-SHA256으로 수행함. 커스텀 JSON parser가 raw body(Buffer)를 보존해 Provider 원본 바이트에 대한 서명을 검증하며, 타임스탬프 헤더 기반 replay-window 검증은 후속 보강 과제
 - Redis idempotency lock은 처리 중 중복 진입을 줄이는 조정 계층이며, Redis 장애 시 PostgreSQL unique 제약이 최종 데이터 무결성 방어선
 
 ## 프로젝트 목표

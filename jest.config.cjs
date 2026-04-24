@@ -10,6 +10,7 @@ module.exports = {
     'src/core/models/ticket.ts',
     'src/core/models/order.ts',
     'src/infra/postgres/client.ts',
+    'src/api/middleware/webhook-signature.ts',
   ],
   coverageThreshold: {
     global: {

@@ -9,8 +9,24 @@ function getWebhookSignature(request: FastifyRequest): string | undefined {
   return value && value.trim().length > 0 ? value.trim() : undefined;
 }
 
-function getBodyForSignature(request: FastifyRequest): string {
-  return JSON.stringify(request.body ?? {});
+export function computeWebhookSignature(secret: string, rawBody: Buffer): string {
+  return crypto.createHmac('sha256', secret).update(rawBody).digest('hex');
+}
+
+export function verifyWebhookSignature(
+  secret: string,
+  rawBody: Buffer,
+  providedHex: string,
+): boolean {
+  const expectedHex = computeWebhookSignature(secret, rawBody);
+  const providedBuffer = Buffer.from(providedHex, 'utf8');
+  const expectedBuffer = Buffer.from(expectedHex, 'utf8');
+
+  if (providedBuffer.length !== expectedBuffer.length) {
+    return false;
+  }
+
+  return crypto.timingSafeEqual(providedBuffer, expectedBuffer);
 }
 
 export async function webhookSignatureMiddleware(
@@ -44,18 +60,21 @@ export async function webhookSignatureMiddleware(
     });
   }
 
-  const expected = crypto
-    .createHmac('sha256', secret)
-    .update(getBodyForSignature(request))
-    .digest('hex');
+  const rawBody = request.rawBody;
+  if (!rawBody) {
+    logger.error(
+      { url: request.url },
+      'Webhook raw body not available for signature verification',
+    );
+    return reply.code(500).send({
+      error: {
+        code: 'RAW_BODY_UNAVAILABLE',
+        message: 'unable to verify webhook signature',
+      },
+    });
+  }
 
-  const provided = Buffer.from(signature, 'utf8');
-  const expectedBuffer = Buffer.from(expected, 'utf8');
-  const isValid =
-    provided.length === expectedBuffer.length &&
-    crypto.timingSafeEqual(provided, expectedBuffer);
-
-  if (!isValid) {
+  if (!verifyWebhookSignature(secret, rawBody, signature)) {
     logger.warn({ url: request.url }, 'Webhook signature mismatch');
     return reply.code(401).send({
       error: {
@@ -63,5 +82,11 @@ export async function webhookSignatureMiddleware(
         message: 'webhook signature invalid',
       },
     });
+  }
+}
+
+declare module 'fastify' {
+  interface FastifyRequest {
+    rawBody?: Buffer;
   }
 }

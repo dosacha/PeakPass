@@ -1,4 +1,4 @@
-import Fastify from 'fastify';
+import Fastify, { FastifyRequest } from 'fastify';
 import corsPlugin from '@fastify/cors';
 import helmetPlugin from '@fastify/helmet';
 import { randomUUID } from 'crypto';
@@ -33,6 +33,28 @@ export async function createApp() {
 
   await fastify.register(helmetPlugin, { global: true });
   await fastify.register(corsPlugin, { origin: true });
+
+  fastify.removeContentTypeParser('application/json');
+  fastify.addContentTypeParser(
+    'application/json',
+    { parseAs: 'buffer' },
+    (request, body, done) => {
+      const buffer = Buffer.isBuffer(body) ? body : Buffer.from(body);
+      (request as FastifyRequest).rawBody = buffer;
+
+      if (buffer.length === 0) {
+        done(null, {});
+        return;
+      }
+
+      try {
+        done(null, JSON.parse(buffer.toString('utf8')));
+      } catch (err) {
+        const error = err instanceof Error ? err : new Error('Invalid JSON body');
+        done(error, undefined);
+      }
+    },
+  );
 
   fastify.addHook('onRequest', async (request) => {
     request.id = (request.headers['x-request-id'] as string) || randomUUID();
