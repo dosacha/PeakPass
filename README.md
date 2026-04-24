@@ -1,7 +1,22 @@
 # PeakPass
 
-PeakPass는 고트래픽 워크숍과 세미나를 위한 티켓팅 및 디지털 패스 발급 플랫폼이다.  
-Node.js 백엔드 운영, PostgreSQL 트랜잭션, Redis 실사용, GraphQL read-side, Docker 로컬 워크플로우, Terraform 기반 AWS 배포 준비, k6 부하 테스트까지 설명 가능한 백엔드 포트폴리오를 목표로 한다.
+## 프로젝트 성격
+
+**개인 학습 프로젝트입니다.** 실제 운영 트래픽에서 검증된 시스템이 아니며, "티켓팅 도메인의 정합성/멱등성 문제를 코드로 설명 가능한 수준까지 끌고 가는 것"을 목표로 작성했습니다.
+
+개발 과정에서 AI 코드 어시스턴트를 사용했습니다. 설계 의사결정(트랜잭션 경계, 상태 전이 정의, 멱등 경로 구조, 테스트 시나리오)은 본인이 수행했고, 구현 세부는 AI 보조를 받아 작성한 뒤 검토했습니다. 초기 커밋은 로컬에서 반복 개발한 결과를 정리해 한 번에 올린 상태입니다 (후속 개선은 의미 단위 커밋으로 진행 예정).
+
+## 한계 (Limitations)
+
+인지하고 있는 구조적 한계입니다. 실제 운영 환경 적용 시 보강이 필요한 항목:
+
+- 프로덕션 checkout 라우트에 Serialization Failure(40001) 재시도 로직이 누락되어 있음. 통합 테스트에는 포함되어 있음 (`runCheckoutWithRetry`)
+- Idempotency 미들웨어의 cache-check → process → cache-store가 원자적이지 않아, 거의 동시에 도달하는 동일 키 요청 race에 취약. `SET NX EX` 기반 처리 중 락 도입이 적절한 개선 방향
+- webhook Provider HMAC 서명 검증 미구현. 실제 연동 시 필수 보강
+- `POST /checkouts`, `POST /reservations`는 body의 `userId`를 신뢰. 실제 환경에서는 JWT subject와 대조 필요
+- 유닛 테스트 커버리지 부족 (통합 테스트 위주로 작성됨)
+- Terraform 실제 AWS apply 미수행. `fmt` / `validate` 수준까지 확인
+- `tickets.qr_code` 컬럼은 스키마에만 존재하고 발급 로직은 미구현
 
 ## 프로젝트 목표
 
