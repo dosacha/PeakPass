@@ -3,6 +3,8 @@
 **Live demo:** https://peak-pass.com · `/health` · `/ready`  
 **Stack:** TypeScript · Fastify · Apollo GraphQL · PostgreSQL 16 · Redis 7 · Docker Compose · Nginx · AWS EC2 · Let's Encrypt
 
+**Frontend demo:** `/`에서 React/Babel 정적 데모 UI를 제공합니다. 기본은 mock mode이며, live mode로 전환하면 같은 서버의 API를 호출합니다.
+
 실시간 티켓 발급 서비스의 핵심 흐름(Reservation → Payment → Ticket issuance)을 단일 서비스 수준에서 재현한 학습용 백엔드 모노레포입니다.
 
 ## 프로젝트 성격
