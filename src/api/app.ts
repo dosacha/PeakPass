@@ -5,7 +5,6 @@ import { randomUUID } from 'crypto';
 import { getLogger } from '@/infra/logger';
 import { AppError } from '@/core/errors';
 import { handleAppError, handleUnexpectedError } from './errors';
-import { registerFrontendRoutes } from './frontend';
 import { createApolloServer, registerGraphQLRoute } from './graphql/server';
 import { registerHealthChecks } from './health';
 
@@ -32,25 +31,7 @@ export async function createApp() {
     requestTimeout: 30000,
   });
 
-  await fastify.register(helmetPlugin, {
-    global: true,
-    contentSecurityPolicy: {
-      directives: {
-        defaultSrc: ["'self'"],
-        baseUri: ["'self'"],
-        connectSrc: ["'self'", 'http:', 'https:'],
-        fontSrc: ["'self'", 'https://fonts.gstatic.com', 'data:'],
-        formAction: ["'self'"],
-        frameAncestors: ["'self'"],
-        imgSrc: ["'self'", 'data:'],
-        objectSrc: ["'none'"],
-        scriptSrc: ["'self'", "'unsafe-inline'", "'unsafe-eval'", 'https://unpkg.com'],
-        scriptSrcAttr: ["'none'"],
-        styleSrc: ["'self'", "'unsafe-inline'", 'https://fonts.googleapis.com'],
-        upgradeInsecureRequests: null,
-      },
-    },
-  });
+  await fastify.register(helmetPlugin, { global: true });
   await fastify.register(corsPlugin, { origin: true });
 
   fastify.removeContentTypeParser('application/json');
@@ -121,7 +102,6 @@ export async function createApp() {
   await registerPaymentRoutes(fastify);
   await registerReservationRoutes(fastify);
   await registerCheckoutRoutes(fastify);
-  await registerFrontendRoutes(fastify);
 
   const closeGracefully = async (signal: string) => {
     logger.info({ signal }, 'Starting graceful shutdown');

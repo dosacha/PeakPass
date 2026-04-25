@@ -3,8 +3,6 @@
 **Live demo:** https://peak-pass.com · `/health` · `/ready`  
 **Stack:** TypeScript · Fastify · Apollo GraphQL · PostgreSQL 16 · Redis 7 · Docker Compose · Nginx · AWS EC2 · Let's Encrypt
 
-**Frontend demo:** `/`에서 React/Babel 정적 데모 UI를 제공합니다. 기본은 mock mode이며, live mode로 전환하면 같은 서버의 API를 호출합니다.
-
 실시간 티켓 발급 서비스의 핵심 흐름(Reservation → Payment → Ticket issuance)을 단일 서비스 수준에서 재현한 학습용 백엔드 모노레포입니다.
 
 ## 프로젝트 성격
@@ -12,6 +10,16 @@
 **개인 학습 프로젝트입니다.** 실제 운영 트래픽에서 검증된 시스템이 아니며, "티켓팅 도메인의 정합성/멱등성 문제를 코드로 설명 가능한 수준까지 끌고 가는 것"을 목표로 작성했습니다.
 
 개발 과정에서 AI 코드 어시스턴트를 사용했습니다. 설계 의사결정(트랜잭션 경계, 상태 전이 정의, 멱등 경로 구조, 테스트 시나리오)은 직접 수행했고, 구현 세부는 AI 보조를 받아 작성한 뒤 검토했습니다. 초기 커밋은 로컬에서 반복 개발한 결과를 정리해 한 번에 올린 상태입니다 (후속 개선은 의미 단위 커밋으로 진행 예정).
+
+## 프론트엔드 데모
+
+`frontend/` 디렉토리의 정적 React 데모 UI는 예약 → 결제 → 티켓 발급 플로우를 시각적으로 시뮬레이션합니다. 빌드 파이프라인 없이 React UMD + Babel standalone CDN으로 동작합니다.
+
+- **mock 모드 (기본):** 브라우저 내에서 전체 백엔드 로직을 시뮬레이션합니다.
+- **live 모드:** 실제 PeakPass 백엔드 API를 호출합니다. 토글로 전환 가능.
+- **의도된 제한:** live 모드의 webhook 시뮬레이션은 클라이언트가 HMAC 서명을 가지고 있지 않아 401로 거부됩니다. 이는 프론트엔드에 secret을 노출하지 않는 정상 동작이며, 서명 검증의 필요성을 시각적으로 드러내는 학습 포인트입니다.
+
+**서빙 구조:** 정적 자산(`frontend/`)은 Nginx가 직접 서빙하고, API 경로(`/reservations`, `/checkouts`, `/webhooks/*`, `/graphql`, `/health`, `/ready` 등)만 Fastify 앱(`127.0.0.1:3000`)으로 프록시합니다. 이렇게 분리하면 앱 서버의 이벤트 루프가 정적 자산 요청으로 점유되지 않고, 정적 자산 응답에만 약한 CSP(`unsafe-eval` 허용 — Babel standalone 런타임 트랜스파일용)가 적용되어 API 응답의 보안 헤더가 끌어내려지지 않습니다.
 
 ## 한계 (Limitations)
 
@@ -25,7 +33,7 @@
 
 현재 데모는 AWS EC2(t3.small, 서울 리전) 단일 노드에 Docker Compose로 전체 스택을 올린 구성입니다.
 
-- Nginx가 80/443에서 요청을 받아 `127.0.0.1:3000` 앱 컨테이너로 프록시
+- Nginx가 80/443에서 정적 데모 UI를 직접 서빙하고 API 경로만 `127.0.0.1:3000` 앱 컨테이너로 프록시
 - Postgres/Redis는 외부 포트 미노출, 같은 Docker 네트워크에서만 접근
 - Let's Encrypt 인증서 자동 갱신 (certbot systemd timer)
 - Route 53 + Elastic IP로 고정 도메인(`peak-pass.com`) 연결
