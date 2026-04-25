@@ -41,8 +41,6 @@
 
 `terraform/` 디렉토리에는 ECS Fargate + RDS + ElastiCache 기반 프로덕션급 구성을 별도로 코드화해 두었습니다. 실제 AWS apply는 수행하지 않고 `terraform fmt` · `terraform validate`까지 검증한 상태입니다. 현 데모와 Terraform 구성의 차이는 *"학습 데모 단일 노드"* 와 *"프로덕션 분산 구성"* 의 대비로 의도된 것입니다.
 
-`terraform/` 디렉토리에는 ECS Fargate + RDS + ElastiCache 기반의 프로덕션급 구성을 별도로 코드화해 두었습니다. 실제 AWS apply는 수행하지 않고 `terraform fmt`·`terraform validate`까지 검증했습니다. 현 데모 구성과 Terraform 구성의 차이는 "학습 데모 단일 노드" 대 "프로덕션 분산 구성"의 대비로 의도된 것입니다.
-
 ## 프로젝트 목표
 
 - Node.js + TypeScript 기반 백엔드 서비스 구현
