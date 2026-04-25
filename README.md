@@ -31,12 +31,15 @@
 
 ## 배포 구성
 
-현재 데모는 AWS EC2(t3.small, 서울 리전) 단일 노드에 Docker Compose로 전체 스택을 올린 구성입니다.
+현재 데모는 AWS EC2(서울 리전) 단일 노드에 Docker Compose로 PostgreSQL · Redis · Fastify 앱을 함께 올린 구성입니다.
 
-- Nginx가 80/443에서 정적 데모 UI를 직접 서빙하고 API 경로만 `127.0.0.1:3000` 앱 컨테이너로 프록시
-- Postgres/Redis는 외부 포트 미노출, 같은 Docker 네트워크에서만 접근
-- Let's Encrypt 인증서 자동 갱신 (certbot systemd timer)
-- Route 53 + Elastic IP로 고정 도메인(`peak-pass.com`) 연결
+- **Nginx**가 `peak-pass.com:443`에서 요청을 받아 정적 자산(`/var/www/peakpass`)은 직접 서빙하고, API 경로(`/reservations`, `/checkouts`, `/webhooks/*`, `/graphql`, `/events`, `/health`, `/ready` 등)만 `127.0.0.1:3000`의 Fastify 앱으로 프록시합니다.
+- **Postgres·Redis**는 외부 포트 미노출, 같은 Docker 네트워크에서만 접근. 컨테이너 메모리 제한과 Redis 비밀번호·메모리 정책(allkeys-lru)을 명시.
+- **Let's Encrypt** 인증서를 certbot systemd timer로 자동 갱신.
+- **Route 53 + Elastic IP**로 고정 도메인 연결.
+- **CSP 분리 정책:** Nginx가 정적 응답에만 Babel runtime 트랜스파일에 필요한 약한 CSP(`'unsafe-eval'` 허용)를 박고, API 응답은 helmet 기본값(`default-src 'self'`)을 유지합니다. 정적 자산 응답에는 `X-Request-ID` 같은 Fastify 미들웨어 헤더가 보이지 않아, 정적 요청이 JWT/rate limit/idempotency 미들웨어를 우회한다는 점이 응답 헤더 자체로 검증됩니다.
+
+`terraform/` 디렉토리에는 ECS Fargate + RDS + ElastiCache 기반 프로덕션급 구성을 별도로 코드화해 두었습니다. 실제 AWS apply는 수행하지 않고 `terraform fmt` · `terraform validate`까지 검증한 상태입니다. 현 데모와 Terraform 구성의 차이는 *"학습 데모 단일 노드"* 와 *"프로덕션 분산 구성"* 의 대비로 의도된 것입니다.
 
 `terraform/` 디렉토리에는 ECS Fargate + RDS + ElastiCache 기반의 프로덕션급 구성을 별도로 코드화해 두었습니다. 실제 AWS apply는 수행하지 않고 `terraform fmt`·`terraform validate`까지 검증했습니다. 현 데모 구성과 Terraform 구성의 차이는 "학습 데모 단일 노드" 대 "프로덕션 분산 구성"의 대비로 의도된 것입니다.
 
