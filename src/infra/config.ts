@@ -3,10 +3,12 @@ import { z } from 'zod';
 
 // 환경변수에서 boolean을 안전하게 읽는다.
 // `z.coerce.boolean()`은 자바스크립트 `Boolean(string)` 룰을 따라
-// "false"·"0"·"FALSE" 같은 *모든 비어있지 않은 문자열을 true*로 변환하는 함정이 있다.
+// 빈 문자열을 제외한 모든 string("false"·"0"·"FALSE" 등)을 true로 변환하는 함정이 있다.
 // 실제 운영에서 ENABLE_RATE_LIMITING=false로 끄려고 해도 안 꺼지는 *진짜 버그*였다.
-// 명시적 파서로 "true"/"1"만 true로, 그 외("false"/"0"/빈값/누락)는 false로 정확히 매핑한다.
-const booleanFromEnv = (defaultValue: boolean) =>
+// 명시적 파서로 "true"/"1"만 true로, "false"/"0"은 false로 정확히 매핑한다.
+//
+// export하는 이유: 테스트가 inline 재정의 대신 production parser를 직접 검증하도록 함.
+export const booleanFromEnv = (defaultValue: boolean) =>
   z
     .union([z.string(), z.boolean(), z.undefined()])
     .transform((v) => {

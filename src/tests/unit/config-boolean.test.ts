@@ -3,26 +3,18 @@
  *
  * 배경: PeakPass의 ENABLE_RATE_LIMITING / ENFORCE_AUTH_USER_MATCH는 원래
  * `z.coerce.boolean()`로 정의되어 있었는데, 이건 자바스크립트 `Boolean(string)`을
- * 따라서 *비어있지 않은 모든 문자열을 true로 변환*한다.
+ * 따라서 *빈 문자열을 제외한 모든 string을 true로 변환*한다.
  * 즉 `.env`에 `ENABLE_RATE_LIMITING=false`라고 적어도 실제로는 true가 되어
  * rate limit을 끄지 못하는 *진짜 운영 버그*였다 (k6 부하 측정 중 발견).
  *
  * 명시적 booleanFromEnv 파서로 교체했고, 이 테스트가 회귀를 막는다.
+ *
+ * 중요: production config.ts의 booleanFromEnv를 *직접 import*해서 검증한다.
+ * 이전에는 동일 로직을 inline 재정의해서 테스트했는데, 그러면 production이
+ * 다시 `z.coerce.boolean()`으로 회귀해도 테스트는 그대로 통과하는 약점이 있었다.
  */
 
-import { z } from 'zod';
-
-const booleanFromEnv = (defaultValue: boolean) =>
-  z
-    .union([z.string(), z.boolean(), z.undefined()])
-    .transform((v) => {
-      if (typeof v === 'boolean') return v;
-      if (v === undefined || v === '') return defaultValue;
-      const normalized = v.toLowerCase();
-      if (normalized === 'true' || normalized === '1') return true;
-      if (normalized === 'false' || normalized === '0') return false;
-      return defaultValue;
-    });
+import { booleanFromEnv } from '@/infra/config';
 
 describe('booleanFromEnv parser', () => {
   it('treats "false" as false (not true!)', () => {
