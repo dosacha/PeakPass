@@ -558,8 +558,49 @@ export class CheckoutService {
       );
     } catch (err) {
       if ((err as { code?: string }).code === '23505') {
-        this.logger.warn({ orderId, providerTransactionId, idempotencyKey }, 'Duplicate payment record ignored');
-        return;
+        // UNIQUE violation. provider_transaction_id 또는 idempotency_key 충돌 가능성.
+        // 단순히 "duplicate ignored"로 무시하면 *다른 orderId가 같은 providerTransactionId를*
+        // 사용한 경우 (공격성 또는 데이터 오염) 그대로 통과되는 보안 결함이 된다.
+        // 기존 record를 조회해 같은 order인지 검증하고, 다르면 ConflictError로 거부한다.
+        const existing = await client.query<{
+          order_id: string;
+          provider_transaction_id: string;
+          idempotency_key: string;
+        }>(
+          `SELECT order_id, provider_transaction_id, idempotency_key
+           FROM payment_records
+           WHERE provider_transaction_id = $1 OR idempotency_key = $2
+           LIMIT 1`,
+          [providerTransactionId, idempotencyKey],
+        );
+
+        if (existing.rowCount === 0) {
+          // 충돌은 났지만 row 조회가 안 됨 (race condition). 안전을 위해 throw.
+          throw err;
+        }
+
+        const row = existing.rows[0];
+        if (row.order_id === orderId) {
+          // 동일 order에 대한 재시도 — 정상적인 idempotent 동작.
+          this.logger.warn(
+            { orderId, providerTransactionId, idempotencyKey },
+            'Duplicate payment record for same order ignored (idempotent)',
+          );
+          return;
+        }
+
+        // 다른 order에서 같은 providerTransactionId를 사용 — 데이터 오염 또는 공격 가능성.
+        this.logger.error(
+          {
+            requestedOrderId: orderId,
+            existingOrderId: row.order_id,
+            providerTransactionId,
+          },
+          'payment_records UNIQUE conflict across orders (potential security event)',
+        );
+        throw new ConflictError(
+          'provider_transaction_id already used by a different order',
+        );
       }
 
       throw err;
