@@ -25,12 +25,19 @@ export async function rateLimitMiddleware(
     return;
   }
 
-  if (!request.url.includes('/checkouts') && !request.url.includes('/reservations')) {
+  // 적용 대상: reservation/checkout 외에도 webhook을 포함한다.
+  // - reservation/checkout: 사용자 폭주 방어
+  // - webhook: provider 재시도 폭주 또는 위조 webhook spam 방어
+  // (REDIS_STRATEGY.md와 일치)
+  const isWebhook = request.url.includes('/webhooks');
+  const isCheckout = request.url.includes('/checkouts');
+  const isReservation = request.url.includes('/reservations');
+  if (!isCheckout && !isReservation && !isWebhook) {
     return;
   }
 
   const userId = request.user?.id || request.ip || 'anonymous';
-  const action = request.url.includes('checkouts') ? 'checkout' : 'reservation';
+  const action = isCheckout ? 'checkout' : isReservation ? 'reservation' : 'webhook';
 
   const { allowed, count, resetAt, redisAvailable } = await checkRateLimit(
     userId,
