@@ -48,7 +48,7 @@ function createPendingOrder(baseUrl, eventId, tierId, userId) {
   );
 
   const reservationJson = parseJson(reservationResponse);
-  if (reservationResponse.status !== 201 || !reservationJson?.id) {
+  if (reservationResponse.status !== 201 || !reservationJson || !reservationJson.id) {
     throw new Error('payment callback setup 중 reservation 생성 실패');
   }
 
@@ -71,7 +71,7 @@ function createPendingOrder(baseUrl, eventId, tierId, userId) {
   );
 
   const checkoutJson = parseJson(checkoutResponse);
-  if (checkoutResponse.status !== 201 || !checkoutJson?.order?.id) {
+  if (checkoutResponse.status !== 201 || !checkoutJson || !checkoutJson.order || !checkoutJson.order.id) {
     throw new Error('payment callback setup 중 checkout 생성 실패');
   }
 
@@ -130,8 +130,8 @@ export default function (data) {
   callbackLatency.add(response.timings.duration);
 
   const json = parseJson(response);
-  const accepted = response.status === 200 && json?.order?.id === data.orderId;
-  const duplicate = Boolean(json?.duplicate);
+  const accepted = response.status === 200 && json && json.order && json.order.id === data.orderId;
+  const duplicate = Boolean(json && json.duplicate);
 
   if (duplicate) {
     callbackDuplicates.add(1);
@@ -140,7 +140,7 @@ export default function (data) {
   check(response, {
     'callback status 200': () => response.status === 200,
     'callback order returned': () => accepted,
-    'callback payment status settled': () => json?.paymentStatus === 'settled',
+    'callback payment status settled': () => json && json.paymentStatus === 'settled',
   }) || callbackErrors.add(1);
 
   sleep(Math.random() * 0.2);

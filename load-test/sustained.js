@@ -56,9 +56,9 @@ export function setup() {
   const response = http.get(`${baseUrl}/events?limit=1&offset=0`);
   const events = parseJson(response);
   const firstEvent = Array.isArray(events) && events.length > 0 ? events[0] : null;
-  const firstTier = firstEvent?.pricing?.[0] || null;
+  const firstTier = firstEvent && firstEvent.pricing && firstEvent.pricing[0] ? firstEvent.pricing[0] : null;
 
-  if (!firstEvent?.id || !firstTier?.id) {
+  if (!firstEvent || !firstEvent.id || !firstTier || !firstTier.id) {
     throw new Error('이벤트 또는 tierId를 찾지 못함');
   }
 
@@ -101,7 +101,7 @@ export default function (data) {
   check(response, {
     'reservation expected status': () => isAcceptedStatus,
     'reservation created or rate limited': () =>
-      response.status === 201 ? Boolean(json?.id) : true,
+      response.status === 201 ? Boolean(json && json.id) : true,
   }) || reservationErrors.add(1);
 
   if (response.status === 201) {

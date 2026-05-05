@@ -28,7 +28,6 @@ const eventDetailQuery = `
         tier
         price
         seats
-        available
       }
     }
   }
@@ -63,7 +62,7 @@ export function setup() {
 
   return {
     baseUrl,
-    eventId: __ENV.LOAD_TEST_EVENT_ID || firstEvent?.id || null,
+    eventId: __ENV.LOAD_TEST_EVENT_ID || (firstEvent && firstEvent.id) || null,
   };
 }
 
@@ -93,7 +92,7 @@ export default function (data) {
   const browseJson = parseJson(browseResponse);
   check(browseResponse, {
     'browse status 200': (response) => response.status === 200,
-    'browse graphql data': () => Boolean(browseJson?.data?.events),
+    'browse graphql data': () => Boolean(browseJson && browseJson.data && browseJson.data.events),
     'browse latency < 500ms': (response) => response.timings.duration < 500,
   }) || browseErrors.add(1);
 
@@ -113,7 +112,7 @@ export default function (data) {
     const detailJson = parseJson(detailResponse);
     check(detailResponse, {
       'detail status 200': (response) => response.status === 200,
-      'detail graphql data': () => Boolean(detailJson?.data?.event),
+      'detail graphql data': () => Boolean(detailJson && detailJson.data && detailJson.data.event),
       'detail latency < 600ms': (response) => response.timings.duration < 600,
     }) || browseErrors.add(1);
   }

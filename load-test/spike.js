@@ -17,7 +17,6 @@ const eventDetailQuery = `
         tier
         price
         seats
-        available
       }
     }
   }
@@ -56,7 +55,7 @@ export function setup() {
   const events = parseJson(response);
   const firstEvent = Array.isArray(events) && events.length > 0 ? events[0] : null;
 
-  if (!firstEvent?.id) {
+  if (!firstEvent || !firstEvent.id) {
     throw new Error('LOAD_TEST_EVENT_ID가 없고 /events에서도 eventId를 찾지 못함');
   }
 
@@ -83,7 +82,7 @@ export default function (data) {
   const json = parseJson(response);
   check(response, {
     'detail status 200': (current) => current.status === 200,
-    'detail graphql data': () => Boolean(json?.data?.event),
+    'detail graphql data': () => Boolean(json && json.data && json.data.event),
     'detail latency < 1000ms': (current) => current.timings.duration < 1000,
   }) || spikeErrors.add(1);
 
