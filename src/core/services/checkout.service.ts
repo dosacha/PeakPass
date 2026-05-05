@@ -433,6 +433,16 @@ export class CheckoutService {
         client,
       );
 
+      // 좌석 원복은 차감(`checkout`)과 같은 락 패턴을 사용한다.
+      // SERIALIZABLE 격리만으로도 정합성은 유지되지만, 명시적 FOR UPDATE를 두면:
+      //   1. 차감/원복 경로의 락 모델이 대칭이라 코드 의도가 분명함
+      //   2. 격리수준이 낮아져도 (REPEATABLE READ 등) 동작이 안전함
+      //   3. 동시 실패 webhook 다수 진입 시 SSI abort/retry 대신 lock-wait로 직렬화돼 비용이 적음
+      await client.query(
+        `SELECT id FROM events WHERE id = $1 FOR UPDATE`,
+        [order.eventId],
+      );
+
       await client.query(
         `
         UPDATE events
