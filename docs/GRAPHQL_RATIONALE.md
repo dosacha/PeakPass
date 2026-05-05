@@ -72,7 +72,7 @@ GraphQL은 클라이언트가 필요한 필드를 직접 고를 수 있어서 �
 
 제약:
 
-- query complexity 제한 코드는 있지만 서버 경로에 아직 연결하지 않음
+- query complexity 제한은 Apollo plugin으로 `didResolveOperation` 단계에 연결되어 있으며 (`server.ts`의 `createComplexityPlugin({ max: config.GRAPHQL_MAX_COMPLEXITY })`), resolver 진입 전에 query cost를 계산해 `GRAPHQL_MAX_COMPLEXITY` (default 5000) 초과 시 거부함. `graphql-complexity.test.ts`의 12개 단위 테스트로 임계값과 합산 로직을 회귀 가드. 향후 schema가 커지면 비용 모델을 분기별로 재조정하는 것이 후속 과제
 - read model은 현재 단일 DB 기반 조회 위주라 별도 projection 저장소는 두지 않음
 
 ## 면접에서 설명할 문장

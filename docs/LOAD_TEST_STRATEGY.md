@@ -83,4 +83,6 @@ npm run load-test:callbacks
 ## 현재 메모
 
 - 스크립트는 현재 REST write-side와 GraphQL read-side 구조에 맞춰 갱신함
-- 실제 수치 보고서는 최신 settlement 흐름 기준으로 다시 채워야 함
+- baseline / spike / sustained-reservation / sustained-rate-limit 측정 결과를 commit으로 고정 (`load-test/results/`)
+- 측정 결과 해석은 `docs/PERFORMANCE_REPORT.md`의 "측정 결과" 섹션 참조
+- payment-callback 시나리오는 HMAC `X-Webhook-Timestamp` 서명 헤더 반영 후 결과 파일 추가 예정

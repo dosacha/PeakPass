@@ -1,7 +1,6 @@
 # 성능 보고서
 
-이 문서는 현재 저장소에 포함된 k6 시나리오와 관찰 지점을 정리한다.  
-중요한 점은, 최신 settlement 흐름으로 스크립트는 갱신했지만 실제 수치 측정은 다시 수행해야 한다는 점이다.
+이 문서는 현재 저장소에 포함된 k6 시나리오, 관찰 지점, 그리고 commit된 측정 결과를 정리한다.
 
 ## 포함된 부하 테스트 스크립트
 
@@ -66,4 +65,20 @@
 ## 현재 메모
 
 - 스크립트는 현재 API 구조와 settlement 이후 발급 흐름을 반영함
-- 최신 수치 측정과 해석은 별도 실행 후 다시 채워야 함
+- baseline / spike / sustained 결과는 commit으로 고정됨 (아래 측정 결과 참조)
+- payment-callback 시나리오는 HMAC `X-Webhook-Timestamp` 서명 패턴 반영 후 결과 추가 예정 (현재 script는 secret 미설정 환경에서만 실행 가능)
+
+## 측정 결과 (2026-05-05, 로컬 Docker Compose 환경)
+
+| 시나리오 | 결과 파일 | RPS | p95 latency | 에러율 |
+|---|---|---|---|---|
+| read spike (200 VU) | `load-test/results/spike-2026-05-05-1915.json` | 648.9 | 15.6 ms | 0% |
+| read baseline (50 VU 10분) | `load-test/results/baseline-2026-05-05-1933.json` | 107.4 | 18.5 ms | 0% |
+| write reservation sustained (150 VU 3분 20초) | `load-test/results/sustained-reservation-2026-05-05-2208.json` | 258.4 | 486 ms | 0% (51,685건 모두 성공) |
+| rate limit on, 동일 부하 | `load-test/results/sustained-2026-05-05-2119.json` | 1,059.6 | 6.0 ms | 100% rate-limited (212,028건 거부) |
+
+해석:
+- read 경로는 200 VU spike에서도 p95 16ms로 흔들리지 않음 (cache hit + 단순 SELECT)
+- write 경로는 SERIALIZABLE + FOR UPDATE + Redis hold를 모두 거치는 *완전한* reservation 흐름에서 258 RPS, 0% 에러
+- rate limit on 비교 시나리오에서 1,060 RPS의 사실상 100%가 fail-fast 거부됨 (p95 6ms) → fail-closed 정책의 정량 검증
+- payment-callback 시나리오는 결과 미고정 (HMAC header 반영 후 추가 예정)
