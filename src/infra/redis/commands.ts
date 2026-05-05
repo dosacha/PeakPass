@@ -25,7 +25,7 @@ function safeJsonParse<T>(data: string, fallback: T): T {
   try {
     return JSON.parse(data);
   } catch (err) {
-    logger.warn({ err, data: data.slice(0, 100) }, 'Invalid JSON data in Redis, using fallback');
+    logger.warn({ err, payloadLength: data.length }, 'Invalid JSON data in Redis, using fallback');
     return fallback;
   }
 }
@@ -96,18 +96,15 @@ export async function deleteReservationHold(reservationId: string): Promise<void
  */
 export async function checkRateLimit(
   userId: string,
-  action: 'checkout' | 'reservation' | 'webhook',
+  action: 'checkout' | 'reservation',
   limit: number,
   windowMs: number,
   failMode: 'open' | 'closed' = 'closed',
 ): Promise<{ allowed: boolean; count: number; resetAt: number; redisAvailable: boolean }> {
   const redis = getRedis();
-  const key =
-    action === 'checkout'
-      ? redisKeys.rateLimitCheckout(userId)
-      : action === 'reservation'
-        ? redisKeys.rateLimitReservation(userId)
-        : redisKeys.rateLimitWebhook(userId);
+  const key = action === 'checkout'
+    ? redisKeys.rateLimitCheckout(userId)
+    : redisKeys.rateLimitReservation(userId);
 
   try {
     const now = Date.now();

@@ -17,9 +17,11 @@ export async function createApp() {
         req: (request) => ({
           method: request.method,
           url: request.url,
-          headers: request.headers,
           remoteAddress: request.ip,
           requestId: request.id,
+          // headers 의 화이트리스트만 명시적으로 (필요 시):
+          contentType: request.headers['content-type'],
+          userAgent: request.headers['user-agent'],
         }),
         res: (reply) => ({
           statusCode: reply.statusCode,
@@ -102,24 +104,6 @@ export async function createApp() {
   await registerPaymentRoutes(fastify);
   await registerReservationRoutes(fastify);
   await registerCheckoutRoutes(fastify);
-
-  const closeGracefully = async (signal: string) => {
-    logger.info({ signal }, 'Starting graceful shutdown');
-
-    try {
-      await apollo.stop();
-      logger.info('Apollo Server stopped');
-      await fastify.close();
-      logger.info('Fastify server closed');
-      process.exit(0);
-    } catch (err) {
-      logger.error({ err }, 'Error during graceful shutdown');
-      process.exit(1);
-    }
-  };
-
-  process.on('SIGINT', () => void closeGracefully('SIGINT'));
-  process.on('SIGTERM', () => void closeGracefully('SIGTERM'));
-
+  
   return fastify;
 }
