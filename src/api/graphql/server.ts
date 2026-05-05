@@ -3,6 +3,8 @@ import { FastifyInstance } from 'fastify';
 import { graphqlTypeDefs } from './types';
 import { resolvers } from './resolvers';
 import { clearGraphQLContext, createGraphQLContext, GraphQLContext } from './loaders';
+import { createComplexityPlugin } from './complexity';
+import { getConfig } from '@/infra/config';
 import { getLogger } from '@/infra/logger';
 
 const logger = getLogger();
@@ -13,13 +15,22 @@ type GraphQLRequestBody = {
 };
 
 export async function createApolloServer(): Promise<ApolloServer<GraphQLContext>> {
+  const config = getConfig();
+
   const server = new ApolloServer<GraphQLContext>({
     typeDefs: graphqlTypeDefs,
     resolvers,
     introspection: true,
+    // didResolveOperation 단계에서 query 복잡도를 검증한다.
+    // 한도 초과 시 GraphQL이 resolver 호출 전에 query를 거부한다 (DB 미접근).
+    plugins: [createComplexityPlugin({ max: config.GRAPHQL_MAX_COMPLEXITY })],
   });
 
   await server.start();
+  logger.info(
+    { maxComplexity: config.GRAPHQL_MAX_COMPLEXITY },
+    'Apollo server started with complexity plugin',
+  );
   return server;
 }
 

@@ -47,6 +47,11 @@ const envSchema = z.object({
   //   - true: JWT 미존재 시 401, JWT subject != body.userId 시 403
   //   - false (default, 호환): JWT 있을 때만 일치 강제, 없으면 body 신뢰 + warn 로그
   ENFORCE_AUTH_USER_MATCH: z.coerce.boolean().default(false),
+
+  // GraphQL query 복잡도 상한.
+  // didResolveOperation 단계에서 계산된 complexity가 이 값을 초과하면 거부한다.
+  // 의도: 악의/실수로 들어오는 깊은 nested query 또는 큰 limit 인자로 인한 DB 폭주 방어.
+  GRAPHQL_MAX_COMPLEXITY: z.coerce.number().int().positive().default(5000),
 });
 
 export type Config = z.infer<typeof envSchema>;
