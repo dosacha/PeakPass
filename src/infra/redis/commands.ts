@@ -87,14 +87,20 @@ export async function deleteReservationHold(reservationId: string): Promise<void
 
 /**
  * 레이트 리미팅: 슬라이딩 윈도우 카운터
- * 시간 윈도우 내 요청 수 세기, 제한 내이면 true 반환
+ *
+ * Redis 장애 시 동작은 failMode로 결정한다:
+ *   - 'closed' (default): 거부 (allowed: false, redisAvailable: false)
+ *     → 보안 우선. 운영에서는 이 모드를 권장.
+ *   - 'open': 허용 (allowed: true, redisAvailable: false)
+ *     → 가용성 우선. browse 같은 비핵심 경로용.
  */
 export async function checkRateLimit(
   userId: string,
   action: 'checkout' | 'reservation',
   limit: number,
   windowMs: number,
-): Promise<{ allowed: boolean; count: number; resetAt: number }> {
+  failMode: 'open' | 'closed' = 'closed',
+): Promise<{ allowed: boolean; count: number; resetAt: number; redisAvailable: boolean }> {
   const redis = getRedis();
   const key = action === 'checkout'
     ? redisKeys.rateLimitCheckout(userId)
@@ -104,30 +110,23 @@ export async function checkRateLimit(
     const now = Date.now();
     const windowStart = now - windowMs;
 
-    // 윈도우 바깥 오래된 항목 제거
     await redis.zRemRangeByScore(key, 0, windowStart);
-
-    // 현재 항목 세기
     const count = await redis.zCard(key);
 
     if (count >= limit) {
-      const resetAt = now + windowMs;
-      logger.warn(
-        { userId, action, limit, count },
-        'Rate limit exceeded',
-      );
-      return { allowed: false, count, resetAt };
+      return { allowed: false, count, resetAt: now + windowMs, redisAvailable: true };
     }
 
-    // 현재 요청 추가
     await redis.zAdd(key, { score: now, value: `${now}-${Math.random()}` });
     await redis.expire(key, Math.ceil(windowMs / 1000));
 
-    return { allowed: true, count: count + 1, resetAt: now + windowMs };
+    return { allowed: true, count: count + 1, resetAt: now + windowMs, redisAvailable: true };
   } catch (err) {
-    logger.error({ err }, '레이트 리미트 확인 실패');
-    // 오픈 실패: Redis가 다운되면 요청 허용
-    return { allowed: true, count: 0, resetAt: 0 };
+    logger.error({ err, userId, action, failMode }, '레이트 리미트 확인 실패 (Redis 장애)');
+    if (failMode === 'open') {
+      return { allowed: true, count: 0, resetAt: 0, redisAvailable: false };
+    }
+    return { allowed: false, count: 0, resetAt: 0, redisAvailable: false };
   }
 }
 

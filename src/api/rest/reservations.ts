@@ -2,6 +2,7 @@ import { FastifyInstance } from 'fastify';
 import { ReservationService } from '@/core/services/reservation.service';
 import { CreateReservationSchema } from '@/core/models/reservation';
 import { getLogger } from '@/infra/logger';
+import { assertBodyUserMatchesAuth } from '@/api/middleware/auth';
 
 /**
  * NOTE (known limitation):
@@ -17,6 +18,7 @@ export async function registerReservationRoutes(app: FastifyInstance) {
 
   app.post<{ Body: unknown }>('/reservations', async (request, reply) => {
     const input = CreateReservationSchema.parse(request.body);
+    assertBodyUserMatchesAuth(request, input.userId);
     const reservation = await reservationService.createReservation(input);
 
     logger.info({ reservationId: reservation.id, eventId: input.eventId }, 'Reservation created');

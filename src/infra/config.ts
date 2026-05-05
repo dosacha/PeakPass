@@ -5,7 +5,7 @@ const envSchema = z.object({
   NODE_ENV: z.enum(['development', 'production', 'test']).default('development'),
   LOG_LEVEL: z.enum(['trace', 'debug', 'info', 'warn', 'error', 'fatal']).default('info'),
   PORT: z.coerce.number().default(3000),
-  
+
   // 데이터베이스 설정
   DATABASE_URL: z.string().default('postgresql://peakpass:peakpass@localhost:5432/peakpass'),
   DB_HOST: z.string().default('localhost'),
@@ -15,27 +15,38 @@ const envSchema = z.object({
   DB_NAME: z.string().default('peakpass'),
   DB_POOL_MIN: z.coerce.number().default(2),
   DB_POOL_MAX: z.coerce.number().default(10),
-  
+
   // Redis 설정
   REDIS_URL: z.string().optional(),
   REDIS_HOST: z.string().default('localhost'),
   REDIS_PORT: z.coerce.number().default(6379),
   REDIS_PASSWORD: z.string().optional(),
   REDIS_POOL_SIZE: z.coerce.number().default(10),
-  
+
   // 애플리케이션 설정
   JWT_SECRET: z.string().default('dev-secret-change-in-production'),
   API_KEY: z.string().default('dev-api-key-change-in-production'),
-  
+
   // 외부 서비스 설정
   PAYMENT_SERVICE_URL: z.string().url().default('https://api.payment-provider.example.com'),
   PAYMENT_API_KEY: z.string().default('test-key-change-in-production'),
   WEBHOOK_SIGNING_SECRET: z.string().optional(),
-  
+  // webhook timestamp ± 허용 범위 (초). default 5분 (Stripe 권장값과 동일).
+  WEBHOOK_REPLAY_TOLERANCE_SECONDS: z.coerce.number().int().positive().default(300),
+
   // 기능 플래그
   ENABLE_RATE_LIMITING: z.coerce.boolean().default(true),
   RATE_LIMIT_WINDOW_MS: z.coerce.number().default(60000),
   RATE_LIMIT_MAX_REQUESTS: z.coerce.number().default(5),
+  // Redis 장애 시 동작:
+  //   - 'closed' (default): 요청 거부 (보안 우선, 운영 권장)
+  //   - 'open': 요청 통과 (가용성 우선, 비핵심 경로용)
+  RATE_LIMIT_FAIL_MODE: z.enum(['open', 'closed']).default('closed'),
+
+  // 인증 정책:
+  //   - true: JWT 미존재 시 401, JWT subject != body.userId 시 403
+  //   - false (default, 호환): JWT 있을 때만 일치 강제, 없으면 body 신뢰 + warn 로그
+  ENFORCE_AUTH_USER_MATCH: z.coerce.boolean().default(false),
 });
 
 export type Config = z.infer<typeof envSchema>;

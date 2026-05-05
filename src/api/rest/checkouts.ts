@@ -9,6 +9,7 @@ import {
   releaseIdempotencyLock,
 } from '@/infra/redis/commands';
 import { storeIdempotencyResult } from '@/api/middleware/idempotency';
+import { assertBodyUserMatchesAuth } from '@/api/middleware/auth';
 
 /**
  * NOTE (known limitation):
@@ -33,6 +34,8 @@ export async function registerCheckoutRoutes(app: FastifyInstance) {
         ...body,
         idempotencyKey,
       });
+
+      assertBodyUserMatchesAuth(request, input.userId);
 
       logger.info(
         {
