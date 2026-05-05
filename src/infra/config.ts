@@ -1,6 +1,23 @@
 import 'dotenv/config';
 import { z } from 'zod';
 
+// 환경변수에서 boolean을 안전하게 읽는다.
+// `z.coerce.boolean()`은 자바스크립트 `Boolean(string)` 룰을 따라
+// "false"·"0"·"FALSE" 같은 *모든 비어있지 않은 문자열을 true*로 변환하는 함정이 있다.
+// 실제 운영에서 ENABLE_RATE_LIMITING=false로 끄려고 해도 안 꺼지는 *진짜 버그*였다.
+// 명시적 파서로 "true"/"1"만 true로, 그 외("false"/"0"/빈값/누락)는 false로 정확히 매핑한다.
+const booleanFromEnv = (defaultValue: boolean) =>
+  z
+    .union([z.string(), z.boolean(), z.undefined()])
+    .transform((v) => {
+      if (typeof v === 'boolean') return v;
+      if (v === undefined || v === '') return defaultValue;
+      const normalized = v.toLowerCase();
+      if (normalized === 'true' || normalized === '1') return true;
+      if (normalized === 'false' || normalized === '0') return false;
+      return defaultValue;
+    });
+
 const envSchema = z.object({
   NODE_ENV: z.enum(['development', 'production', 'test']).default('development'),
   LOG_LEVEL: z.enum(['trace', 'debug', 'info', 'warn', 'error', 'fatal']).default('info'),
@@ -35,7 +52,7 @@ const envSchema = z.object({
   WEBHOOK_REPLAY_TOLERANCE_SECONDS: z.coerce.number().int().positive().default(300),
 
   // 기능 플래그
-  ENABLE_RATE_LIMITING: z.coerce.boolean().default(true),
+  ENABLE_RATE_LIMITING: booleanFromEnv(true),
   RATE_LIMIT_WINDOW_MS: z.coerce.number().default(60000),
   RATE_LIMIT_MAX_REQUESTS: z.coerce.number().default(5),
   // Redis 장애 시 동작:
@@ -46,7 +63,7 @@ const envSchema = z.object({
   // 인증 정책:
   //   - true: JWT 미존재 시 401, JWT subject != body.userId 시 403
   //   - false (default, 호환): JWT 있을 때만 일치 강제, 없으면 body 신뢰 + warn 로그
-  ENFORCE_AUTH_USER_MATCH: z.coerce.boolean().default(false),
+  ENFORCE_AUTH_USER_MATCH: booleanFromEnv(false),
 
   // GraphQL query 복잡도 상한.
   // didResolveOperation 단계에서 계산된 complexity가 이 값을 초과하면 거부한다.
