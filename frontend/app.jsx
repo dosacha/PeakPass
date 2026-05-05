@@ -255,7 +255,7 @@ const App = () => {
     step1: async () => {
       setStep("s1", "running"); setActiveStep(1);
       const query = `query Events($limit: Int, $offset: Int) {
-  events(limit: $limit, offset: $offset) { id title description date capacity availableSeats pricing { tier price seats available } }
+  events(limit: $limit, offset: $offset) { id title description date capacity availableSeats pricing { tier price seats } }
 }`;
       const res = await api.graphql(query, { limit: 10, offset: 0 });
       logReq({ method: "GQL", url: "/graphql · events", status: res.status, elapsed: res.elapsed || 200,

@@ -196,7 +196,6 @@ export const resolvers = {
         tier: tier.name,
         price: tier.price,
         seats: tier.quantity,
-        available: tier.quantity,
       })),
     createdAt: (parent: GraphQLEventParent) => toIsoString(parent.createdAt),
     updatedAt: (parent: GraphQLEventParent) => toIsoString(parent.updatedAt),

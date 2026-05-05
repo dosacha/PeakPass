@@ -107,13 +107,13 @@ const DemoFlow = ({ state, actions }) => {
             timing={stepTiming.s1}
           >
             <div style={{fontSize:13, color:"var(--ink-2)", marginBottom:10}}>
-              읽기 조합은 GraphQL로 담당합니다. 다음 쿼리로 이벤트 목록과 각 tier의 잔여 좌석 수를 한 번에 가져옵니다:
+              읽기 조합은 GraphQL로 담당합니다. 다음 쿼리로 이벤트 목록과 각 tier의 정원을 한 번에 가져옵니다:
             </div>
             <div className="json-block" style={{maxHeight:160}}>
 {`query Events($limit: Int, $offset: Int) {
   events(limit: $limit, offset: $offset) {
     id title description date capacity availableSeats
-    pricing { tier price seats available }
+    pricing { tier price seats }
   }
 }`}
             </div>
@@ -179,7 +179,7 @@ const DemoFlow = ({ state, actions }) => {
                            onClick={() => actions.selectTier(p.tierId)}>
                         <div className="tier-name">{p.tier}</div>
                         <div className="tier-price">{fmtKRW(p.price)}</div>
-                        <div className="tier-sub">잔여 {p.available} / {p.seats}</div>
+                        <div className="tier-sub">정원 {p.seats.toLocaleString()}석</div>
                       </div>
                     ))}
                   </div>
