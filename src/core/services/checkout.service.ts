@@ -34,14 +34,35 @@ export class CheckoutService {
       return { order: existingOrder, tickets };
     }
 
+    // reservation을 사용한다면 검증+convert를 atomic UPDATE로 처리한다.
+    //
+    // 이 패턴이 중요한 이유:
+    //   - "valid 체크 → checkout → convert" 3단계는 그 사이에 다른 트랜잭션이
+    //     reservation을 release/expire 시킬 수 있어 race condition이 생긴다.
+    //   - UPDATE ... WHERE status='active' AND expires_at > NOW() RETURNING은
+    //     row lock + 조건 검증 + 상태 전환을 한 쿼리로 묶는다.
+    //   - affected = 0이면 invalid (released/expired/만료시간 초과).
+    //
+    // reservation 단계에서 좌석은 이미 차감되어 있으므로 checkout은 좌석을 *추가 차감하지 않는다*.
+    let seatsAlreadyHeld = false;
     if (input.reservationId) {
-      const isValid = await this.reservationService.isReservationValidWithClient(
-        input.reservationId,
-        client,
+      const convertResult = await client.query(
+        `UPDATE reservations
+         SET status = 'converted'
+         WHERE id = $1 AND status = 'active' AND expires_at > NOW()
+         RETURNING id`,
+        [input.reservationId],
       );
-      if (!isValid) {
+
+      if (convertResult.rowCount === 0) {
+        // Lazy expire: 만료된 reservation이 좌석을 점유하고 있으면 그 자리에서 정리한다.
+        // expireReservationWithClient는 status가 'active'가 아니면 noop이므로
+        // 이미 release/expire된 경우에도 안전하다.
+        await this.reservationService.expireReservationWithClient(input.reservationId, client);
         throw new ConflictError('Reservation has expired or is no longer valid');
       }
+
+      seatsAlreadyHeld = true;
     }
 
     const eventLock = await client.query<Event>(
@@ -61,16 +82,21 @@ export class CheckoutService {
     }
 
     const event = eventLock.rows[0];
-    if (event.availableSeats < input.quantity) {
-      this.logger.warn(
-        {
-          eventId: input.eventId,
-          available: event.availableSeats,
-          requested: input.quantity,
-        },
-        'Insufficient inventory during checkout',
-      );
-      throw new InsufficientInventoryError(event.availableSeats, input.quantity);
+
+    // 좌석 검증은 reservation 없이 들어온 직접 checkout 경로에서만 한다.
+    // reservation 경로는 reservation 단계에서 이미 좌석을 점유했다.
+    if (!seatsAlreadyHeld) {
+      if (event.availableSeats < input.quantity) {
+        this.logger.warn(
+          {
+            eventId: input.eventId,
+            available: event.availableSeats,
+            requested: input.quantity,
+          },
+          'Insufficient inventory during checkout',
+        );
+        throw new InsufficientInventoryError(event.availableSeats, input.quantity);
+      }
     }
 
     const tier = event.pricing.find((candidate) => candidate.id === input.tierId);
@@ -120,27 +146,37 @@ export class CheckoutService {
 
     const order = orderResult.rows[0];
 
-    await client.query(
-      `
-      UPDATE events
-      SET available_seats = available_seats - $1
-      WHERE id = $2
-      `,
-      [input.quantity, input.eventId],
-    );
+    // 좌석 차감도 직접 checkout 경로에서만 한다.
+    // reservation 경로의 좌석 점유는 그대로 order의 점유로 이전된다.
+    if (!seatsAlreadyHeld) {
+      await client.query(
+        `
+        UPDATE events
+        SET available_seats = available_seats - $1
+        WHERE id = $2
+        `,
+        [input.quantity, input.eventId],
+      );
 
-    this.logger.info(
-      {
-        orderId,
-        eventId: input.eventId,
-        seatsDeducted: input.quantity,
-        newAvailable: event.availableSeats - input.quantity,
-      },
-      'Inventory deducted for checkout',
-    );
-
-    if (input.reservationId) {
-      await this.reservationService.convertReservationWithClient(input.reservationId, client);
+      this.logger.info(
+        {
+          orderId,
+          eventId: input.eventId,
+          seatsDeducted: input.quantity,
+          newAvailable: event.availableSeats - input.quantity,
+        },
+        'Inventory deducted for checkout (no reservation)',
+      );
+    } else {
+      this.logger.info(
+        {
+          orderId,
+          eventId: input.eventId,
+          reservationId: input.reservationId,
+          seatsTransferred: input.quantity,
+        },
+        'Inventory transferred from reservation hold to order',
+      );
     }
 
     const paymentRecordId = uuid();
