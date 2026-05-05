@@ -56,14 +56,6 @@ async function main() {
 
     app = await createApp();
 
-    process.once('SIGINT', () => {
-      void gracefulShutdown('SIGINT');
-    });
-
-    process.once('SIGTERM', () => {
-      void gracefulShutdown('SIGTERM');
-    });
-
     await app.listen({ port: config.PORT, host: '0.0.0.0' });
 
     logger.info(`서버 실행 시작: ${config.PORT}`);
