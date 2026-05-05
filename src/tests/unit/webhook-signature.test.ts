@@ -2,6 +2,7 @@ import crypto from 'crypto';
 import {
   computeWebhookSignature,
   verifyWebhookSignature,
+  validateTimestamp,
 } from '@/api/middleware/webhook-signature';
 
 describe('computeWebhookSignature', () => {
@@ -33,38 +34,96 @@ describe('computeWebhookSignature', () => {
       computeWebhookSignature(secret, spacedBody),
     );
   });
+
+  it('changes when the timestamp differs (replay binding)', () => {
+    const secret = 'test-secret';
+    const body = Buffer.from('{"x":1}', 'utf8');
+
+    const sigA = computeWebhookSignature(secret, body, '1700000000');
+    const sigB = computeWebhookSignature(secret, body, '1700000001');
+
+    expect(sigA).not.toBe(sigB);
+  });
+
+  it('legacy signature (no timestamp) differs from timestamped signature', () => {
+    const secret = 'test-secret';
+    const body = Buffer.from('{"x":1}', 'utf8');
+
+    expect(computeWebhookSignature(secret, body)).not.toBe(
+      computeWebhookSignature(secret, body, '1700000000'),
+    );
+  });
 });
 
 describe('verifyWebhookSignature', () => {
   const secret = 'test-secret';
   const body = Buffer.from('{"event":"payment.settled","id":"evt_1"}', 'utf8');
+  const timestamp = '1700000000';
   const validSignature = crypto
     .createHmac('sha256', secret)
+    .update(`${timestamp}.`)
     .update(body)
     .digest('hex');
 
-  it('returns true for a valid signature', () => {
-    expect(verifyWebhookSignature(secret, body, validSignature)).toBe(true);
+  it('returns true for a valid timestamped signature', () => {
+    expect(verifyWebhookSignature(secret, body, validSignature, timestamp)).toBe(true);
   });
 
   it('returns false for a tampered signature', () => {
     const tampered = validSignature.replace(/.$/, (char) => (char === '0' ? '1' : '0'));
 
-    expect(verifyWebhookSignature(secret, body, tampered)).toBe(false);
+    expect(verifyWebhookSignature(secret, body, tampered, timestamp)).toBe(false);
   });
 
   it('returns false for signatures with a different length', () => {
-    expect(verifyWebhookSignature(secret, body, 'tooshort')).toBe(false);
-    expect(verifyWebhookSignature(secret, body, `${validSignature}extra`)).toBe(false);
+    expect(verifyWebhookSignature(secret, body, 'tooshort', timestamp)).toBe(false);
+    expect(verifyWebhookSignature(secret, body, `${validSignature}extra`, timestamp)).toBe(false);
   });
 
   it('returns false when the secret differs', () => {
-    expect(verifyWebhookSignature('different-secret', body, validSignature)).toBe(false);
+    expect(verifyWebhookSignature('different-secret', body, validSignature, timestamp)).toBe(false);
   });
 
   it('returns false when the body bytes differ', () => {
     const modifiedBody = Buffer.from('{"event":"payment.settled","id":"evt_2"}', 'utf8');
 
-    expect(verifyWebhookSignature(secret, modifiedBody, validSignature)).toBe(false);
+    expect(verifyWebhookSignature(secret, modifiedBody, validSignature, timestamp)).toBe(false);
+  });
+
+  it('returns false when the timestamp is changed (signature was bound to original)', () => {
+    expect(verifyWebhookSignature(secret, body, validSignature, '1700000999')).toBe(false);
+  });
+
+  it('returns false when timestamp is dropped on a timestamped signature', () => {
+    expect(verifyWebhookSignature(secret, body, validSignature)).toBe(false);
+  });
+});
+
+describe('validateTimestamp', () => {
+  // 2026-01-01T00:00:00Z 기준 (ms)
+  const nowMs = 1767225600 * 1000;
+  const tolerance = 300; // 5분
+
+  it('returns ok within window', () => {
+    expect(validateTimestamp(String(1767225600 - 60), tolerance, nowMs)).toBe('ok');
+    expect(validateTimestamp(String(1767225600 + 60), tolerance, nowMs)).toBe('ok');
+    expect(validateTimestamp(String(1767225600), tolerance, nowMs)).toBe('ok');
+  });
+
+  it('returns expired when older than tolerance', () => {
+    expect(validateTimestamp(String(1767225600 - 301), tolerance, nowMs)).toBe('expired');
+    expect(validateTimestamp(String(1767225600 - 86400), tolerance, nowMs)).toBe('expired');
+  });
+
+  it('returns future when later than tolerance', () => {
+    expect(validateTimestamp(String(1767225600 + 301), tolerance, nowMs)).toBe('future');
+    expect(validateTimestamp(String(1767225600 + 86400), tolerance, nowMs)).toBe('future');
+  });
+
+  it('returns malformed for non-numeric or non-positive', () => {
+    expect(validateTimestamp('abc', tolerance, nowMs)).toBe('malformed');
+    expect(validateTimestamp('', tolerance, nowMs)).toBe('malformed');
+    expect(validateTimestamp('0', tolerance, nowMs)).toBe('malformed');
+    expect(validateTimestamp('-1', tolerance, nowMs)).toBe('malformed');
   });
 });
