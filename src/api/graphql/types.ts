@@ -37,7 +37,7 @@ export const graphqlTypeDefs = `
     eventId: ID!
     event: Event!
     ticketCount: Int!
-    totalPrice: Float!
+    totalPrice: String!
     status: String!
     paymentStatus: String!
     idempotencyKey: String

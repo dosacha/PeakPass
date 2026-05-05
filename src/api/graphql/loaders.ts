@@ -18,7 +18,8 @@ export type GraphQLOrder = {
   userId: string;
   eventId: string;
   quantity: number;
-  totalPrice: number;
+  // 화폐는 직렬화 경계에서 string으로 흐른다 (정밀도 손실 방지).
+  totalPrice: string;
   status: string;
   paymentStatus: string;
   idempotencyKey?: string;
@@ -151,7 +152,7 @@ export function createGraphQLContext(userId?: string): GraphQLContext {
             userId: order.userId,
             eventId: order.eventId,
             quantity: order.quantity,
-            totalPrice: Number(order.totalPrice),
+            totalPrice: order.totalPrice,
             status: order.status,
             paymentStatus: order.paymentStatus ?? 'pending',
             idempotencyKey: order.idempotencyKey,

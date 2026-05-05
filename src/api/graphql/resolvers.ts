@@ -33,7 +33,8 @@ type GraphQLOrderParent = {
   userId: string;
   eventId: string;
   quantity: number;
-  totalPrice: number;
+  // 화폐는 직렬화 경계에서 string으로 흐른다 (정밀도 손실 방지).
+  totalPrice: string;
   status: string;
   paymentStatus: string;
   idempotencyKey?: string;
@@ -127,7 +128,7 @@ export const resolvers = {
           userId: order.userId,
           eventId: order.eventId,
           quantity: order.quantity,
-          totalPrice: Number(order.totalAmount),
+          totalPrice: order.totalAmount,
           status: order.status,
           paymentStatus: order.paymentStatus,
           idempotencyKey: order.idempotencyKey,
