@@ -400,15 +400,15 @@ terraform plan
 
 공개 문서 인덱스:
 
-- [docs/README.md](C:/Users/dosac/projects/PeakPass/docs/README.md)
+- [docs/README.md](./docs/README.md)
 
 우선 추천 문서:
 
-- [docs/ARCHITECTURE_DIAGRAMS.md](C:/Users/dosac/projects/PeakPass/docs/ARCHITECTURE_DIAGRAMS.md)
-- [docs/TRANSACTION_CONSISTENCY.md](C:/Users/dosac/projects/PeakPass/docs/TRANSACTION_CONSISTENCY.md)
-- [docs/REDIS_STRATEGY.md](C:/Users/dosac/projects/PeakPass/docs/REDIS_STRATEGY.md)
-- [docs/GRAPHQL_RATIONALE.md](C:/Users/dosac/projects/PeakPass/docs/GRAPHQL_RATIONALE.md)
-- [docs/DEPLOYMENT_RUNBOOK.md](C:/Users/dosac/projects/PeakPass/docs/DEPLOYMENT_RUNBOOK.md)
+- [docs/ARCHITECTURE_DIAGRAMS.md](./docs/ARCHITECTURE_DIAGRAMS.md)
+- [docs/TRANSACTION_CONSISTENCY.md](./docs/TRANSACTION_CONSISTENCY.md)
+- [docs/REDIS_STRATEGY.md](./docs/REDIS_STRATEGY.md)
+- [docs/GRAPHQL_RATIONALE.md](./docs/GRAPHQL_RATIONALE.md)
+- [docs/DEPLOYMENT_RUNBOOK.md](./docs/DEPLOYMENT_RUNBOOK.md)
 
 ## 현재 상태 메모
 

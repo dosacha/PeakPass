@@ -42,7 +42,7 @@
 
 ## 변수 예시
 
-예시 파일은 [terraform.tfvars.example](C:/Users/dosac/projects/PeakPass/terraform/terraform.tfvars.example)에 있다.
+예시 파일은 [terraform.tfvars.example](./terraform/terraform.tfvars.example)에 있다.
 
 중요 변수:
 

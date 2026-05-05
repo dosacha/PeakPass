@@ -9,7 +9,7 @@ PeakPass는 읽기 트래픽과 쓰기 트래픽의 성격이 다르다.
 
 - 목적: 일반 조회 트래픽 기준선 측정
 - 대상: `/health`, GraphQL `events`, GraphQL `event`
-- 스크립트: [baseline.js](C:/Users/dosac/projects/PeakPass/load-test/baseline.js)
+- 스크립트: [baseline.js](./load-test/baseline.js)
 
 ```bash
 npm run load-test:baseline
@@ -19,7 +19,7 @@ npm run load-test:baseline
 
 - 목적: 특정 이벤트 상세 조회가 갑자기 몰릴 때 응답성 확인
 - 대상: GraphQL `event`
-- 스크립트: [spike.js](C:/Users/dosac/projects/PeakPass/load-test/spike.js)
+- 스크립트: [spike.js](./load-test/spike.js)
 
 ```bash
 npm run load-test:spike
@@ -29,7 +29,7 @@ npm run load-test:spike
 
 - 목적: 플래시세일 상황에서 reservation hold API의 응답 시간과 rate limiting 동작 확인
 - 대상: `POST /reservations`
-- 스크립트: [sustained.js](C:/Users/dosac/projects/PeakPass/load-test/sustained.js)
+- 스크립트: [sustained.js](./load-test/sustained.js)
 
 필수 환경 변수:
 
@@ -44,7 +44,7 @@ npm run load-test:sustained
 
 - 목적: 같은 settlement webhook이 여러 번 들어와도 중복 발급이 생기지 않는지 확인
 - 대상: `POST /webhooks/payments/settlement`
-- 스크립트: [payment-callback.js](C:/Users/dosac/projects/PeakPass/load-test/payment-callback.js)
+- 스크립트: [payment-callback.js](./load-test/payment-callback.js)
 
 필수 환경 변수:
 

@@ -47,9 +47,9 @@ GraphQL은 클라이언트가 필요한 필드를 직접 고를 수 있어서 �
 
 실제 스키마와 resolver는 다음 파일에 있다.
 
-- [types.ts](C:/Users/dosac/projects/PeakPass/src/api/graphql/types.ts)
-- [resolvers.ts](C:/Users/dosac/projects/PeakPass/src/api/graphql/resolvers.ts)
-- [loaders.ts](C:/Users/dosac/projects/PeakPass/src/api/graphql/loaders.ts)
+- [types.ts](./src/api/graphql/types.ts)
+- [resolvers.ts](./src/api/graphql/resolvers.ts)
+- [loaders.ts](./src/api/graphql/loaders.ts)
 
 현재 실제로 동작을 확인한 조회는 다음과 같다.
 

@@ -12,7 +12,7 @@ PeakPass에서 Redis는 성능과 운영 편의성을 높이기 위한 보조 �
 3. 멱등성 결과 cache
 4. 이벤트 조회 cache와 재고 cache
 
-관련 코드는 [commands.ts](C:/Users/dosac/projects/PeakPass/src/infra/redis/commands.ts)에 모여 있다.
+관련 코드는 [commands.ts](./src/infra/redis/commands.ts)에 모여 있다.
 
 ## 1. 예약 hold TTL
 
@@ -33,7 +33,7 @@ PeakPass에서 Redis는 성능과 운영 편의성을 높이기 위한 보조 �
 - 기준: 인증 사용자 ID 우선, 없으면 IP fallback
 - 구현 방식: Redis sorted set 기반 sliding window
 
-관련 흐름은 [rateLimit.ts](C:/Users/dosac/projects/PeakPass/src/api/middleware/rateLimit.ts)와 [app.ts](C:/Users/dosac/projects/PeakPass/src/api/app.ts)에서 연결한다.
+관련 흐름은 [rateLimit.ts](./src/api/middleware/rateLimit.ts)와 [app.ts](./src/api/app.ts)에서 연결한다.
 
 ## 3. 멱등성 결과 cache
 

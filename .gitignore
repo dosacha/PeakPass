@@ -146,3 +146,4 @@ docs/TECHNICAL_QA.md
 
 .env.prod
 docker-compose.prod.yml
+load-test-event.sql

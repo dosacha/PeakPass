@@ -4,10 +4,10 @@
 
 ## 포함된 부하 테스트 스크립트
 
-- [baseline.js](C:/Users/dosac/projects/PeakPass/load-test/baseline.js)
-- [spike.js](C:/Users/dosac/projects/PeakPass/load-test/spike.js)
-- [sustained.js](C:/Users/dosac/projects/PeakPass/load-test/sustained.js)
-- [payment-callback.js](C:/Users/dosac/projects/PeakPass/load-test/payment-callback.js)
+- [baseline.js](./load-test/baseline.js)
+- [spike.js](./load-test/spike.js)
+- [sustained.js](./load-test/sustained.js)
+- [payment-callback.js](./load-test/payment-callback.js)
 
 ## 시나리오 목적
 

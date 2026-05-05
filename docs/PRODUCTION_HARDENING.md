@@ -11,7 +11,7 @@
 
 관련 파일:
 
-- [health.ts](C:/Users/dosac/projects/PeakPass/src/api/health.ts)
+- [health.ts](./src/api/health.ts)
 
 동작:
 
@@ -26,8 +26,8 @@
 
 관련 파일:
 
-- [logger.ts](C:/Users/dosac/projects/PeakPass/src/infra/logger.ts)
-- [app.ts](C:/Users/dosac/projects/PeakPass/src/api/app.ts)
+- [logger.ts](./src/infra/logger.ts)
+- [app.ts](./src/api/app.ts)
 
 ### 요청 ID
 

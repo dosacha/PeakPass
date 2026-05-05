@@ -5,37 +5,37 @@
 
 ## 먼저 읽을 문서
 
-1. [ARCHITECTURE_DIAGRAMS.md](C:/Users/dosac/projects/PeakPass/docs/ARCHITECTURE_DIAGRAMS.md)
-2. [TRANSACTION_CONSISTENCY.md](C:/Users/dosac/projects/PeakPass/docs/TRANSACTION_CONSISTENCY.md)
-3. [REDIS_STRATEGY.md](C:/Users/dosac/projects/PeakPass/docs/REDIS_STRATEGY.md)
-4. [GRAPHQL_RATIONALE.md](C:/Users/dosac/projects/PeakPass/docs/GRAPHQL_RATIONALE.md)
-5. [DEPLOYMENT_RUNBOOK.md](C:/Users/dosac/projects/PeakPass/docs/DEPLOYMENT_RUNBOOK.md)
+1. [ARCHITECTURE_DIAGRAMS.md](./docs/ARCHITECTURE_DIAGRAMS.md)
+2. [TRANSACTION_CONSISTENCY.md](./docs/TRANSACTION_CONSISTENCY.md)
+3. [REDIS_STRATEGY.md](./docs/REDIS_STRATEGY.md)
+4. [GRAPHQL_RATIONALE.md](./docs/GRAPHQL_RATIONALE.md)
+5. [DEPLOYMENT_RUNBOOK.md](./docs/DEPLOYMENT_RUNBOOK.md)
 
 ## 주제별 문서
 
 ### 아키텍처
 
-- [ARCHITECTURE_DIAGRAMS.md](C:/Users/dosac/projects/PeakPass/docs/ARCHITECTURE_DIAGRAMS.md)
-- [CASE_STUDY.md](C:/Users/dosac/projects/PeakPass/docs/CASE_STUDY.md)
-- [adr/0001-read-write-separation.md](C:/Users/dosac/projects/PeakPass/docs/adr/0001-read-write-separation.md)
+- [ARCHITECTURE_DIAGRAMS.md](./docs/ARCHITECTURE_DIAGRAMS.md)
+- [CASE_STUDY.md](./docs/CASE_STUDY.md)
+- [adr/0001-read-write-separation.md](./docs/adr/0001-read-write-separation.md)
 
 ### 정합성과 데이터 처리
 
-- [TRANSACTION_CONSISTENCY.md](C:/Users/dosac/projects/PeakPass/docs/TRANSACTION_CONSISTENCY.md)
-- [REDIS_STRATEGY.md](C:/Users/dosac/projects/PeakPass/docs/REDIS_STRATEGY.md)
-- [GRAPHQL_RATIONALE.md](C:/Users/dosac/projects/PeakPass/docs/GRAPHQL_RATIONALE.md)
-- [GRAPHQL_EXAMPLES.md](C:/Users/dosac/projects/PeakPass/docs/GRAPHQL_EXAMPLES.md)
+- [TRANSACTION_CONSISTENCY.md](./docs/TRANSACTION_CONSISTENCY.md)
+- [REDIS_STRATEGY.md](./docs/REDIS_STRATEGY.md)
+- [GRAPHQL_RATIONALE.md](./docs/GRAPHQL_RATIONALE.md)
+- [GRAPHQL_EXAMPLES.md](./docs/GRAPHQL_EXAMPLES.md)
 
 ### 운영과 배포
 
-- [PRODUCTION_HARDENING.md](C:/Users/dosac/projects/PeakPass/docs/PRODUCTION_HARDENING.md)
-- [DEPLOYMENT_RUNBOOK.md](C:/Users/dosac/projects/PeakPass/docs/DEPLOYMENT_RUNBOOK.md)
-- [AWS_DEPLOYMENT.md](C:/Users/dosac/projects/PeakPass/docs/AWS_DEPLOYMENT.md)
+- [PRODUCTION_HARDENING.md](./docs/PRODUCTION_HARDENING.md)
+- [DEPLOYMENT_RUNBOOK.md](./docs/DEPLOYMENT_RUNBOOK.md)
+- [AWS_DEPLOYMENT.md](./docs/AWS_DEPLOYMENT.md)
 
 ### 성능과 부하 테스트
 
-- [LOAD_TEST_STRATEGY.md](C:/Users/dosac/projects/PeakPass/docs/LOAD_TEST_STRATEGY.md)
-- [PERFORMANCE_REPORT.md](C:/Users/dosac/projects/PeakPass/docs/PERFORMANCE_REPORT.md)
+- [LOAD_TEST_STRATEGY.md](./docs/LOAD_TEST_STRATEGY.md)
+- [PERFORMANCE_REPORT.md](./docs/PERFORMANCE_REPORT.md)
 
 ## 읽을 때 알고 있으면 좋은 점
 
