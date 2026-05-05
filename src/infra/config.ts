@@ -95,6 +95,14 @@ export function loadConfig(): Config {
     if (config.API_KEY === 'dev-api-key-change-in-production') {
       throw new Error('API_KEY must be set in production environment');
     }
+    // WEBHOOK_SIGNING_SECRET이 미설정이면 webhook-signature 미들웨어가 검증을 skip한다.
+    // production에서는 fail-open이 보안 사고로 직결되므로 fail-fast로 강제한다.
+    if (!config.WEBHOOK_SIGNING_SECRET || config.WEBHOOK_SIGNING_SECRET.trim().length === 0) {
+      throw new Error(
+        'WEBHOOK_SIGNING_SECRET must be set in production environment ' +
+          '(missing secret would cause webhook signature verification to silently skip)',
+      );
+    }
   }
 
   cachedConfig = config;
