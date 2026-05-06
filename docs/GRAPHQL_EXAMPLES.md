@@ -5,21 +5,15 @@
 
 ## 이벤트 목록
 
+목록 화면은 가벼운 필드만 가져온다. `description`, `pricing`, `my*` 컨텍스트는 상세 화면에서만 요청한다.
+
 ```graphql
-query BrowseEvents($limit: Int, $offset: Int) {
+query EventListPage($limit: Int, $offset: Int) {
   events(limit: $limit, offset: $offset) {
     id
-    title
-    description
-    date
-    capacity
+    name
+    startsAt
     availableSeats
-    pricing {
-      tier
-      price
-      seats
-      available
-    }
   }
 }
 ```
@@ -35,20 +29,31 @@ query BrowseEvents($limit: Int, $offset: Int) {
 
 ## 이벤트 상세
 
+상세 화면은 같은 이벤트 데이터 소스에서 무거운 설명, 가격 등급, 인증 사용자 컨텍스트를 한 번에 조합한다.
+
 ```graphql
-query EventDetail($id: ID!) {
-  event(id: $id) {
+query EventDetailPage($eventId: ID!) {
+  event(id: $eventId) {
     id
-    title
+    name
     description
-    date
+    startsAt
+    totalSeats
     availableSeats
     pricing {
-      tier
+      tierId
+      name
       price
       seats
-      available
     }
+    myActiveReservation {
+      id
+      tierId
+      quantity
+      expiresAt
+      status
+    }
+    myTicketCount
   }
 }
 ```
@@ -62,10 +67,10 @@ query MyOrders($limit: Int, $offset: Int) {
   myOrders(limit: $limit, offset: $offset) {
     id
     eventId
+    quantity
+    totalAmount
     status
     paymentStatus
-    ticketCount
-    totalPrice
     idempotencyKey
   }
 }
@@ -79,20 +84,19 @@ query MyOrders($limit: Int, $offset: Int) {
 query MyTickets($limit: Int, $offset: Int) {
   myTickets(limit: $limit, offset: $offset) {
     id
-    code
+    ticketNumber
     status
+    issuedAt
+    expiresAt
     order {
       id
-      totalPrice
+      totalAmount
       paymentStatus
     }
     event {
       id
-      title
-    }
-    user {
-      id
-      email
+      name
+      startsAt
     }
   }
 }
@@ -100,24 +104,17 @@ query MyTickets($limit: Int, $offset: Int) {
 
 ## 티켓 코드 조회
 
+`ticketByCode`는 게이트 검증용 공개 DTO만 반환한다. 사용자 식별 정보, 주문, 결제 정보는 노출하지 않는다.
+
 ```graphql
 query TicketByCode($code: String!) {
   ticketByCode(code: $code) {
-    id
-    code
+    valid
     status
-    order {
-      id
-      totalPrice
-    }
-    event {
-      id
-      title
-    }
-    user {
-      id
-      email
-    }
+    ticketNumber
+    eventName
+    startsAt
+    endsAt
   }
 }
 ```
@@ -129,7 +126,7 @@ query TicketByCode($code: String!) {
 ```bash
 curl -X POST http://localhost:3000/graphql \
   -H "Content-Type: application/json" \
-  -d '{"query":"query { events(limit: 5, offset: 0) { id title availableSeats } }"}'
+  -d '{"query":"query { events(limit: 5, offset: 0) { id name startsAt availableSeats } }"}'
 ```
 
 인증 사용자 주문과 티켓:
@@ -138,7 +135,7 @@ curl -X POST http://localhost:3000/graphql \
 curl -X POST http://localhost:3000/graphql \
   -H "Content-Type: application/json" \
   -H "Authorization: Bearer JWT_TOKEN" \
-  -d '{"query":"query { myOrders(limit: 10) { id status paymentStatus totalPrice } myTickets(limit: 10) { id code status } }"}'
+  -d '{"query":"query { myOrders(limit: 10) { id status paymentStatus totalAmount } myTickets(limit: 10) { id ticketNumber status } }"}'
 ```
 
 티켓 코드 조회:
@@ -146,13 +143,15 @@ curl -X POST http://localhost:3000/graphql \
 ```bash
 curl -X POST http://localhost:3000/graphql \
   -H "Content-Type: application/json" \
-  -d '{"query":"query { ticketByCode(code: \"PASS-2026-000002\") { id code status event { title } } }"}'
+  -d '{"query":"query { ticketByCode(code: \"PASS-2026-000002\") { valid status ticketNumber eventName startsAt endsAt } }"}'
 ```
 
 ## 실제 검증 메모
 
 실제로 확인한 대표 응답:
 
+- `events` 목록은 목록 화면에 필요한 필드만 조회
+- `event` 상세는 `pricing`, `myActiveReservation`, `myTicketCount`를 한 번에 조합
 - `myOrders`에서 settlement 이후 주문이 `paid`, `paymentStatus: settled`
 - `myTickets`에서 settlement 이후 발급된 `PASS-2026-000002` 조회
-- `ticketByCode(code: "PASS-2026-000002")` 정상 조회
+- `ticketByCode(code: "PASS-2026-000002")`는 검증 DTO로만 응답

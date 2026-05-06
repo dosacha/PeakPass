@@ -17,7 +17,7 @@
 
 - **mock 모드 (기본):** 브라우저 내에서 전체 백엔드 로직을 시뮬레이션합니다.
 - **live 모드:** 실제 PeakPass 백엔드 API를 호출합니다. 토글로 전환 가능.
-- **의도된 제한:** live 모드의 webhook 시뮬레이션은 클라이언트가 HMAC 서명을 가지고 있지 않아 401로 거부됩니다. 이는 프론트엔드에 secret을 노출하지 않는 정상 동작이며, 서명 검증의 필요성을 시각적으로 드러내는 학습 포인트입니다.
+- **의도된 제한:** live 모드에서는 브라우저가 webhook을 직접 시뮬레이션하지 못하도록 버튼을 비활성화합니다. 실제 webhook 호출은 HMAC 서명이 필요하고, 서명 secret은 클라이언트에 노출하지 않습니다.
 
 **서빙 구조:** 정적 자산(`frontend/`)은 Nginx가 직접 서빙하고, API 경로(`/reservations`, `/checkouts`, `/webhooks/*`, `/graphql`, `/health`, `/ready` 등)만 Fastify 앱(`127.0.0.1:3000`)으로 프록시합니다. 이렇게 분리하면 앱 서버의 이벤트 루프가 정적 자산 요청으로 점유되지 않고, 정적 자산 응답에만 약한 CSP(`unsafe-eval` 허용 — Babel standalone 런타임 트랜스파일용)가 적용되어 API 응답의 보안 헤더가 끌어내려지지 않습니다.
 
@@ -25,7 +25,7 @@
 
 인지하고 있는 구조적 한계입니다. 실제 운영 환경 적용 시 보강이 필요한 항목:
 
-- `POST /checkouts`, `POST /reservations`는 body의 `userId`를 신뢰. 실제 환경에서는 JWT subject와 대조하거나 body userId를 제거하고 인증 주체에서 파생해야 함
+- `POST /checkouts`, `POST /reservations`는 body의 `userId`를 받지만, 기본 설정은 `ENFORCE_AUTH_USER_MATCH=true`로 JWT subject와 일치 검증을 강제함. 데모 모드(`ENFORCE_AUTH_USER_MATCH=false`)에서만 body userId를 그대로 신뢰함
 - Webhook 서명 검증은 `WEBHOOK_SIGNING_SECRET`이 설정된 경우 HMAC-SHA256으로 수행함. 커스텀 JSON parser가 raw body(Buffer)를 보존해 Provider 원본 바이트에 대한 서명을 검증하며, 타임스탬프 헤더 기반 replay-window 검증은 후속 보강 과제
 - Redis idempotency lock은 처리 중 중복 진입을 줄이는 조정 계층이며, Redis 장애 시 PostgreSQL unique 제약이 최종 데이터 무결성 방어선
 
@@ -39,7 +39,9 @@
 - **Route 53 + Elastic IP**로 고정 도메인 연결.
 - **CSP 분리 정책:** Nginx가 정적 응답에만 Babel runtime 트랜스파일에 필요한 약한 CSP(`'unsafe-eval'` 허용)를 박고, API 응답은 helmet 기본값(`default-src 'self'`)을 유지합니다. 정적 자산 응답에는 `X-Request-ID` 같은 Fastify 미들웨어 헤더가 보이지 않아, 정적 요청이 JWT/rate limit/idempotency 미들웨어를 우회한다는 점이 응답 헤더 자체로 검증됩니다.
 
-`terraform/` 디렉토리에는 ECS Fargate + RDS + ElastiCache 기반 프로덕션급 구성을 별도로 코드화해 두었습니다. 실제 AWS apply는 수행하지 않고 `terraform fmt` · `terraform validate`까지 검증한 상태입니다. 현 데모와 Terraform 구성의 차이는 *"학습 데모 단일 노드"* 와 *"프로덕션 분산 구성"* 의 대비로 의도된 것입니다.
+### 학습 자료로 작성한 추가 구성
+
+`terraform/` 디렉토리는 ECS Fargate + RDS + ElastiCache 기반 분산 구성을 코드화한 학습 자료입니다. 실제 AWS apply는 수행하지 않았고 `terraform fmt`/`terraform validate`까지 검증했습니다. 포트폴리오 가치는 *"분산 구성을 학습 목적으로 모델링한 것"* 이지, 운영 검증이 아닙니다.
 
 ## 프로젝트 목표
 
@@ -49,7 +51,7 @@
 - Redis를 hold TTL, rate limit, idempotency, cache에 실제 사용
 - 동시성 하에서 oversell을 막는 트랜잭션 흐름 구현
 - Docker Compose 기반 로컬 실행 흐름 제공
-- Terraform 기반 AWS 배포 구조 제공
+- Terraform 기반 AWS 분산 구성 모델링 자료 제공
 - k6 기반 부하 테스트 시나리오 제공
 
 ## 핵심 설계
@@ -112,7 +114,7 @@ src/
   infra/      PostgreSQL, Redis, 설정, 로거, 마이그레이션, 시드
 docs/         아키텍처, 정합성, Redis, GraphQL, 운영 문서
 load-test/    k6 부하 테스트 스크립트
-terraform/    AWS 배포용 Terraform 코드
+terraform/    학습용 AWS 분산 구성 Terraform 코드
 ```
 
 ## 빠른 시작
@@ -225,7 +227,7 @@ curl -X POST http://localhost:3000/webhooks/payments/settlement \
 curl -X POST http://localhost:3000/graphql \
   -H "Content-Type: application/json" \
   -H "Authorization: Bearer JWT_TOKEN" \
-  -d '{"query":"query { myOrders(limit: 10) { id status paymentStatus ticketCount totalPrice } myTickets(limit: 10) { id code status } }"}'
+  -d '{"query":"query { myOrders(limit: 10) { id status paymentStatus quantity totalAmount } myTickets(limit: 10) { id ticketNumber status } }"}'
 ```
 
 ## 실제로 확인한 것
@@ -382,6 +384,8 @@ npm run docker:logs
 
 ## Terraform
 
+이 디렉토리는 운영 중인 배포가 아니라 학습 목적으로 작성한 분산 구성 모델입니다. 실제 운영 데모는 EC2 단일 노드 Docker Compose 구성입니다.
+
 기본 순서:
 
 ```bash
@@ -417,7 +421,7 @@ terraform plan
 - settlement webhook 이후 티켓 발급 흐름을 실제로 확인함
 - duplicate settlement webhook에도 중복 발급이 나지 않음을 확인함
 - Docker Compose 기반 로컬 end-to-end 검증까지 수행함
-- Terraform 파일은 존재하지만 로컬 CLI 부재로 재검증은 미실행
+- Terraform은 학습 자료이며 실제 운영 배포 경험으로 주장하지 않음
 
 ## 처음 읽을 때 추천 순서
 
