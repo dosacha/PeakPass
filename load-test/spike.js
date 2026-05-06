@@ -10,11 +10,12 @@ const eventDetailQuery = `
   query EventDetail($id: ID!) {
     event(id: $id) {
       id
-      title
-      date
+      name
+      startsAt
       availableSeats
       pricing {
-        tier
+        tierId
+        name
         price
         seats
       }

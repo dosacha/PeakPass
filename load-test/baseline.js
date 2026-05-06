@@ -10,9 +10,9 @@ const eventsQuery = `
   query BrowseEvents($limit: Int!, $offset: Int!) {
     events(limit: $limit, offset: $offset) {
       id
-      title
-      date
-      capacity
+      name
+      startsAt
+      totalSeats
       availableSeats
     }
   }
@@ -22,10 +22,12 @@ const eventDetailQuery = `
   query EventDetail($id: ID!) {
     event(id: $id) {
       id
-      title
+      name
+      startsAt
       availableSeats
       pricing {
-        tier
+        tierId
+        name
         price
         seats
       }
