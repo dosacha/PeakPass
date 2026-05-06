@@ -396,4 +396,53 @@ describe('concurrency integration tests', () => {
     // 좌석은 차감되지 않아야 함
     expect(await getAvailableSeats(eventId)).toBe(5);
   });
+
+  it(
+    'rejects checkout when same idempotency_key is reused with different payload',
+    async () => {
+      const { eventId, tierId, userIds } = await setupEventAndUsers({
+        seats: 5,
+        userCount: 1,
+      });
+      const idempotencyKey = uuid();
+      const checkoutService = new CheckoutService();
+
+      const firstInput: CheckoutInput = {
+        eventId,
+        userId: userIds[0],
+        quantity: 1,
+        tierId,
+        idempotencyKey,
+      };
+      const firstResult = await serializableTransactionWithRetry((client) =>
+        checkoutService.checkout(firstInput, client),
+      );
+      expect(firstResult.order.quantity).toBe(1);
+
+      // 같은 idempotency_key, 다른 quantity → 409 (ConflictError)
+      const conflictingInput: CheckoutInput = {
+        eventId,
+        userId: userIds[0],
+        quantity: 3,
+        tierId,
+        idempotencyKey,
+      };
+
+      await expect(
+        serializableTransactionWithRetry((client) =>
+          checkoutService.checkout(conflictingInput, client),
+        ),
+      ).rejects.toThrow(ConflictError);
+
+      // 같은 key + 같은 payload는 여전히 idempotent해야 함
+      const idempotentResult = await serializableTransactionWithRetry((client) =>
+        checkoutService.checkout(firstInput, client),
+      );
+      expect(idempotentResult.order.id).toBe(firstResult.order.id);
+
+      // 좌석은 1개만 차감되어 있어야 함
+      expect(await getAvailableSeats(eventId)).toBe(4);
+    },
+    15000,
+  );
 });

@@ -19,6 +19,7 @@ export class OrderService {
         id, user_id as "userId", event_id as "eventId", quantity,
         tier_id as "tierId", unit_price as "unitPrice", total_amount as "totalAmount",
         status, idempotency_key as "idempotencyKey",
+        reservation_id as "reservationId",
         created_at as "createdAt", updated_at as "updatedAt", paid_at as "paidAt"
       FROM orders WHERE id = $1
       `,
@@ -55,7 +56,8 @@ export class OrderService {
    * 멱등성 키로 기존 주문 조회.
    *
    * checkout 흐름에서 advisory lock 획득 직후 호출되어, 동일 키 재시도를
-   * 기존 주문 반환으로 처리한다 (idempotent 응답).
+   * 기존 주문 반환으로 처리한다 (idempotent 응답). 호출자는 새 요청 payload가
+   * 기존 주문과 동일한지 fingerprint 검증을 추가로 수행한다.
    */
   async getOrderByIdempotencyKey(
     idempotencyKey: string,
@@ -67,6 +69,7 @@ export class OrderService {
         id, user_id as "userId", event_id as "eventId", quantity,
         tier_id as "tierId", unit_price as "unitPrice", total_amount as "totalAmount",
         status, idempotency_key as "idempotencyKey",
+        reservation_id as "reservationId",
         created_at as "createdAt", updated_at as "updatedAt", paid_at as "paidAt"
       FROM orders WHERE idempotency_key = $1
       `,

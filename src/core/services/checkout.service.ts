@@ -24,6 +24,7 @@ export interface CheckoutResult {
  *
  * 이 서비스의 책임:
  *   - 동일 idempotency_key 동시 진입을 advisory lock으로 직렬화
+ *   - 동일 idempotency_key 재사용 시 payload fingerprint 일치 검증
  *   - reservation 경유 시 reservation 검증+converted 전환을 atomic UPDATE로 처리
  *   - event 행을 FOR UPDATE로 잠그고 tier/가격 검증
  *   - order INSERT, payment_record INSERT(pending), 좌석 차감/이전
@@ -48,12 +49,6 @@ export class CheckoutService {
     //   (23505)으로 깨지고, retry 대상도 아니므로 500으로 새어나간다.
     //
     // 해결: pg_advisory_xact_lock으로 idempotency_key 단위 mutual exclusion.
-    //   - hashtext: 64-bit hash, 충돌 가능성 무시 가능
-    //   - xact_lock: 트랜잭션 종료 시 자동 해제, 별도 release 필요 없음
-    //   - 늦게 도착한 트랜잭션은 lock을 기다린 후 SELECT에서 기존 order 발견
-    //
-    // 결과: 23505 race window 자체가 제거되어 idempotent 응답이 일관되게 나간다.
-    // DB UNIQUE constraint는 여전히 schema-level backup으로 남는다.
     await client.query(
       `SELECT pg_advisory_xact_lock(hashtext($1))`,
       [input.idempotencyKey],
@@ -64,6 +59,39 @@ export class CheckoutService {
       client,
     );
     if (existingOrder) {
+      // Idempotency-Key 재사용 시 payload fingerprint 검증.
+      //
+      // 같은 key로 *다른* payload가 들어오는 건 의도된 멱등성이 아니다 (key 재사용 사고
+      // 또는 악의적 우회 시도). 이 경우 기존 주문을 그대로 반환하면 클라이언트가 보낸
+      // 의도와 다른 응답이 나가므로 더 위험하다 — 명시적으로 409로 거부한다.
+      //
+      // 비교 대상은 checkout의 결정요소(누가/무엇을/얼마나/어떤 reservation 기반인지)에
+      // 한정. unit_price/total_amount는 server-side 계산이므로 입력으로 비교하지 않는다.
+      const reservationMismatch =
+        (existingOrder.reservationId ?? null) !== (input.reservationId ?? null);
+      if (
+        existingOrder.userId !== input.userId ||
+        existingOrder.eventId !== input.eventId ||
+        existingOrder.tierId !== input.tierId ||
+        existingOrder.quantity !== input.quantity ||
+        reservationMismatch
+      ) {
+        this.logger.warn(
+          {
+            idempotencyKey: input.idempotencyKey,
+            existingOrderId: existingOrder.id,
+            existingUserId: existingOrder.userId,
+            requestedUserId: input.userId,
+            existingEventId: existingOrder.eventId,
+            requestedEventId: input.eventId,
+          },
+          'Idempotency-Key reused with different payload',
+        );
+        throw new ConflictError(
+          'Idempotency-Key reused with a different request payload',
+        );
+      }
+
       this.logger.warn(
         { idempotencyKey: input.idempotencyKey },
         'Duplicate checkout request detected',
@@ -80,26 +108,23 @@ export class CheckoutService {
     //   - UPDATE ... WHERE status='active' AND expires_at > NOW() RETURNING은
     //     row lock + 조건 검증 + 상태 전환을 한 쿼리로 묶는다.
     //   - affected = 0이면 invalid (released/expired/만료시간 초과/payload mismatch).
-    //
-    // reservation 단계에서 좌석은 이미 차감되어 있으므로 checkout은 좌석을 *추가 차감하지 않는다*.
     let seatsAlreadyHeld = false;
     if (input.reservationId) {
       const convertResult = await client.query(
         `UPDATE reservations
-        SET status = 'converted'
-        WHERE id = $1
-          AND user_id = $2
-          AND event_id = $3
-          AND tier_id = $4
-          AND quantity = $5
-          AND status = 'active'
-          AND expires_at > NOW()
-        RETURNING id, user_id, event_id, tier_id, quantity`,
+         SET status = 'converted'
+         WHERE id = $1
+           AND user_id = $2
+           AND event_id = $3
+           AND tier_id = $4
+           AND quantity = $5
+           AND status = 'active'
+           AND expires_at > NOW()
+         RETURNING id, user_id, event_id, tier_id, quantity`,
         [input.reservationId, input.userId, input.eventId, input.tierId, input.quantity],
       );
 
       if (convertResult.rowCount === 0) {
-        // 정확한 사유 분기
         const reservationCheck = await client.query(
           `SELECT user_id, event_id, tier_id, quantity, status, expires_at FROM reservations WHERE id = $1`,
           [input.reservationId],
@@ -112,7 +137,6 @@ export class CheckoutService {
           await this.reservationService.expireReservationWithClient(input.reservationId, client);
           throw new ConflictError('Reservation has expired or is no longer valid');
         }
-        // 여기까지 오면 payload mismatch
         this.logger.warn(
           {
             reservationId: input.reservationId,
@@ -141,14 +165,12 @@ export class CheckoutService {
       id: string;
       pricing: Array<{ id: string; price: number }>;
     }>(
-      `
-      SELECT
-        id,
-        pricing::jsonb as "pricing"
-      FROM events
-      WHERE id = $1
-      FOR UPDATE
-      `,
+      `SELECT
+         id,
+         pricing::jsonb as "pricing"
+       FROM events
+       WHERE id = $1
+       FOR UPDATE`,
       [input.eventId],
     );
 
@@ -158,9 +180,6 @@ export class CheckoutService {
 
     const event = eventResult.rows[0];
 
-    // tier_id가 event.pricing 안에 존재하는지 검증.
-    // reservation 경로에서도 reservation service가 진입 시점에 같은 검증을 수행하지만,
-    // direct checkout (no reservation) 경로는 여기서만 검증된다.
     const tier = event.pricing.find((candidate) => candidate.id === input.tierId);
     if (!tier) {
       throw new ValidationError(`Pricing tier not found: ${input.tierId}`);
@@ -181,18 +200,16 @@ export class CheckoutService {
 
     const orderId = uuid();
     const orderResult = await client.query<Order>(
-      `
-      INSERT INTO orders (
-        id, user_id, event_id, quantity, tier_id, unit_price, total_amount,
-        idempotency_key, reservation_id, status
-      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, 'pending')
-      RETURNING
-        id, user_id as "userId", event_id as "eventId", quantity,
-        tier_id as "tierId", unit_price as "unitPrice", total_amount as "totalAmount",
-        status, idempotency_key as "idempotencyKey",
-        reservation_id as "reservationId",
-        created_at as "createdAt", updated_at as "updatedAt"
-      `,
+      `INSERT INTO orders (
+         id, user_id, event_id, quantity, tier_id, unit_price, total_amount,
+         idempotency_key, reservation_id, status
+       ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, 'pending')
+       RETURNING
+         id, user_id as "userId", event_id as "eventId", quantity,
+         tier_id as "tierId", unit_price as "unitPrice", total_amount as "totalAmount",
+         status, idempotency_key as "idempotencyKey",
+         reservation_id as "reservationId",
+         created_at as "createdAt", updated_at as "updatedAt"`,
       [
         orderId,
         input.userId,
@@ -208,10 +225,6 @@ export class CheckoutService {
 
     const order = orderResult.rows[0];
 
-    // 좌석 차감도 직접 checkout 경로에서만 한다.
-    // reservation 경로의 좌석 점유는 그대로 order의 점유로 이전된다.
-    // (events row는 위쪽 SELECT FOR UPDATE 시점에 이미 잠겨 있으므로
-    //  여기서의 adjustAvailableSeats는 같은 트랜잭션의 lock을 재사용한다.)
     if (!seatsAlreadyHeld) {
       const newAvailable = await this.inventory.adjustAvailableSeats(
         input.eventId,
@@ -242,10 +255,8 @@ export class CheckoutService {
 
     const paymentRecordId = uuid();
     await client.query(
-      `
-      INSERT INTO payment_records (id, order_id, status, idempotency_key)
-      VALUES ($1, $2, 'pending', $3)
-      `,
+      `INSERT INTO payment_records (id, order_id, status, idempotency_key)
+       VALUES ($1, $2, 'pending', $3)`,
       [paymentRecordId, orderId, input.idempotencyKey],
     );
 
