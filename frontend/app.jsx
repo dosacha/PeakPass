@@ -38,20 +38,29 @@ function createMockServer() {
     }
     if (query.includes("ticketByCode")) {
       for (const list of tickets.values()) {
-        const t = list.find(x => x.code === variables.code);
+        const t = list.find(x => x.ticketNumber === variables.code);
         if (t) {
-          const order = orders.get(t.orderId);
           return {
             ok: true, status: 200,
             data: { data: { ticketByCode: {
-              id: t.id, code: t.code, status: t.status, issuedAt: t.issuedAt,
-              event: { id: t.eventId, title: t.eventTitle },
-              order: { id: order.id, status: order.status, paymentStatus: order.paymentStatus, ticketCount: list.length, totalPrice: order.totalPrice }
+              valid: t.status === "active" || t.status === "ISSUED",
+              status: t.status,
+              ticketNumber: t.ticketNumber,
+              eventName: t.eventName,
+              startsAt: t.startsAt,
+              endsAt: t.endsAt
             } } }
           };
         }
       }
-      return { ok: true, status: 200, data: { data: { ticketByCode: null } } };
+      return { ok: true, status: 200, data: { data: { ticketByCode: {
+        valid: false,
+        status: "not_found",
+        ticketNumber: variables.code,
+        eventName: null,
+        startsAt: null,
+        endsAt: null
+      } } } };
     }
     return { ok: true, status: 200, data: { data: {} } };
   }
@@ -78,7 +87,7 @@ function createMockServer() {
     const total = (tier?.price || 0) * body.quantity;
     const order = {
       id: orderId, userId: body.userId, eventId: body.eventId, tierId: body.tierId,
-      quantity: body.quantity, totalPrice: total,
+      quantity: body.quantity, totalAmount: total,
       status: "PENDING", paymentStatus: "PENDING",
       reservationId: body.reservationId, createdAt: new Date().toISOString()
     };
@@ -117,9 +126,10 @@ function createMockServer() {
         Math.random().toString(36).slice(2, 6).toUpperCase();
       issued.push({
         id: "tk_" + Math.random().toString(36).slice(2, 12).toUpperCase(),
-        code, ticketNumber: code,
-        orderId: order.id, eventId: order.eventId, eventTitle: event?.title,
-        tier: tier?.tier, seat: `${String.fromCharCode(65 + i)}-${10 + i}`,
+        ticketNumber: code,
+        orderId: order.id, eventId: order.eventId, eventName: event?.name,
+        startsAt: event?.startsAt, endsAt: event?.endsAt,
+        tier: tier?.name, seat: `${String.fromCharCode(65 + i)}-${10 + i}`,
         status: "ISSUED", issuedAt: new Date().toISOString()
       });
     }
@@ -255,7 +265,7 @@ const App = () => {
     step1: async () => {
       setStep("s1", "running"); setActiveStep(1);
       const query = `query Events($limit: Int, $offset: Int) {
-  events(limit: $limit, offset: $offset) { id title description date capacity availableSeats pricing { tier price seats } }
+  events(limit: $limit, offset: $offset) { id name description startsAt totalSeats availableSeats pricing { tierId name price seats } }
 }`;
       const res = await api.graphql(query, { limit: 10, offset: 0 });
       logReq({ method: "GQL", url: "/graphql · events", status: res.status, elapsed: res.elapsed || 200,
@@ -306,6 +316,7 @@ const App = () => {
 
     step5: async () => {
       if (!order) return;
+      if (mode === "live") return;
       setStep("s5", "running"); setActiveStep(5);
       actions.gotoStep(5);
       const key = settlementIdemKey || uuid();
@@ -320,12 +331,13 @@ const App = () => {
         setSettlement(res.data);
         setTiming("s5", res.elapsed || 200);
         setStep("s5", "done");
-        if (res.data?.tickets?.[0]?.code) setLookupCode(res.data.tickets[0].code);
+        if (res.data?.tickets?.[0]?.ticketNumber) setLookupCode(res.data.tickets[0].ticketNumber);
       } else setStep("s5", "error");
     },
 
     runDupReplay: async () => {
       if (!order || !settlementIdemKey) return;
+      if (mode === "live") return;
       setStep("s6", "running"); setActiveStep(6);
       const body = { orderId: order.order.id, providerTransactionId: providerTxnId, status: "settled" };
       const res = await api.settlement(body, settlementIdemKey);
@@ -337,6 +349,7 @@ const App = () => {
 
     runDupSemantic: async () => {
       if (!order) return;
+      if (mode === "live") return;
       setStep("s6", "running"); setActiveStep(6);
       const newKey = uuid();
       const body = { orderId: order.order.id, providerTransactionId: providerTxnId, status: "settled" };
@@ -351,7 +364,7 @@ const App = () => {
       if (!lookupCode) return;
       setStep("s7", "running"); setActiveStep(7);
       actions.gotoStep(7);
-      const query = `query TicketByCode($code: String!) { ticketByCode(code: $code) { id code status issuedAt event { id title } order { id status paymentStatus ticketCount totalPrice } } }`;
+      const query = `query TicketByCode($code: String!) { ticketByCode(code: $code) { valid status ticketNumber eventName startsAt endsAt } }`;
       const res = await api.graphql(query, { code: lookupCode });
       logReq({ method: "GQL", url: "/graphql · ticketByCode", status: res.status, elapsed: res.elapsed || 200,
                request: { query, variables: { code: lookupCode } }, response: res.data });
@@ -363,6 +376,7 @@ const App = () => {
     },
 
     runAll: async () => {
+      if (mode === "live") return;
       actions.reset();
       await new Promise(r => setTimeout(r, 100));
       await actions.step1();
@@ -401,7 +415,7 @@ const App = () => {
       logReq({ method:"POST", url:"/webhooks/payments/settlement", idemKey:k5, status:r5.status, elapsed:r5.elapsed||200, request: body5, response: r5.data });
       if (!r5.ok) { setStep("s5","error"); return; }
       setSettlement(r5.data); setTiming("s5", r5.elapsed||200); setStep("s5","done");
-      const code = r5.data?.tickets?.[0]?.code;
+      const code = r5.data?.tickets?.[0]?.ticketNumber;
       if (code) setLookupCode(code);
       setActiveStep(6); setExpandedSteps(p => ({ ...p, s6: true }));
       await new Promise(r => setTimeout(r, 400));
@@ -423,7 +437,7 @@ const App = () => {
 
       // step 7
       if (code) {
-        const query = `query TicketByCode($code: String!) { ticketByCode(code: $code) { id code status issuedAt event { id title } order { id status paymentStatus ticketCount totalPrice } } }`;
+        const query = `query TicketByCode($code: String!) { ticketByCode(code: $code) { valid status ticketNumber eventName startsAt endsAt } }`;
         setStep("s7","running");
         const r7 = await api.graphql(query, { code });
         logReq({ method:"GQL", url:"/graphql · ticketByCode", status:r7.status, elapsed:r7.elapsed||200, request: { query, variables: { code } }, response: r7.data });

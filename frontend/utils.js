@@ -39,7 +39,7 @@ window.fmtDate = (iso) => {
 };
 
 window.fmtKRW = (n) => {
-  // 화폐 값은 백엔드에서 string으로 들어올 수 있다 (예: GraphQL totalPrice: String!).
+  // 화폐 값은 백엔드에서 string으로 들어올 수 있다 (예: GraphQL totalAmount: String!).
   // string "0.00"이 들어와도 "무료" 분기를 정확히 타도록 Number 변환 후 비교한다.
   const num = Number(n);
   if (num === 0) return "무료";

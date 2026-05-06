@@ -4,13 +4,13 @@ const { useState: useStateF, useEffect: useEffectF, useMemo: useMemoF, useRef: u
 
 // ---------- Ticket card ----------
 const TicketCard = ({ ticket, event }) => {
-  const cells = qrPattern(ticket.code || ticket.ticketNumber || "");
+  const cells = qrPattern(ticket.ticketNumber || "");
   return (
     <div className="ticket">
       <div>
-        <div className="t-event">ISSUED · {event?.title?.split("—")[0]?.trim() || "Event"}</div>
-        <div className="t-title">{event?.title || "Ticket"}</div>
-        <div className="t-code">{ticket.code || ticket.ticketNumber}</div>
+        <div className="t-event">ISSUED · {event?.name?.split("—")[0]?.trim() || "Event"}</div>
+        <div className="t-title">{event?.name || "Ticket"}</div>
+        <div className="t-code">{ticket.ticketNumber}</div>
         <div className="t-meta">
           {ticket.tier} · {ticket.seat || "자유석"} · {fmtDate(ticket.issuedAt)}
         </div>
@@ -65,6 +65,7 @@ const DemoFlow = ({ state, actions }) => {
   const orderStatus = order?.order?.status;
   const paymentStatus = settlement?.paymentStatus || settlement?.order?.paymentStatus;
   const tickets = settlement?.tickets || order?.tickets || [];
+  const liveWebhookDisabled = mode === "live";
 
   const pct = Math.round((Object.values(stepStatus).filter(s => s === "done").length / 7) * 100);
 
@@ -90,7 +91,7 @@ const DemoFlow = ({ state, actions }) => {
               <button className="btn btn-ghost" onClick={actions.reset} style={{color:"#dfe8f2"}}>
                 <Icon name="reset" size={13}/> Reset
               </button>
-              <button className="btn btn-warn" onClick={actions.runAll}>
+              <button className="btn btn-warn" onClick={actions.runAll} disabled={liveWebhookDisabled}>
                 <Icon name="play" size={12}/> Run Full Demo
               </button>
             </div>
@@ -112,8 +113,8 @@ const DemoFlow = ({ state, actions }) => {
             <div className="json-block" style={{maxHeight:160}}>
 {`query Events($limit: Int, $offset: Int) {
   events(limit: $limit, offset: $offset) {
-    id title description date capacity availableSeats
-    pricing { tier price seats }
+    id name description startsAt totalSeats availableSeats
+    pricing { tierId name price seats }
   }
 }`}
             </div>
@@ -128,16 +129,16 @@ const DemoFlow = ({ state, actions }) => {
                   <div className="field-label">응답 · {events.length}개 이벤트</div>
                   <div className="event-grid" style={{marginTop:8}}>
                     {events.map(ev => {
-                      const ratio = ev.availableSeats / ev.capacity;
+                      const ratio = ev.availableSeats / ev.totalSeats;
                       const cls = ratio < 0.1 ? "crit" : ratio < 0.3 ? "low" : "";
                       return (
                         <div key={ev.id}
                              className={`event-card ${selectedEventId === ev.id ? "selected" : ""}`}
                              onClick={() => actions.selectEvent(ev.id)}>
-                          <div className="event-date">{fmtDate(ev.date)}</div>
-                          <div className="event-title">{ev.title}</div>
+                          <div className="event-date">{fmtDate(ev.startsAt)}</div>
+                          <div className="event-title">{ev.name}</div>
                           <div className="event-meta">
-                            <span>{ev.availableSeats.toLocaleString()} / {ev.capacity.toLocaleString()} 좌석</span>
+                            <span>{ev.availableSeats.toLocaleString()} / {ev.totalSeats.toLocaleString()} 좌석</span>
                             <span>{ev.pricing.length} tiers</span>
                           </div>
                           <div className="capacity-bar"><div className={`fill ${cls}`} style={{width: `${ratio * 100}%`}}/></div>
@@ -164,9 +165,9 @@ const DemoFlow = ({ state, actions }) => {
               <>
                 <div className="field-block" style={{marginTop:8}}>
                   <div className="field-label">Selected Event</div>
-                  <div style={{fontFamily:"var(--font-display)", fontWeight:500, fontSize:17}}>{selectedEvent.title}</div>
+                  <div style={{fontFamily:"var(--font-display)", fontWeight:500, fontSize:17}}>{selectedEvent.name}</div>
                   <div style={{fontFamily:"var(--font-mono)", fontSize:11.5, color:"var(--muted)"}}>
-                    {selectedEvent.id} · {fmtDate(selectedEvent.date)}
+                    {selectedEvent.id} · {fmtDate(selectedEvent.startsAt)}
                   </div>
                 </div>
 
@@ -177,7 +178,7 @@ const DemoFlow = ({ state, actions }) => {
                       <div key={p.tierId}
                            className={`tier-card ${selectedTierId === p.tierId ? "selected" : ""}`}
                            onClick={() => actions.selectTier(p.tierId)}>
-                        <div className="tier-name">{p.tier}</div>
+                        <div className="tier-name">{p.name}</div>
                         <div className="tier-price">{fmtKRW(p.price)}</div>
                         <div className="tier-sub">정원 {p.seats.toLocaleString()}석</div>
                       </div>
@@ -310,7 +311,7 @@ const DemoFlow = ({ state, actions }) => {
                 </div>
                 <div className="rb-stat">
                   <div className="stat"><div className="n" style={{color:"var(--red)"}}>0</div><div className="l">tickets</div></div>
-                  <div className="stat"><div className="n">{order.order?.totalPrice ? fmtKRW(order.order.totalPrice) : "—"}</div><div className="l">total</div></div>
+                  <div className="stat"><div className="n">{order.order?.totalAmount ? fmtKRW(order.order.totalAmount) : "—"}</div><div className="l">total</div></div>
                 </div>
               </div>
             )}
@@ -329,6 +330,11 @@ const DemoFlow = ({ state, actions }) => {
             <div style={{fontSize:13, color:"var(--ink-2)"}}>
               PG사가 보낸 정산 webhook을 처리합니다. 이 시점에만 <code style={{fontFamily:"var(--font-mono)"}}>tickets</code>가 생성됩니다.
             </div>
+            {liveWebhookDisabled && (
+              <div className="field-hint" style={{marginTop:8}}>
+                Live mode disables browser-triggered webhooks. Real webhook calls require an HMAC signature, and the signing secret must never be exposed to the client. Use mock mode for this step.
+              </div>
+            )}
             <div className="idem-ribbon">
               <span className="label">Idempotency-Key</span>
               <span className="key">{settlementIdemKey || "— 실행 시 생성"}</span>
@@ -352,7 +358,7 @@ const DemoFlow = ({ state, actions }) => {
             </div>
             <div className="btn-row" style={{marginTop:12}}>
               <button className="btn btn-danger" onClick={actions.step5}
-                      disabled={!order || stepStatus.s5 === "running"}>
+                      disabled={!order || stepStatus.s5 === "running" || liveWebhookDisabled}>
                 <Icon name="play" size={11}/> POST /webhooks/payments/settlement
               </button>
             </div>
@@ -397,7 +403,7 @@ const DemoFlow = ({ state, actions }) => {
                   동일 <code style={{fontFamily:"var(--font-mono)"}}>Idempotency-Key</code>와 동일 body. Redis의 idempotency cache가 저장해 둔 기존 응답을 그대로 반환합니다.
                 </div>
                 <button className="btn btn-secondary" onClick={actions.runDupReplay}
-                        disabled={!settlement || stepStatus.s6 === "running"}>
+                        disabled={!settlement || stepStatus.s6 === "running" || liveWebhookDisabled}>
                   <Icon name="play" size={11}/> Replay webhook
                 </button>
                 {duplicateReplay && (
@@ -419,7 +425,7 @@ const DemoFlow = ({ state, actions }) => {
                   <b>새로운</b> Idempotency-Key지만 동일 <code style={{fontFamily:"var(--font-mono)"}}>orderId / providerTransactionId</code>. Redis 캐시를 지나가더라도 DB <code style={{fontFamily:"var(--font-mono)"}}>UNIQUE(provider_txn_id)</code> 위반으로 방어됩니다.
                 </div>
                 <button className="btn btn-secondary" onClick={actions.runDupSemantic}
-                        disabled={!settlement || stepStatus.s6 === "running"}>
+                        disabled={!settlement || stepStatus.s6 === "running" || liveWebhookDisabled}>
                   <Icon name="play" size={11}/> Semantic duplicate
                 </button>
                 {duplicateSemantic && (
@@ -450,9 +456,12 @@ const DemoFlow = ({ state, actions }) => {
             <div className="json-block" style={{maxHeight:180}}>
 {`query TicketByCode($code: String!) {
   ticketByCode(code: $code) {
-    id code status issuedAt
-    event { id title }
-    order { id status paymentStatus ticketCount totalPrice }
+    valid
+    status
+    ticketNumber
+    eventName
+    startsAt
+    endsAt
   }
 }`}
             </div>
@@ -466,7 +475,7 @@ const DemoFlow = ({ state, actions }) => {
                 <Icon name="play" size={11}/> Query ticketByCode
               </button>
               {tickets.length > 0 && (
-                <button className="btn btn-ghost" onClick={() => actions.setLookupCode(tickets[0].code)}>
+                <button className="btn btn-ghost" onClick={() => actions.setLookupCode(tickets[0].ticketNumber)}>
                   <Icon name="copy" size={11}/> 발급된 코드 사용
                 </button>
               )}
@@ -497,8 +506,8 @@ const DemoFlow = ({ state, actions }) => {
 const StateInspector = ({ state }) => {
   const rows = [
     ["mode", state.mode.toUpperCase()],
-    ["selectedEvent", state.events?.find(e => e.id === state.selectedEventId)?.title || "—"],
-    ["selectedTier", state.events?.find(e => e.id === state.selectedEventId)?.pricing?.find(p => p.tierId === state.selectedTierId)?.tier || "—"],
+    ["selectedEvent", state.events?.find(e => e.id === state.selectedEventId)?.name || "—"],
+    ["selectedTier", state.events?.find(e => e.id === state.selectedEventId)?.pricing?.find(p => p.tierId === state.selectedTierId)?.name || "—"],
     ["userId", state.userId || "—"],
     ["quantity", state.quantity],
     ["reservationId", state.reservation?.id || "—"],
@@ -510,7 +519,7 @@ const StateInspector = ({ state }) => {
     ["settlementIdempotencyKey", state.settlementIdemKey ? fmtShort(state.settlementIdemKey, 16) : "—"],
     ["providerTransactionId", state.providerTxnId || "—"],
     ["ticketCount", (state.settlement?.tickets || state.order?.tickets || []).length],
-    ["ticketCodes", ((state.settlement?.tickets || []).map(t => t.code).join(", ")) || "—"],
+    ["ticketNumbers", ((state.settlement?.tickets || []).map(t => t.ticketNumber).join(", ")) || "—"],
     ["duplicateResult", state.duplicateReplay || state.duplicateSemantic ? "unchanged ✓" : "—"],
   ];
   const highlightKeys = ["orderStatus", "paymentStatus", "ticketCount"];
