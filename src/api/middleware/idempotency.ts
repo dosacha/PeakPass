@@ -68,9 +68,9 @@ export async function idempotencyMiddleware(
     return sendCachedResult(reply, idempotencyKey, cachedResult);
   }
 
-  let lockAcquired: boolean;
+  let lockToken: string | null;
   try {
-    lockAcquired = await tryAcquireIdempotencyLock(idempotencyKey);
+    lockToken = await tryAcquireIdempotencyLock(idempotencyKey);
   } catch (err) {
     logger.warn(
       { err, idempotencyKey },
@@ -80,7 +80,7 @@ export async function idempotencyMiddleware(
     return;
   }
 
-  if (!lockAcquired) {
+  if (!lockToken) {
     await sleep(IN_PROGRESS_RECHECK_DELAY_MS);
 
     const completedResult = await getIdempotencyResult(idempotencyKey);
@@ -98,7 +98,7 @@ export async function idempotencyMiddleware(
   }
 
   request.idempotencyKey = idempotencyKey;
-  request.idempotencyLockAcquired = true;
+  request.idempotencyLockToken = lockToken;
 }
 
 export async function storeIdempotencyResult(
@@ -122,6 +122,6 @@ export async function storeIdempotencyResult(
 declare module 'fastify' {
   interface FastifyRequest {
     idempotencyKey?: string;
-    idempotencyLockAcquired?: boolean;
+    idempotencyLockToken?: string;
   }
 }

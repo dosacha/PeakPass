@@ -70,8 +70,8 @@ export async function registerCheckoutRoutes(app: FastifyInstance) {
 
       return reply.code(201).send(orderResult);
     } finally {
-      if (request.idempotencyLockAcquired && request.idempotencyKey) {
-        await releaseIdempotencyLock(request.idempotencyKey);
+      if (request.idempotencyLockToken && request.idempotencyKey) {
+        await releaseIdempotencyLock(request.idempotencyKey, request.idempotencyLockToken);
       }
     }
   });

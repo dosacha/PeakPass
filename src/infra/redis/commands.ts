@@ -1,3 +1,4 @@
+import { randomUUID } from 'crypto';
 import { getRedis, redisKeys } from './client';
 import { getLogger } from '../logger';
 
@@ -102,12 +103,11 @@ export async function checkRateLimit(
   failMode: 'open' | 'closed' = 'closed',
 ): Promise<{ allowed: boolean; count: number; resetAt: number; redisAvailable: boolean }> {
   const redis = getRedis();
-  const key =
-    action === 'checkout'
-      ? redisKeys.rateLimitCheckout(userId)
-      : action === 'reservation'
-        ? redisKeys.rateLimitReservation(userId)
-        : redisKeys.rateLimitWebhook(userId);
+  const key = action === 'checkout'
+    ? redisKeys.rateLimitCheckout(userId)
+    : action === 'reservation'
+      ? redisKeys.rateLimitReservation(userId)
+      : redisKeys.rateLimitWebhook(userId);
 
   try {
     const now = Date.now();
@@ -151,13 +151,14 @@ export async function setIdempotencyResult(
     await redis.setEx(key, ttlSeconds, JSON.stringify(result));
     logger.debug({ idempotencyKey }, 'Idempotency result cached');
   } catch (err) {
-    logger.warn({ err }, 'Failed to cache idempotency result');
+    logger.warn({ err }, 'Failed to set idempotency result');
   }
 }
 
 /**
- * 캐시된 멱등성 결과 조회
+ * 멱등성 결과 조회
  * @param idempotencyKey
+ * @returns 캐시된 결과 또는 누락 시 null
  */
 export async function getIdempotencyResult(
   idempotencyKey: string,
@@ -168,34 +169,64 @@ export async function getIdempotencyResult(
   try {
     const data = await redis.get(key);
     if (!data) return null;
-    logger.debug({ idempotencyKey }, 'Idempotency hit (cached result)');
-    return safeJsonParse<Record<string, unknown> | null>(data, null);
+    return safeJsonParse(data, null);
   } catch (err) {
     logger.warn({ err }, 'Failed to get idempotency result');
     return null;
   }
 }
 
+/**
+ * 멱등성 lock 획득 시도. owner token을 value로 저장한다.
+ *
+ * 반환값:
+ *   - 성공: token (이후 release 시 owner 검증용)
+ *   - 실패 (다른 요청이 이미 보유): null
+ *
+ * token을 두는 이유:
+ *   - TTL 만료 후 다른 요청이 같은 key의 lock을 잡은 상태에서
+ *     원래 요청이 release를 호출하면, 단순 DEL은 다른 요청의 lock을
+ *     잘못 삭제하게 된다 (lock 분실 사고).
+ *   - releaseIdempotencyLock에서 Lua script로 token을 비교한 후에만
+ *     DEL을 실행하므로, owner가 아닌 release 호출은 무해한 no-op이 된다.
+ */
 export async function tryAcquireIdempotencyLock(
   idempotencyKey: string,
   ttlSeconds: number = REDIS_TTL.IDEMPOTENCY_LOCK,
-): Promise<boolean> {
+): Promise<string | null> {
   const redis = getRedis();
   const key = redisKeys.idempotencyLock(idempotencyKey);
-  const result = await redis.set(key, 'processing', {
+  const token = randomUUID();
+  const result = await redis.set(key, token, {
     NX: true,
     EX: ttlSeconds,
   });
 
-  return result === 'OK';
+  return result === 'OK' ? token : null;
 }
 
-export async function releaseIdempotencyLock(idempotencyKey: string): Promise<void> {
+/**
+ * 멱등성 lock 해제. token이 현재 보유자와 일치하는 경우에만 삭제한다.
+ *
+ * Lua script로 GET + DEL을 atomic하게 묶어 race condition을 막는다:
+ *   - GET 후 외부에서 DEL 사이에 TTL 만료 + 다른 요청 SET이 발생할 수 있음
+ *   - script는 단일 atomic 단계로 실행되므로 그 race 자체가 발생하지 않는다.
+ */
+export async function releaseIdempotencyLock(
+  idempotencyKey: string,
+  token: string,
+): Promise<void> {
   const redis = getRedis();
   const key = redisKeys.idempotencyLock(idempotencyKey);
 
   try {
-    await redis.del(key);
+    await redis.eval(
+      `if redis.call("get", KEYS[1]) == ARGV[1] then return redis.call("del", KEYS[1]) else return 0 end`,
+      {
+        keys: [key],
+        arguments: [token],
+      },
+    );
   } catch (err) {
     logger.warn({ err, idempotencyKey }, 'Failed to release idempotency lock');
   }
@@ -214,15 +245,17 @@ export async function setInventoryCount(
   const key = redisKeys.inventoryCount(eventId);
 
   try {
-    await redis.setEx(key, ttlSeconds, JSON.stringify({ count, updatedAt: new Date().toISOString() }));
-    logger.debug({ eventId, count }, 'Inventory count cached');
+    await redis.setEx(key, ttlSeconds, String(count));
+    logger.debug({ eventId, count, ttlSeconds }, 'Inventory count cached');
   } catch (err) {
     logger.warn({ err }, 'Failed to cache inventory count');
   }
 }
 
 /**
- * 캐시된 재고 수량 조회
+ * 재고 수량 조회
+ * @param eventId
+ * @returns 캐시된 수량 또는 누락 시 null
  */
 export async function getInventoryCount(eventId: string): Promise<number | null> {
   const redis = getRedis();
@@ -231,8 +264,8 @@ export async function getInventoryCount(eventId: string): Promise<number | null>
   try {
     const data = await redis.get(key);
     if (!data) return null;
-    const parsed = safeJsonParse(data, { count: null });
-    return parsed.count;
+    const count = parseInt(data, 10);
+    return Number.isNaN(count) ? null : count;
   } catch (err) {
     logger.warn({ err }, 'Failed to get inventory count');
     return null;
@@ -241,7 +274,7 @@ export async function getInventoryCount(eventId: string): Promise<number | null>
 
 /**
  * 이벤트 캐시 무효화
- * 체크아웃 후 데이터 최신 유지용
+ * 재고 변경 후 호출됨
  */
 export async function invalidateEventCache(eventId: string): Promise<void> {
   const redis = getRedis();
@@ -255,19 +288,5 @@ export async function invalidateEventCache(eventId: string): Promise<void> {
     logger.debug({ eventId }, 'Event cache invalidated');
   } catch (err) {
     logger.warn({ err }, 'Failed to invalidate event cache');
-  }
-}
-
-/**
- * 모든 이벤트 목록 캐시 정리
- */
-export async function invalidateEventsList(): Promise<void> {
-  const redis = getRedis();
-
-  try {
-    await redis.del(redisKeys.eventsList());
-    logger.debug('Events list cache invalidated');
-  } catch (err) {
-    logger.warn({ err }, 'Failed to invalidate events list');
   }
 }

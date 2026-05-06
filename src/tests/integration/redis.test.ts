@@ -151,18 +151,42 @@ describe('Redis 통합 테스트', () => {
     it('allows only one in-flight idempotency lock holder', async () => {
       const idempotencyKey = uuid();
 
-      const firstAcquire = await tryAcquireIdempotencyLock(idempotencyKey, 5);
-      const secondAcquire = await tryAcquireIdempotencyLock(idempotencyKey, 5);
+      const firstToken = await tryAcquireIdempotencyLock(idempotencyKey, 5);
+      const secondToken = await tryAcquireIdempotencyLock(idempotencyKey, 5);
 
-      expect(firstAcquire).toBe(true);
-      expect(secondAcquire).toBe(false);
+      expect(firstToken).toBeTruthy();
+      expect(secondToken).toBeNull();
 
-      await releaseIdempotencyLock(idempotencyKey);
+      await releaseIdempotencyLock(idempotencyKey, firstToken!);
 
-      const acquireAfterRelease = await tryAcquireIdempotencyLock(idempotencyKey, 5);
-      expect(acquireAfterRelease).toBe(true);
+      const tokenAfterRelease = await tryAcquireIdempotencyLock(idempotencyKey, 5);
+      expect(tokenAfterRelease).toBeTruthy();
 
-      await releaseIdempotencyLock(idempotencyKey);
+      await releaseIdempotencyLock(idempotencyKey, tokenAfterRelease!);
+    });
+
+    it('release with stale token does not delete an active lock (owner fencing)', async () => {
+      const idempotencyKey = uuid();
+
+      // A가 lock 획득
+      const tokenA = await tryAcquireIdempotencyLock(idempotencyKey, 30);
+      expect(tokenA).toBeTruthy();
+
+      // 가짜 token으로 release 시도 → no-op이어야 함
+      await releaseIdempotencyLock(idempotencyKey, 'stale-token-from-elsewhere');
+
+      // A의 lock은 여전히 살아있어야 함 → 다른 acquire는 null
+      const tokenB = await tryAcquireIdempotencyLock(idempotencyKey, 30);
+      expect(tokenB).toBeNull();
+
+      // 정상 token으로 release
+      await releaseIdempotencyLock(idempotencyKey, tokenA!);
+
+      // 이제 acquire 가능
+      const tokenC = await tryAcquireIdempotencyLock(idempotencyKey, 30);
+      expect(tokenC).toBeTruthy();
+
+      await releaseIdempotencyLock(idempotencyKey, tokenC!);
     });
   });
 

@@ -54,8 +54,8 @@ export async function registerPaymentRoutes(app: FastifyInstance) {
 
       return reply.code(200).send(result);
     } finally {
-      if (request.idempotencyLockAcquired && idempotencyKey) {
-        await releaseIdempotencyLock(idempotencyKey);
+      if (request.idempotencyLockToken && idempotencyKey) {
+        await releaseIdempotencyLock(idempotencyKey, request.idempotencyLockToken);
       }
     }
   });
