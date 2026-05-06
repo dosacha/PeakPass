@@ -1,6 +1,8 @@
 import { FastifyInstance } from 'fastify';
 import { getPostgresPool, serializableTransactionWithRetry } from '@/infra/postgres/client';
 import { CheckoutService } from '@/core/services/checkout.service';
+import { OrderService } from '@/core/services/order.service';
+import { TicketService } from '@/core/services/ticket.service';
 import { CreateOrderSchema } from '@/core/models/order';
 import { getLogger } from '@/infra/logger';
 import {
@@ -22,6 +24,8 @@ import { assertBodyUserMatchesAuth } from '@/api/middleware/auth';
 export async function registerCheckoutRoutes(app: FastifyInstance) {
   const logger = getLogger();
   const pool = getPostgresPool();
+  const orderService = new OrderService();
+  const ticketService = new TicketService();
 
   app.post<{ Body: Record<string, unknown> | undefined }>('/checkouts', async (request, reply) => {
     const body = request.body ?? {};
@@ -81,9 +85,8 @@ export async function registerCheckoutRoutes(app: FastifyInstance) {
     const client = await pool.connect();
 
     try {
-      const checkoutService = new CheckoutService();
-      const order = await checkoutService.getOrderById(orderId, client);
-      const tickets = order ? await checkoutService.getTicketsByOrderId(orderId, client) : [];
+      const order = await orderService.getOrderById(orderId, client);
+      const tickets = order ? await ticketService.getTicketsByOrderId(orderId, client) : [];
 
       if (!order) {
         return reply.code(404).send({ error: 'Order not found' });

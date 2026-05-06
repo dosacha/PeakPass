@@ -1,6 +1,6 @@
 import { FastifyInstance } from 'fastify';
 import { serializableTransactionWithRetry } from '@/infra/postgres/client';
-import { CheckoutService } from '@/core/services/checkout.service';
+import { PaymentWebhookService } from '@/core/services/payment-webhook.service';
 import { PaymentWebhookSchema } from '@/core/models/payment';
 import { getLogger } from '@/infra/logger';
 import { invalidateEventCache, releaseIdempotencyLock } from '@/infra/redis/commands';
@@ -35,8 +35,8 @@ export async function registerPaymentRoutes(app: FastifyInstance) {
       );
 
       const result = await serializableTransactionWithRetry(async (client) => {
-        const checkoutService = new CheckoutService();
-        return checkoutService.processPaymentWebhook(input, idempotencyKey, client);
+        const paymentWebhookService = new PaymentWebhookService();
+        return paymentWebhookService.processPaymentWebhook(input, idempotencyKey, client);
       });
 
       await invalidateEventCache(result.order.eventId);

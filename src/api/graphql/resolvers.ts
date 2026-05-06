@@ -1,14 +1,16 @@
 import { GraphQLError } from 'graphql';
 import { GraphQLContext } from './loaders';
 import { EventService } from '@/core/services/event.service';
-import { CheckoutService } from '@/core/services/checkout.service';
+import { OrderService } from '@/core/services/order.service';
+import { TicketService } from '@/core/services/ticket.service';
 import { getLogger } from '@/infra/logger';
 import { AppError } from '@/core/errors';
 import { getPostgresPool } from '@/infra/postgres/client';
 
 const logger = getLogger();
 const eventService = new EventService();
-const checkoutService = new CheckoutService();
+const orderService = new OrderService();
+const ticketService = new TicketService();
 
 const MAX_LIMIT_EVENTS = 100;
 const MAX_LIMIT_ORDERS = 50;
@@ -148,7 +150,7 @@ export const resolvers = {
 
       try {
         logger.info({ userId: context.userId, limit: safeLimit, offset: safeOffset }, 'Query: myOrders');
-        const orders = await checkoutService.getOrdersByUserId(context.userId, safeLimit, safeOffset, client);
+        const orders = await orderService.getOrdersByUserId(context.userId, safeLimit, safeOffset, client);
         return orders.map((order) => ({
           id: order.id,
           userId: order.userId,
@@ -187,7 +189,7 @@ export const resolvers = {
 
       try {
         logger.info({ userId: context.userId, limit: safeLimit, offset: safeOffset }, 'Query: myTickets');
-        return await checkoutService.getTicketsByUserId(context.userId, safeLimit, safeOffset, client);
+        return await ticketService.getTicketsByUserId(context.userId, safeLimit, safeOffset, client);
       } catch (err) {
         logger.error({ err, userId: context.userId, limit: safeLimit, offset: safeOffset }, 'Query failed: myTickets');
         throw toGraphQLError(err as Error);
@@ -206,7 +208,7 @@ export const resolvers = {
 
       try {
         logger.info({ code }, 'Query: ticketByCode');
-        const ticket = await checkoutService.getTicketByCode(code, client);
+        const ticket = await ticketService.getTicketByCode(code, client);
         if (!ticket) {
           return {
             valid: false,

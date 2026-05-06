@@ -7,6 +7,7 @@ import { closeRedis, getRedis, initRedis } from '@/infra/redis/client';
 import { loadConfig } from '@/infra/config';
 import { initLogger } from '@/infra/logger';
 import { CheckoutService } from '@/core/services/checkout.service';
+import { PaymentWebhookService } from '@/core/services/payment-webhook.service';
 import { ConflictError } from '@/core/errors';
 import { Order } from '@/core/models/order';
 import { Ticket } from '@/core/models/ticket';
@@ -15,6 +16,7 @@ import { v4 as uuid } from 'uuid';
 describe('webhook idempotency integration tests', () => {
   let pool: Awaited<ReturnType<typeof initPostgresPool>>;
   const checkoutService = new CheckoutService();
+  const paymentWebhookService = new PaymentWebhookService();
 
   async function clearTestData() {
     if (!pool) return;
@@ -116,7 +118,7 @@ describe('webhook idempotency integration tests', () => {
     providerTransactionId: string,
   ) {
     return serializableTransactionWithRetry((client) =>
-      checkoutService.processPaymentWebhook(
+      paymentWebhookService.processPaymentWebhook(
         { orderId, providerTransactionId, status },
         idempotencyKey,
         client,
