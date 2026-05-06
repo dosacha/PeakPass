@@ -27,7 +27,7 @@ PeakPass에서 Redis는 성능과 운영 편의성을 높이기 위한 보조 �
 - Redis miss면 DB에서 `status`, `expires_at`를 다시 확인함
 - checkout 성공 후 reservation hold를 즉시 삭제해 stale active 상태를 줄임
 
-현재 checkout 경로는 reservation을 `UPDATE ... WHERE status='active' AND expires_at > NOW() RETURNING`의 단일 atomic 쿼리로 검증·전환하므로 Redis hold를 *읽지 않는다*. Redis hold는 GET `/reservations/:id`의 빠른 응답과 클라이언트가 만료 시각을 표시하기 위한 보조 자료로 사용된다.
+현재 checkout 경로는 reservation을 `UPDATE ... WHERE status='active' AND expires_at > NOW() RETURNING`의 단일 atomic 쿼리로 검증·전환하므로 Redis hold를 *읽지 않는다*. Redis hold의 read 경로는 단 한 곳, `GET /reservations/:id`(`ReservationService.getReservationWithClient`)뿐이다. 목적은 GET 응답 가속과 클라이언트가 만료 시각(`expiresAt`)을 빠르게 표시하기 위한 것이며, hold가 stale해도 정합성에는 영향이 없다 (정합성 판단은 모두 DB 트랜잭션 안에서). Redis 장애 시 DB fallback이 자동으로 동작한다.
 
 ## 2. rate limiting
 

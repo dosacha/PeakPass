@@ -14,6 +14,24 @@ import { getPostgresPool } from '@/infra/postgres/client';
 
 const RESERVATION_TTL_SECONDS = REDIS_TTL.RESERVATION_HOLD;
 
+/**
+ * Reservation 도메인 서비스.
+ *
+ * 흐름:
+ *   - create: events 행 lock + 좌석 차감 + reservations INSERT + Redis hold 캐시
+ *   - convert (checkout 시): UPDATE ... WHERE status='active' AND expires_at > NOW()
+ *     atomic 쿼리. 이 경로는 본 서비스의 메서드를 *호출하지 않는다* — 호출자가
+ *     트랜잭션 안에서 직접 실행 (CheckoutService.checkout)
+ *   - release/expire: returnSeatsAndFinalize 공통 로직, 좌석 원복 + status 전환
+ *
+ * Redis hold 역할:
+ *   - GET /reservations/:id 응답 가속 (getReservationWithClient에서 1회 read)
+ *   - 클라이언트가 만료 시각을 빠르게 표시
+ *
+ *   *checkout 경로는 Redis hold를 읽지 않는다*. 정합성 판단은 모두 DB 트랜잭션
+ *   안의 atomic UPDATE에서 이뤄진다. 이 사실을 명시하지 않으면 "hold가 정합성 layer
+ *   인 줄 알았는데 아니네"라는 오해가 생긴다.
+ */
 export class ReservationService {
   private logger = getLogger();
   private inventory = new InventoryService();
@@ -120,6 +138,20 @@ export class ReservationService {
     }
   }
 
+  /**
+   * Reservation 단건 조회 (GET /reservations/:id 등 외부 read 경로용).
+   *
+   * Redis hold 우선, DB fallback. Redis hold는 createReservation의 commit 직후
+   * 적재되며 release/expire/convert 트랜잭션 commit 직후에 삭제된다. TTL 만료 시에도
+   * 자동 소거된다.
+   *
+   * 주의: 이 함수는 *조회 가속*이 목적이다. checkout 흐름의 정합성 판단은 본 함수를
+   * 거치지 않고 DB 트랜잭션 안의 atomic UPDATE에서 이뤄진다 (CheckoutService.checkout
+   * 의 reservation convert 쿼리). 즉 Redis hold가 stale해도 정합성에는 영향이 없고,
+   * 사용자가 GET 응답에서 잠깐 stale한 expiresAt을 볼 수 있는 정도가 최악의 시나리오다.
+   *
+   * Redis 장애 시 DB로 폴백하므로 이 경로는 fail-safe하다.
+   */
   async getReservationWithClient(
     reservationId: string,
     client: PoolClient,
@@ -143,46 +175,6 @@ export class ReservationService {
     );
 
     return result.rows[0] || null;
-  }
-
-  async isReservationValid(reservationId: string): Promise<boolean> {
-    const pool = getPostgresPool();
-    const client = await pool.connect();
-
-    try {
-      return await this.isReservationValidWithClient(reservationId, client);
-    } finally {
-      client.release();
-    }
-  }
-
-  /**
-   * Reservation이 사용 가능한 상태인지만 확인한다 (부작용 없음).
-   *
-   * 만료를 발견해도 *좌석 원복은 하지 않는다*. 호출자(checkout 등)가
-   * 만료된 reservation을 발견하면 명시적으로 expireReservation()을 호출해서
-   * 좌석을 돌려놓아야 한다. 단순 GET 조회는 이 함수만으로 충분.
-   */
-  async isReservationValidWithClient(reservationId: string, client: PoolClient): Promise<boolean> {
-    const redisData = await getReservationHold(reservationId);
-    if (redisData) {
-      return redisData.status === 'active';
-    }
-
-    const result = await client.query<{ valid: boolean }>(
-      `
-      SELECT
-        CASE
-          WHEN status = 'active' AND expires_at > NOW() THEN true
-          ELSE false
-        END as valid
-      FROM reservations
-      WHERE id = $1
-      `,
-      [reservationId],
-    );
-
-    return result.rows[0]?.valid ?? false;
   }
 
   async releaseReservation(reservationId: string): Promise<void> {
@@ -229,7 +221,7 @@ export class ReservationService {
 
   /**
    * TTL 초과로 만료된 reservation을 정리하고 좌석을 원복한다.
-   * isReservationValidWithClient가 false를 반환했을 때 호출자가 사용한다.
+   * sweeper와 checkout의 lazy expire 경로에서 호출된다.
    */
   async expireReservationWithClient(reservationId: string, client: PoolClient): Promise<void> {
     await this.returnSeatsAndFinalize(reservationId, 'expired', client);
@@ -309,9 +301,12 @@ export class ReservationService {
   /**
    * checkout 성공 시 reservation을 'converted'로 전환.
    *
-   * 좌석은 이미 reservation 시점에 차감되어 있으므로 *원복하지 않는다*.
-   * 차감된 좌석은 그대로 order의 점유로 이전된다 (checkout이
-   * reservation_id를 받으면 좌석 차감을 skip해야 한다 — 2단계에서 처리).
+   * 본 메서드는 현재 시점에는 *호출되지 않는다*. CheckoutService.checkout이
+   * reservation convert를 atomic UPDATE 한 쿼리(WHERE status='active' AND
+   * expires_at > NOW() RETURNING)로 직접 처리한다 — 이게 race condition을 더
+   * 좁게 막는 패턴이라서. 본 메서드는 CheckoutService 외부에서 *명시적*으로
+   * reservation을 convert하고 싶은 경우 (어드민 도구, 데이터 보정 작업 등)를
+   * 위해 남겨둔다.
    *
    * WHERE status = 'active' 조건으로 이중 convert를 방어한다.
    */
