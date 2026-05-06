@@ -1,6 +1,7 @@
 import { FastifyInstance } from 'fastify';
 import { ReservationService } from '@/core/services/reservation.service';
 import { CreateReservationSchema } from '@/core/models/reservation';
+import { getConfig } from '@/infra/config';
 import { getLogger } from '@/infra/logger';
 import { assertBodyUserMatchesAuth } from '@/api/middleware/auth';
 
@@ -27,9 +28,32 @@ export async function registerReservationRoutes(app: FastifyInstance) {
 
   app.get<{ Params: { id: string } }>('/reservations/:id', async (request, reply) => {
     const { id } = request.params;
+    const config = getConfig();
     const reservation = await reservationService.getReservation(id);
 
-    if (!reservation) {
+    // Ownership 검증. checkouts와 동일 정책.
+    // mismatch와 not-found 모두 404로 응답해 reservation 존재 여부가 누설되지 않게 한다.
+    if (config.ENFORCE_AUTH_USER_MATCH) {
+      if (!request.user?.id) {
+        return reply.code(401).send({
+          error: { code: 'UNAUTHENTICATED', message: 'Authentication required' },
+        });
+      }
+      if (!reservation || reservation.userId !== request.user.id) {
+        if (reservation) {
+          logger.warn(
+            {
+              reservationId: id,
+              requestedBy: request.user.id,
+              ownerId: reservation.userId,
+              requestId: request.id,
+            },
+            'Reservation ownership mismatch on GET /reservations/:id',
+          );
+        }
+        return reply.code(404).send({ error: 'Reservation not found' });
+      }
+    } else if (!reservation) {
       return reply.code(404).send({ error: 'Reservation not found' });
     }
 

@@ -1,6 +1,6 @@
 import { z } from 'zod';
 
-export const ReservationStatus = z.enum(['active', 'released', 'converted']);
+export const ReservationStatus = z.enum(['active', 'released', 'converted', 'expired']);
 export type ReservationStatus = z.infer<typeof ReservationStatus>;
 
 export interface Reservation {
