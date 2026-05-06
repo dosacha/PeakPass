@@ -80,6 +80,18 @@ jobs:
           REDIS_PORT: '6379'
         run: npm run test:concurrency
 
+      - name: Run integration tests (webhook idempotency)
+        env:
+          NODE_ENV: test
+          DB_HOST: localhost
+          DB_PORT: '5432'
+          DB_USER: peakpass
+          DB_PASSWORD: peakpass
+          DB_NAME: peakpass
+          REDIS_HOST: localhost
+          REDIS_PORT: '6379'
+        run: npm run test:webhook
+
       - name: Run integration tests (redis)
         env:
           NODE_ENV: test
