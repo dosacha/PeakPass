@@ -43,7 +43,8 @@ export const graphqlTypeDefs = `
   }
 
   """
-  확인된 구매 주문
+  확인된 구매 주문.
+  NOTE: idempotencyKey는 클라이언트가 *생성해 보내는* 값이고 응답에 포함하지 않는다.
   """
   type Order {
     id: ID!
@@ -54,7 +55,6 @@ export const graphqlTypeDefs = `
     totalAmount: String!
     status: String!
     paymentStatus: String!
-    idempotencyKey: String
     createdAt: String!
     updatedAt: String!
   }

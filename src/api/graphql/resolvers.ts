@@ -44,7 +44,6 @@ type GraphQLOrderParent = {
   totalAmount: string;
   status: string;
   paymentStatus: string;
-  idempotencyKey?: string;
   createdAt: string;
   updatedAt: string;
 };
@@ -159,7 +158,6 @@ export const resolvers = {
           totalAmount: order.totalAmount,
           status: order.status,
           paymentStatus: order.paymentStatus,
-          idempotencyKey: order.idempotencyKey,
           createdAt: toIsoString(order.createdAt),
           updatedAt: toIsoString(order.updatedAt),
         }));

@@ -22,7 +22,6 @@ export type GraphQLOrder = {
   totalAmount: string;
   status: string;
   paymentStatus: string;
-  idempotencyKey?: string;
   createdAt: string;
   updatedAt: string;
 };
@@ -50,7 +49,6 @@ type OrderRow = {
   totalAmount: string;
   status: string;
   paymentStatus: string | null;
-  idempotencyKey?: string;
   createdAt: Date;
   updatedAt: Date;
 };
@@ -165,7 +163,6 @@ export function createGraphQLContext(userId?: string): GraphQLContext {
           o.total_amount as "totalAmount",
           o.status,
           COALESCE(pr.status, 'pending') as "paymentStatus",
-          o.idempotency_key as "idempotencyKey",
           o.created_at as "createdAt",
           o.updated_at as "updatedAt"
         FROM orders o
@@ -192,7 +189,6 @@ export function createGraphQLContext(userId?: string): GraphQLContext {
             totalAmount: order.totalAmount,
             status: order.status,
             paymentStatus: order.paymentStatus ?? 'pending',
-            idempotencyKey: order.idempotencyKey,
             createdAt: order.createdAt.toISOString(),
             updatedAt: order.updatedAt.toISOString(),
           },
