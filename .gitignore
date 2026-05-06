@@ -145,3 +145,5 @@ docs/_private/
 .env.prod
 docker-compose.prod.yml
 load-test-event.sql
+# k6 raw output (too large)
+load-test/results/*.json
