@@ -26,8 +26,9 @@
 인지하고 있는 구조적 한계입니다. 실제 운영 환경 적용 시 보강이 필요한 항목:
 
 - `POST /checkouts`, `POST /reservations`는 body의 `userId`를 받지만, 기본 설정은 `ENFORCE_AUTH_USER_MATCH=true`로 JWT subject와 일치 검증을 강제함. 데모 모드(`ENFORCE_AUTH_USER_MATCH=false`)에서만 body userId를 그대로 신뢰함
-- Webhook 서명 검증은 `WEBHOOK_SIGNING_SECRET`이 설정된 경우 HMAC-SHA256으로 수행함. 커스텀 JSON parser가 raw body(Buffer)를 보존해 Provider 원본 바이트에 대한 서명을 검증하며, 타임스탬프 헤더 기반 replay-window 검증은 후속 보강 과제
-- Redis idempotency lock은 처리 중 중복 진입을 줄이는 조정 계층이며, Redis 장애 시 PostgreSQL unique 제약이 최종 데이터 무결성 방어선
+- Webhook 서명 검증은 `WEBHOOK_SIGNING_SECRET`이 설정된 경우 `${timestamp}.${rawBody}` 형식의 HMAC-SHA256으로 수행하며, 커스텀 JSON parser가 raw body(Buffer)를 보존해 Provider 원본 바이트에 대한 서명을 검증함. timestamp 헤더는 `WEBHOOK_REPLAY_TOLERANCE_SECONDS`(기본 5분) 내인지 검증해 단순 replay 공격을 차단함. 다만 provider별 retry 정책 차이, secret rotation, multiple active secrets, 정산 webhook을 영영 못 받는 케이스의 reconciliation worker는 후속 과제로 남아 있음
+- Redis idempotency lock은 처리 중 중복 진입을 줄이는 조정 계층이며, 운영자 token + Lua atomic check-and-delete로 TTL 만료 후 다른 요청 lock을 잘못 삭제하는 사고는 막음. Redis 장애 시 PostgreSQL unique 제약이 최종 데이터 무결성 방어선
+- Reservation TTL 만료 좌석 회수: setInterval 기반 in-process sweeper(`src/infra/cron/reservation-sweeper.ts`, 5분 주기)가 만료된 active reservation을 expired로 전환하고 좌석을 회수함. 데모/단일 노드에는 충분하나, 운영 환경에서는 별도 워커 프로세스(BullMQ 등)로 분리하는 것이 권장됨
 
 ## 배포 구성
 

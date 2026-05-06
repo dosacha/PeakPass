@@ -3,8 +3,10 @@ import { initLogger, getLogger } from '@/infra/logger';
 import { initPostgresPool, closePostgresPool } from '@/infra/postgres/client';
 import { initRedis, closeRedis } from '@/infra/redis/client';
 import { createApp } from '@/api/app';
+import { startReservationSweeper, stopReservationSweeper } from '@/infra/cron/reservation-sweeper';
 
 let app: Awaited<ReturnType<typeof createApp>> | null = null;
+let sweeperHandle: NodeJS.Timeout | null = null;
 let shuttingDown = false;
 
 async function gracefulShutdown(signal: string) {
@@ -18,6 +20,11 @@ async function gracefulShutdown(signal: string) {
   logger.info(`${signal} 수신, 종료 절차 시작`);
 
   try {
+    if (sweeperHandle) {
+      stopReservationSweeper(sweeperHandle);
+      sweeperHandle = null;
+    }
+
     if (app) {
       await app.close();
       logger.info('HTTP 서버 종료');
@@ -58,6 +65,13 @@ async function main() {
 
     process.once('SIGTERM', () => void gracefulShutdown('SIGTERM'));
     process.once('SIGINT', () => void gracefulShutdown('SIGINT'));
+
+    // sweeper는 HTTP listen 직전에 시작한다.
+    // - DB pool은 위에서 이미 초기화됨
+    // - listen 실패해도 catch 블록에서 process.exit 전에
+    //   pool/redis가 closeRedis/closePostgresPool로 정리됨
+    //   (unref 처리된 sweeper는 process exit과 함께 자동 종료)
+    sweeperHandle = startReservationSweeper();
 
     await app.listen({ port: config.PORT, host: '0.0.0.0' });
 
