@@ -145,5 +145,7 @@ docs/_private/
 .env.prod
 docker-compose.prod.yml
 load-test-event.sql
-# k6 raw output (too large)
+# k6 raw output (too large, exceeds GitHub 100MB limit)
+# but summary exports (small) are committed
 load-test/results/*.json
+!load-test/results/*-summary.json
