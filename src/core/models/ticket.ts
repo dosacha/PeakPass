@@ -9,7 +9,6 @@ export interface Ticket {
   eventId: string;
   userId: string;
   ticketNumber: string;
-  qrCode?: string;
   status: TicketStatus;
   createdAt: Date;
   updatedAt: Date;

@@ -81,7 +81,6 @@ CREATE TABLE IF NOT EXISTS tickets (
   event_id UUID NOT NULL REFERENCES events(id),
   user_id UUID NOT NULL REFERENCES users(id),
   ticket_number VARCHAR(50) NOT NULL UNIQUE,
-  qr_code TEXT,
   status VARCHAR(50) NOT NULL DEFAULT 'active',
   created_at TIMESTAMPTZ DEFAULT NOW(),
   updated_at TIMESTAMPTZ DEFAULT NOW()
