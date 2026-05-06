@@ -55,8 +55,17 @@ const envSchema = z.object({
 
   // 기능 플래그
   ENABLE_RATE_LIMITING: booleanFromEnv(true),
+  // write 경로 (checkout, reservation, webhook) rate limit.
+  // 결제·좌석 점유로 직접 이어지므로 보수적으로 짧은 윈도우와 낮은 한도를 둔다.
   RATE_LIMIT_WINDOW_MS: z.coerce.number().default(60000),
   RATE_LIMIT_MAX_REQUESTS: z.coerce.number().default(5),
+  // GraphQL read 경로 rate limit.
+  // /graphql은 read가 main이고 events/event/myOrders/myTickets/ticketByCode가
+  // 화면 1개 렌더링에 여러 번 호출될 수 있어 write 경로보다 관대해야 한다.
+  // complexity 한도(GRAPHQL_MAX_COMPLEXITY)가 *단일 query 비용*을, 본 한도가
+  // *시간당 호출 횟수*를 막는다. 두 layer는 서로 보완.
+  GRAPHQL_RATE_LIMIT_WINDOW_MS: z.coerce.number().default(60000),
+  GRAPHQL_RATE_LIMIT_MAX_REQUESTS: z.coerce.number().default(60),
   // Redis 장애 시 동작:
   //   - 'closed' (default): 요청 거부 (보안 우선, 운영 권장)
   //   - 'open': 요청 통과 (가용성 우선, 비핵심 경로용)

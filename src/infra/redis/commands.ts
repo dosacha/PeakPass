@@ -97,17 +97,22 @@ export async function deleteReservationHold(reservationId: string): Promise<void
  */
 export async function checkRateLimit(
   userId: string,
-  action: 'checkout' | 'reservation' | 'webhook',
+  action: 'checkout' | 'reservation' | 'webhook' | 'graphql',
   limit: number,
   windowMs: number,
   failMode: 'open' | 'closed' = 'closed',
 ): Promise<{ allowed: boolean; count: number; resetAt: number; redisAvailable: boolean }> {
   const redis = getRedis();
-  const key = action === 'checkout'
-    ? redisKeys.rateLimitCheckout(userId)
-    : action === 'reservation'
-      ? redisKeys.rateLimitReservation(userId)
-      : redisKeys.rateLimitWebhook(userId);
+  // action 별 key prefix를 분리해 한 사용자의 여러 액션이 같은 카운터를 공유하지
+  // 않도록 한다 (예: GraphQL read 60건이 checkout 5건과 같은 윈도우에 들어가면
+  // 의도와 다른 거부가 발생한다).
+  const keyByAction: Record<typeof action, string> = {
+    checkout: redisKeys.rateLimitCheckout(userId),
+    reservation: redisKeys.rateLimitReservation(userId),
+    webhook: redisKeys.rateLimitWebhook(userId),
+    graphql: redisKeys.rateLimitGraphql(userId),
+  };
+  const key = keyByAction[action];
 
   try {
     const now = Date.now();
