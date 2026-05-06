@@ -5,37 +5,6 @@ import { initRedis, closeRedis } from '@/infra/redis/client';
 import { createApp } from '@/api/app';
 
 let app: Awaited<ReturnType<typeof createApp>> | null = null;
-let shuttingDown = false;
-
-async function gracefulShutdown(signal: string) {
-  if (shuttingDown) {
-    return;
-  }
-
-  shuttingDown = true;
-
-  const logger = getLogger() || console;
-  logger.info(`${signal} 수신, 종료 절차 시작`);
-
-  try {
-    if (app) {
-      await app.close();
-      logger.info('HTTP 서버 종료');
-    }
-
-    await closePostgresPool();
-    logger.info('PostgreSQL 연결 종료');
-
-    await closeRedis();
-    logger.info('Redis 연결 종료');
-
-    logger.info('종료 절차 완료');
-    process.exit(0);
-  } catch (err) {
-    logger.error({ err }, '종료 절차 실패');
-    process.exit(1);
-  }
-}
 
 async function main() {
   try {
