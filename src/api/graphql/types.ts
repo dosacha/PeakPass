@@ -6,12 +6,14 @@ export const graphqlTypeDefs = `
   """
   type Event {
     id: ID!
-    title: String!
+    name: String!
     description: String
-    date: String!
-    capacity: Int!
+    startsAt: String!
+    totalSeats: Int!
     availableSeats: Int!
     pricing: [PricingTier!]!
+    myActiveReservation: Reservation
+    myTicketCount: Int!
     createdAt: String!
     updatedAt: String!
   }
@@ -23,9 +25,21 @@ export const graphqlTypeDefs = `
   잔여 표시는 Event.availableSeats (이벤트 단위)에서 가져온다.
   """
   type PricingTier {
-    tier: String!
+    tierId: String!
+    name: String!
     price: Float!
     seats: Int!
+  }
+
+  """
+  Active reservation context for the authenticated user on an event.
+  """
+  type Reservation {
+    id: ID!
+    tierId: String!
+    quantity: Int!
+    expiresAt: String!
+    status: String!
   }
 
   """
@@ -36,8 +50,8 @@ export const graphqlTypeDefs = `
     userId: ID!
     eventId: ID!
     event: Event!
-    ticketCount: Int!
-    totalPrice: String!
+    quantity: Int!
+    totalAmount: String!
     status: String!
     paymentStatus: String!
     idempotencyKey: String
@@ -56,10 +70,23 @@ export const graphqlTypeDefs = `
     event: Event!
     userId: ID!
     user: User!
-    code: String!
+    ticketNumber: String!
     status: String!
     issuedAt: String!
     expiresAt: String
+  }
+
+  """
+  Ticket gate verification response.
+  Does not expose user identity, order, payment, or idempotency fields.
+  """
+  type TicketVerification {
+    valid: Boolean!
+    status: String!
+    ticketNumber: String
+    eventName: String
+    startsAt: String
+    endsAt: String
   }
 
   """
@@ -102,7 +129,7 @@ export const graphqlTypeDefs = `
     """
     코드로 티켓 조회 (스캔/검증용)
     """
-    ticketByCode(code: String!): Ticket
+    ticketByCode(code: String!): TicketVerification
   }
 
   schema {

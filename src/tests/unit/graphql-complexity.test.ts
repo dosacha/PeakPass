@@ -35,12 +35,12 @@ describe('GraphQL query complexity', () => {
         query {
           events(limit: 10) {
             id
-            title
+            name
           }
         }
       `);
 
-      expect(() => validateQueryComplexity(document, schema, 100)).not.toThrow();
+      expect(() => validateQueryComplexity(document, schema, {}, 100)).not.toThrow();
     });
 
     it('rejects queries that exceed the limit via large limit args', () => {
@@ -49,12 +49,26 @@ describe('GraphQL query complexity', () => {
         query {
           events(limit: 1000) {
             id
-            title
+            name
           }
         }
       `);
 
-      expect(() => validateQueryComplexity(document, schema, 100)).toThrow(
+      expect(() => validateQueryComplexity(document, schema, {}, 100)).toThrow(
+        /Query too complex/,
+      );
+    });
+
+    it('rejects queries that exceed the limit via variable args', () => {
+      const document = parse(`
+        query Q($l: Int!) {
+          events(limit: $l) {
+            id
+          }
+        }
+      `);
+
+      expect(() => validateQueryComplexity(document, schema, { l: 1000 }, 100)).toThrow(
         /Query too complex/,
       );
     });
@@ -64,14 +78,45 @@ describe('GraphQL query complexity', () => {
         query {
           events(limit: 5) {
             pricing {
-              tier
+              tierId
+              name
               price
             }
           }
         }
       `);
 
-      expect(() => validateQueryComplexity(document, schema, 100)).not.toThrow();
+      expect(() => validateQueryComplexity(document, schema, {}, 100)).not.toThrow();
+    });
+
+    it('allows detail pages to compose event data with user context fields', () => {
+      const document = parse(`
+        query EventDetailPage($eventId: ID!) {
+          event(id: $eventId) {
+            id
+            name
+            description
+            startsAt
+            availableSeats
+            pricing {
+              tierId
+              name
+              price
+              seats
+            }
+            myActiveReservation {
+              id
+              tierId
+              quantity
+              expiresAt
+              status
+            }
+            myTicketCount
+          }
+        }
+      `);
+
+      expect(() => validateQueryComplexity(document, schema, {}, 100)).not.toThrow();
     });
 
     it('sums complexity across multiple top-level fields', () => {
@@ -87,10 +132,10 @@ describe('GraphQL query complexity', () => {
         }
       `);
 
-      expect(() => validateQueryComplexity(document, schema, 80)).toThrow(
+      expect(() => validateQueryComplexity(document, schema, {}, 80)).toThrow(
         /Query too complex/,
       );
-      expect(() => validateQueryComplexity(document, schema, 200)).not.toThrow();
+      expect(() => validateQueryComplexity(document, schema, {}, 200)).not.toThrow();
     });
   });
 
@@ -104,13 +149,14 @@ describe('GraphQL query complexity', () => {
     async function callDidResolveOperation(
       plugin: ReturnType<typeof createComplexityPlugin>,
       query: string,
+      variables: Record<string, unknown> = {},
     ): Promise<void> {
       const document = parse(query);
       const requestListener = await plugin.requestDidStart!({} as never);
       if (!requestListener || !requestListener.didResolveOperation) {
         throw new Error('plugin did not return a request listener');
       }
-      await requestListener.didResolveOperation({ document, schema } as never);
+      await requestListener.didResolveOperation({ document, schema, request: { variables } } as never);
     }
 
     it('returns a plugin with requestDidStart hook', () => {
@@ -125,10 +171,21 @@ describe('GraphQL query complexity', () => {
       ).rejects.toThrow(/Query too complex/);
     });
 
+    it('throws GraphQLError when variable complexity exceeds max', async () => {
+      const plugin = createComplexityPlugin({ max: 100 });
+      await expect(
+        callDidResolveOperation(
+          plugin,
+          `query Q($l: Int!) { events(limit: $l) { id } }`,
+          { l: 1000 },
+        ),
+      ).rejects.toThrow(/Query too complex/);
+    });
+
     it('does not throw when complexity is within limits', async () => {
       const plugin = createComplexityPlugin({ max: 100 });
       await expect(
-        callDidResolveOperation(plugin, `query { event(id: "abc") { id title } }`),
+        callDidResolveOperation(plugin, `query { event(id: "abc") { id name } }`),
       ).resolves.not.toThrow();
     });
 

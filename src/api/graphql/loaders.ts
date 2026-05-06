@@ -19,7 +19,7 @@ export type GraphQLOrder = {
   eventId: string;
   quantity: number;
   // 화폐는 직렬화 경계에서 string으로 흐른다 (정밀도 손실 방지).
-  totalPrice: string;
+  totalAmount: string;
   status: string;
   paymentStatus: string;
   idempotencyKey?: string;
@@ -27,17 +27,48 @@ export type GraphQLOrder = {
   updatedAt: string;
 };
 
+export type GraphQLReservation = {
+  id: string;
+  userId: string;
+  eventId: string;
+  tierId: string;
+  quantity: number;
+  expiresAt: string;
+  status: string;
+};
+
+export type GraphQLUserEventKey = {
+  userId: string;
+  eventId: string;
+};
+
 type OrderRow = {
   id: string;
   userId: string;
   eventId: string;
   quantity: number;
-  totalPrice: string;
+  totalAmount: string;
   status: string;
   paymentStatus: string | null;
   idempotencyKey?: string;
   createdAt: Date;
   updatedAt: Date;
+};
+
+type ReservationRow = {
+  id: string;
+  userId: string;
+  eventId: string;
+  tierId: string;
+  quantity: number;
+  expiresAt: Date;
+  status: string;
+};
+
+type TicketCountRow = {
+  userId: string;
+  eventId: string;
+  count: number;
 };
 
 export interface GraphQLContext {
@@ -46,7 +77,13 @@ export interface GraphQLContext {
     eventLoader: DataLoader<string, Event | null>;
     userLoader: DataLoader<string, GraphQLUser>;
     orderLoader: DataLoader<string, GraphQLOrder>;
+    activeReservationLoader: DataLoader<GraphQLUserEventKey, GraphQLReservation | null>;
+    ticketCountLoader: DataLoader<GraphQLUserEventKey, number>;
   };
+}
+
+function userEventKey({ userId, eventId }: GraphQLUserEventKey): string {
+  return `${userId}:${eventId}`;
 }
 
 export function createGraphQLContext(userId?: string): GraphQLContext {
@@ -125,7 +162,7 @@ export function createGraphQLContext(userId?: string): GraphQLContext {
           o.user_id as "userId",
           o.event_id as "eventId",
           o.quantity,
-          o.total_amount as "totalPrice",
+          o.total_amount as "totalAmount",
           o.status,
           COALESCE(pr.status, 'pending') as "paymentStatus",
           o.idempotency_key as "idempotencyKey",
@@ -152,7 +189,7 @@ export function createGraphQLContext(userId?: string): GraphQLContext {
             userId: order.userId,
             eventId: order.eventId,
             quantity: order.quantity,
-            totalPrice: order.totalPrice,
+            totalAmount: order.totalAmount,
             status: order.status,
             paymentStatus: order.paymentStatus ?? 'pending',
             idempotencyKey: order.idempotencyKey,
@@ -175,12 +212,124 @@ export function createGraphQLContext(userId?: string): GraphQLContext {
     }
   });
 
+  const activeReservationLoader = new DataLoader<
+    GraphQLUserEventKey,
+    GraphQLReservation | null,
+    string
+  >(
+    async (keys: readonly GraphQLUserEventKey[]) => {
+      logger.debug({ keys }, 'Loading active reservation batch');
+
+      if (keys.length === 0) {
+        return [];
+      }
+
+      const client = await pool.connect();
+
+      try {
+        const userIds = keys.map((key) => key.userId);
+        const eventIds = keys.map((key) => key.eventId);
+        const result = await client.query<ReservationRow>(
+          `
+          WITH requested AS (
+            SELECT *
+            FROM UNNEST($1::uuid[], $2::uuid[]) AS pair(user_id, event_id)
+          )
+          SELECT DISTINCT ON (r.user_id, r.event_id)
+            r.id,
+            r.user_id as "userId",
+            r.event_id as "eventId",
+            r.tier_id as "tierId",
+            r.quantity,
+            r.expires_at as "expiresAt",
+            r.status
+          FROM reservations r
+          JOIN requested req
+            ON req.user_id = r.user_id
+           AND req.event_id = r.event_id
+          WHERE r.status = 'active'
+            AND r.expires_at > NOW()
+          ORDER BY r.user_id, r.event_id, r.created_at DESC
+          `,
+          [userIds, eventIds],
+        );
+
+        const reservationMap = new Map(
+          result.rows.map((reservation) => [
+            userEventKey(reservation),
+            {
+              id: reservation.id,
+              userId: reservation.userId,
+              eventId: reservation.eventId,
+              tierId: reservation.tierId,
+              quantity: reservation.quantity,
+              expiresAt: reservation.expiresAt.toISOString(),
+              status: reservation.status,
+            },
+          ]),
+        );
+
+        return keys.map((key) => reservationMap.get(userEventKey(key)) ?? null);
+      } finally {
+        client.release();
+      }
+    },
+    { cacheKeyFn: userEventKey },
+  );
+
+  const ticketCountLoader = new DataLoader<GraphQLUserEventKey, number, string>(
+    async (keys: readonly GraphQLUserEventKey[]) => {
+      logger.debug({ keys }, 'Loading ticket count batch');
+
+      if (keys.length === 0) {
+        return [];
+      }
+
+      const client = await pool.connect();
+
+      try {
+        const userIds = keys.map((key) => key.userId);
+        const eventIds = keys.map((key) => key.eventId);
+        const result = await client.query<TicketCountRow>(
+          `
+          WITH requested AS (
+            SELECT *
+            FROM UNNEST($1::uuid[], $2::uuid[]) AS pair(user_id, event_id)
+          )
+          SELECT
+            t.user_id as "userId",
+            t.event_id as "eventId",
+            COUNT(*)::int as "count"
+          FROM tickets t
+          JOIN requested req
+            ON req.user_id = t.user_id
+           AND req.event_id = t.event_id
+          WHERE t.status <> 'cancelled'
+          GROUP BY t.user_id, t.event_id
+          `,
+          [userIds, eventIds],
+        );
+
+        const ticketCountMap = new Map(
+          result.rows.map((row) => [userEventKey(row), row.count]),
+        );
+
+        return keys.map((key) => ticketCountMap.get(userEventKey(key)) ?? 0);
+      } finally {
+        client.release();
+      }
+    },
+    { cacheKeyFn: userEventKey },
+  );
+
   return {
     userId,
     loaders: {
       eventLoader,
       userLoader,
       orderLoader,
+      activeReservationLoader,
+      ticketCountLoader,
     },
   };
 }
@@ -189,4 +338,6 @@ export function clearGraphQLContext(context: GraphQLContext) {
   context.loaders.eventLoader.clearAll();
   context.loaders.userLoader.clearAll();
   context.loaders.orderLoader.clearAll();
+  context.loaders.activeReservationLoader.clearAll();
+  context.loaders.ticketCountLoader.clearAll();
 }

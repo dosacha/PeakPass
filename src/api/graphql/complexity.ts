@@ -14,19 +14,28 @@ type ComplexityRule = {
 
 type ComplexityRulesMap = Record<string, Record<string, ComplexityRule>>;
 
+function numericLimit(value: unknown, fallback: number): number {
+  const parsed = Number(value ?? fallback);
+  if (!Number.isFinite(parsed)) {
+    return fallback;
+  }
+
+  return Math.max(1, Math.floor(parsed));
+}
+
 export const complexityRulesMap: ComplexityRulesMap = {
   Query: {
     events: {
-      complexity: ({ args }) => Number(args.limit ?? 10),
+      complexity: ({ args }) => numericLimit(args.limit, 10),
     },
     event: {
       complexity: 1,
     },
     myOrders: {
-      complexity: ({ args }) => Number(args.limit ?? 10),
+      complexity: ({ args }) => numericLimit(args.limit, 10),
     },
     myTickets: {
-      complexity: ({ args }) => Number(args.limit ?? 20),
+      complexity: ({ args }) => numericLimit(args.limit, 20),
     },
     ticketByCode: {
       complexity: 1,
@@ -46,6 +55,7 @@ export function calculateFieldComplexity(
   node: FieldNode,
   schema: GraphQLSchema,
   type: { name?: string; getFields?: () => Record<string, { type: unknown }> },
+  variables: Record<string, unknown> = {},
   depth = 0,
   maxDepth = 10,
 ): number {
@@ -67,6 +77,11 @@ export function calculateFieldComplexity(
           acc[arg.name.value] = parseInt(arg.value.value, 10);
         } else if (arg.value.kind === 'StringValue') {
           acc[arg.name.value] = arg.value.value;
+        } else if (arg.value.kind === 'Variable') {
+          const varName = arg.value.name.value;
+          if (variables[varName] !== undefined) {
+            acc[arg.name.value] = variables[varName];
+          }
         }
         return acc;
       }, {}) ?? {};
@@ -91,6 +106,7 @@ export function calculateFieldComplexity(
         selection,
         schema,
         namedType as never,
+        variables,
         depth + 1,
         maxDepth,
       );
@@ -108,6 +124,7 @@ export function calculateFieldComplexity(
 export function validateQueryComplexity(
   document: DocumentNode,
   schema: GraphQLSchema,
+  variables: Record<string, unknown> = {},
   maxComplexity = 5000,
 ): void {
   let totalComplexity = 0;
@@ -127,7 +144,7 @@ export function validateQueryComplexity(
         continue;
       }
 
-      totalComplexity += calculateFieldComplexity(selection, schema, queryType, 0);
+      totalComplexity += calculateFieldComplexity(selection, schema, queryType, variables, 0);
     }
   }
 
@@ -154,9 +171,10 @@ export function createComplexityPlugin<TContext extends BaseContext = BaseContex
   return {
     async requestDidStart() {
       return {
-        async didResolveOperation({ document, schema }) {
+        async didResolveOperation({ document, schema, request }) {
           try {
-            validateQueryComplexity(document, schema, maxComplexity);
+            const variables = (request.variables ?? {}) as Record<string, unknown>;
+            validateQueryComplexity(document, schema, variables, maxComplexity);
           } catch (err) {
             if (err instanceof GraphQLError) {
               throw err;

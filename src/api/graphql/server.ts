@@ -20,7 +20,7 @@ export async function createApolloServer(): Promise<ApolloServer<GraphQLContext>
   const server = new ApolloServer<GraphQLContext>({
     typeDefs: graphqlTypeDefs,
     resolvers,
-    introspection: true,
+    introspection: getConfig().NODE_ENV !== 'production',
     // didResolveOperation 단계에서 query 복잡도를 검증한다.
     // 한도 초과 시 GraphQL이 resolver 호출 전에 query를 거부한다 (DB 미접근).
     plugins: [createComplexityPlugin({ max: config.GRAPHQL_MAX_COMPLEXITY })],
@@ -80,7 +80,7 @@ export async function registerGraphQLRoute(
           <body>
             <apollo-sandbox
               initial-state='{
-                "document":"query GetEvents { events(limit: 5) { id title availableSeats } }",
+                "document":"query GetEvents { events(limit: 5) { id name availableSeats } }",
                 "variables":{}
               }'
             ></apollo-sandbox>
