@@ -26,7 +26,11 @@ type WebhookOutcome =
   | { kind: 'idempotent_settled'; order: Order; tickets: Ticket[] }
   | { kind: 'idempotent_failed'; order: Order }
   | { kind: 'newly_settled'; order: Order; tickets: Ticket[] }
-  | { kind: 'newly_failed'; order: Order };
+  | { kind: 'newly_failed'; order: Order }
+  // fail webhook이 도착했지만 order는 이미 paid 상태인 경우.
+  // 응답 자체는 settled 응답과 동일하지만 *입력 의도와 outcome이 다르다*는
+  // 사실을 audit log/내부 분기에서 구분하기 위해 별도 kind로 분리한다.
+  | { kind: 'late_failure_after_settled'; order: Order; tickets: Ticket[] };
 
 export class CheckoutService {
   private logger = getLogger();
@@ -34,6 +38,26 @@ export class CheckoutService {
   private inventory = new InventoryService();
 
   async checkout(input: CreateOrderInput, client: PoolClient): Promise<CheckoutResult> {
+    // 동일 idempotency_key 동시 진입 race를 차단한다.
+    //
+    // 문제 시나리오: Redis idempotency lock이 1차 layer지만 Redis 장애 시
+    //   middleware가 lock 없이 통과시킨다. 그 상태에서 같은 key 두 요청이
+    //   동시에 트랜잭션을 시작하면 둘 다 getOrderByIdempotencyKey에서 null을
+    //   받고 둘 다 INSERT까지 진행한다. 한쪽은 idempotency_key UNIQUE 제약
+    //   (23505)으로 깨지고, retry 대상도 아니므로 500으로 새어나간다.
+    //
+    // 해결: pg_advisory_xact_lock으로 idempotency_key 단위 mutual exclusion.
+    //   - hashtext: 64-bit hash, 충돌 가능성 무시 가능
+    //   - xact_lock: 트랜잭션 종료 시 자동 해제, 별도 release 필요 없음
+    //   - 늦게 도착한 트랜잭션은 lock을 기다린 후 SELECT에서 기존 order 발견
+    //
+    // 결과: 23505 race window 자체가 제거되어 idempotent 응답이 일관되게 나간다.
+    // DB UNIQUE constraint는 여전히 schema-level backup으로 남는다.
+    await client.query(
+      `SELECT pg_advisory_xact_lock(hashtext($1))`,
+      [input.idempotencyKey],
+    );
+
     const existingOrder = await this.getOrderByIdempotencyKey(input.idempotencyKey, client);
     if (existingOrder) {
       this.logger.warn(
@@ -130,6 +154,9 @@ export class CheckoutService {
 
     const event = eventResult.rows[0];
 
+    // tier_id가 event.pricing 안에 존재하는지 검증.
+    // reservation 경로에서도 reservation service가 진입 시점에 같은 검증을 수행하지만,
+    // direct checkout (no reservation) 경로는 여기서만 검증된다.
     const tier = event.pricing.find((candidate) => candidate.id === input.tierId);
     if (!tier) {
       throw new ValidationError(`Pricing tier not found: ${input.tierId}`);
@@ -502,8 +529,20 @@ export class CheckoutService {
     client: PoolClient,
   ): Promise<WebhookOutcome> {
     if (order.status === 'paid') {
+      // fail webhook이 도착했지만 order는 이미 paid 상태.
+      // 정상 흐름이 아니다 (provider가 settled 통지 후 다시 fail을 보낸 경우).
+      // 이미 settled 상태가 답이므로 그 결과를 반환하지만, kind를 별도로 두어
+      // audit log에서 settle/fail 의도가 다른 케이스를 구분 가능하게 한다.
+      this.logger.warn(
+        {
+          orderId: order.id,
+          providerTransactionId: input.providerTransactionId,
+          idempotencyKey,
+        },
+        'Late failure webhook arrived for already-paid order; existing settled state preserved',
+      );
       const tickets = await this.getTicketsByOrderId(order.id, client);
-      return { kind: 'idempotent_settled', order, tickets };
+      return { kind: 'late_failure_after_settled', order, tickets };
     }
 
     if (order.status === 'cancelled') {
@@ -554,6 +593,17 @@ export class CheckoutService {
           tickets: [],
           paymentStatus: 'failed',
           duplicate: false,
+        };
+      case 'late_failure_after_settled':
+        // 응답 자체는 idempotent_settled와 동일.
+        // 호출자(라우트, 클라이언트)가 보는 응답 shape에 차이를 두지 않는 이유는
+        // "최종 상태는 settled"라는 외부 사실이 같기 때문이다.
+        // 내부 audit/모니터링은 outcome.kind 자체로 구분한다 (handleFail의 warn 로그).
+        return {
+          order: outcome.order,
+          tickets: outcome.tickets,
+          paymentStatus: 'settled',
+          duplicate: true,
         };
     }
   }

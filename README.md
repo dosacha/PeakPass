@@ -9,7 +9,7 @@
 
 **개인 학습 프로젝트입니다.** 실제 운영 트래픽에서 검증된 시스템이 아니며, "티켓팅 도메인의 정합성/멱등성 문제를 코드로 설명 가능한 수준까지 끌고 가는 것"을 목표로 작성했습니다.
 
-개발 과정에서 AI 코드 어시스턴트를 사용했습니다. 설계 의사결정(트랜잭션 경계, 상태 전이 정의, 멱등 경로 구조, 테스트 시나리오)은 직접 수행했고, 구현 세부는 AI 보조를 받아 작성한 뒤 검토했습니다. 초기 커밋은 로컬에서 반복 개발한 결과를 정리해 한 번에 올린 상태입니다 (후속 개선은 의미 단위 커밋으로 진행 예정).
+개발 과정에서 AI 코드 어시스턴트를 사용했습니다. 설계 의사결정(트랜잭션 경계, 상태 전이 정의, 멱등 경로 구조, 테스트 시나리오)은 직접 수행했고, 구현 세부는 AI 보조를 받아 작성한 뒤 검토했습니다.
 
 ## 프론트엔드 데모
 
@@ -25,10 +25,13 @@
 
 인지하고 있는 구조적 한계입니다. 실제 운영 환경 적용 시 보강이 필요한 항목:
 
-- `POST /checkouts`, `POST /reservations`는 body의 `userId`를 받지만, 기본 설정은 `ENFORCE_AUTH_USER_MATCH=true`로 JWT subject와 일치 검증을 강제함. 데모 모드(`ENFORCE_AUTH_USER_MATCH=false`)에서만 body userId를 그대로 신뢰함
+- `POST /checkouts`, `POST /reservations`는 body의 `userId`를 받지만, 기본 설정은 `ENFORCE_AUTH_USER_MATCH=true`로 JWT subject와 일치 검증을 강제함. 데모 모드(`ENFORCE_AUTH_USER_MATCH=false`)에서만 body userId를 그대로 신뢰함. `NODE_ENV=production`에서는 `ENFORCE_AUTH_USER_MATCH=false` 조합이 fail-fast로 거부됨
 - Webhook 서명 검증은 `WEBHOOK_SIGNING_SECRET`이 설정된 경우 `${timestamp}.${rawBody}` 형식의 HMAC-SHA256으로 수행하며, 커스텀 JSON parser가 raw body(Buffer)를 보존해 Provider 원본 바이트에 대한 서명을 검증함. timestamp 헤더는 `WEBHOOK_REPLAY_TOLERANCE_SECONDS`(기본 5분) 내인지 검증해 단순 replay 공격을 차단함. 다만 provider별 retry 정책 차이, secret rotation, multiple active secrets, 정산 webhook을 영영 못 받는 케이스의 reconciliation worker는 후속 과제로 남아 있음
-- Redis idempotency lock은 처리 중 중복 진입을 줄이는 조정 계층이며, 운영자 token + Lua atomic check-and-delete로 TTL 만료 후 다른 요청 lock을 잘못 삭제하는 사고는 막음. Redis 장애 시 PostgreSQL unique 제약이 최종 데이터 무결성 방어선
+- `POST /webhooks/payments/settlement`는 학습 목적상 `Idempotency-Key` 헤더를 필수로 요구함. 실제 결제 PG는 이 헤더를 보내지 않는 경우가 많으며, 자연스러운 멱등성 키는 `provider_transaction_id`다. DB의 `payment_records.provider_transaction_id` partial unique index가 실제 멱등성 보장 layer
+- `tier_id`는 reservation/checkout 진입 시점에 event.pricing 안의 tier id와 일치하는지 검증함. FK가 아니므로 schema-level 보장은 application validation에 의존
+- 멱등성은 3계층으로 방어함: (1) Redis idempotency lock — 처리 중 중복 진입의 1차 layer, owner token + Lua atomic check-and-delete로 lock 분실 사고를 막음 (2) PostgreSQL advisory transaction lock — Redis 장애 등으로 1차 layer가 우회된 경우 트랜잭션 시작 시점 `pg_advisory_xact_lock(hashtext(key))`로 동일 key의 동시 트랜잭션을 직렬화 (3) `orders.idempotency_key` UNIQUE 제약 — schema-level backup. 1·2 layer가 모두 우회되어도 23505로 잡힘
 - Reservation TTL 만료 좌석 회수: setInterval 기반 in-process sweeper(`src/infra/cron/reservation-sweeper.ts`, 5분 주기)가 만료된 active reservation을 expired로 전환하고 좌석을 회수함. 데모/단일 노드에는 충분하나, 운영 환경에서는 별도 워커 프로세스(BullMQ 등)로 분리하는 것이 권장됨
+- 좌석 회계는 `events.available_seats` 단일 카운터 기준이며 tier별 잔여를 별도 추적하지 않음. tier 단위 oversell 방지가 필요한 운영 환경에서는 `event_tiers` 별도 테이블이 필요함
 
 ## 배포 구성
 
@@ -98,8 +101,10 @@ Redis는 빠른 조회와 운영 보조 역할을 맡지만 source of truth는 �
 
 ## 주요 정합성 포인트
 
-- `Idempotency-Key` 기반 중복 재시도 방어
-- `SERIALIZABLE` 트랜잭션 사용
+- `Idempotency-Key` 기반 중복 재시도 방어 (REST 진입 layer)
+- 동일 `idempotency_key` 동시 진입은 트랜잭션 시작 시점의 `pg_advisory_xact_lock(hashtext(idempotency_key))`로 직렬화. 늦게 도착한 트랜잭션은 lock 대기 후 SELECT에서 기존 order를 발견해 idempotent 응답을 그대로 반환. `orders.idempotency_key` UNIQUE는 schema-level backup
+- `payment_records.provider_transaction_id` partial UNIQUE — webhook 멱등성의 자연 키
+- `SERIALIZABLE` 트랜잭션 사용 — 정합성을 보수적으로 잡기 위한 선택. row-level FOR UPDATE 만으로도 단일 row 동시성은 막히지만, 미래에 multiple-row read-modify-write를 추가할 여지를 위해 isolation level을 끌어올려 둠
 - `SELECT ... FOR UPDATE` 기반 이벤트 재고 행 잠금
 - `available_seats`가 0 아래로 내려가지 않도록 제어
 - checkout에서는 주문만 생성하고 티켓은 settlement 이후에만 발급
@@ -108,31 +113,25 @@ Redis는 빠른 조회와 운영 보조 역할을 맡지만 source of truth는 �
 
 ## 디렉터리 구조
 
-```text
-src/
-  api/        Fastify 앱 조립, REST 라우트, GraphQL 서버, 미들웨어
-  core/       도메인 모델, 서비스, 에러
-  infra/      PostgreSQL, Redis, 설정, 로거, 마이그레이션, 시드
+```textsrc/
+api/        Fastify 앱 조립, REST 라우트, GraphQL 서버, 미들웨어
+core/       도메인 모델, 서비스, 에러
+infra/      PostgreSQL, Redis, 설정, 로거, 마이그레이션, 시드
 docs/         아키텍처, 정합성, Redis, GraphQL, 운영 문서
 load-test/    k6 부하 테스트 스크립트
 terraform/    학습용 AWS 분산 구성 Terraform 코드
-```
 
 ## 빠른 시작
 
 ### 1. 의존성 설치
 
-```bash
-npm install
-```
+```bashnpm install
 
 ### 2. 정적 검증
 
-```bash
-npm run build
+```bashnpm run build
 npm test -- --runInBand
 npm run lint
-```
 
 현재 기준 검증 상태:
 
@@ -143,10 +142,8 @@ npm run lint
 
 ### 3. 로컬 인프라 실행
 
-```bash
-docker compose up -d postgres redis
+```bashdocker compose up -d postgres redis
 docker compose up -d app
-```
 
 현재 compose 포트:
 
@@ -157,35 +154,27 @@ docker compose up -d app
 
 ### 4. 상태 확인
 
-```bash
-curl http://localhost:3000/health
+```bashcurl http://localhost:3000/health
 curl http://localhost:3000/ready
-```
 
 ## 로컬 데모 순서
 
 ### 이벤트 목록 조회
 
-```bash
-curl http://localhost:3000/events
-```
+```bashcurl http://localhost:3000/events
 
 ### 예약 hold 생성
 
-```bash
-curl -X POST http://localhost:3000/reservations \
-  -H "Content-Type: application/json" \
-  -d '{"eventId":"EVENT_ID","userId":"USER_ID","quantity":1,"tierId":"TIER_ID"}'
-```
+```bashcurl -X POST http://localhost:3000/reservations 
+-H "Content-Type: application/json" 
+-d '{"eventId":"EVENT_ID","userId":"USER_ID","quantity":1,"tierId":"TIER_ID"}'
 
 ### 체크아웃
 
-```bash
-curl -X POST http://localhost:3000/checkouts \
-  -H "Content-Type: application/json" \
-  -H "Idempotency-Key: 22222222-2222-2222-2222-222222222222" \
-  -d '{"eventId":"EVENT_ID","userId":"USER_ID","quantity":1,"tierId":"TIER_ID","reservationId":"RESERVATION_ID"}'
-```
+```bashcurl -X POST http://localhost:3000/checkouts 
+-H "Content-Type: application/json" 
+-H "Idempotency-Key: 22222222-2222-2222-2222-222222222222" 
+-d '{"eventId":"EVENT_ID","userId":"USER_ID","quantity":1,"tierId":"TIER_ID","reservationId":"RESERVATION_ID"}'
 
 이 시점의 기대 상태:
 
@@ -194,12 +183,10 @@ curl -X POST http://localhost:3000/checkouts \
 
 ### settlement webhook
 
-```bash
-curl -X POST http://localhost:3000/webhooks/payments/settlement \
-  -H "Content-Type: application/json" \
-  -H "Idempotency-Key: 33333333-4444-5555-6666-777777777777" \
-  -d '{"orderId":"ORDER_ID","providerTransactionId":"txn-settle-001","status":"settled"}'
-```
+```bashcurl -X POST http://localhost:3000/webhooks/payments/settlement 
+-H "Content-Type: application/json" 
+-H "Idempotency-Key: 33333333-4444-5555-6666-777777777777" 
+-d '{"orderId":"ORDER_ID","providerTransactionId":"txn-settle-001","status":"settled"}'
 
 `WEBHOOK_SIGNING_SECRET`이 설정된 환경에서는 요청 body의 HMAC-SHA256 hex digest를 `X-Webhook-Signature` 헤더로 함께 보내야 한다.
 
@@ -210,12 +197,10 @@ curl -X POST http://localhost:3000/webhooks/payments/settlement \
 
 ### 같은 settlement webhook 재시도
 
-```bash
-curl -X POST http://localhost:3000/webhooks/payments/settlement \
-  -H "Content-Type: application/json" \
-  -H "Idempotency-Key: 33333333-4444-5555-6666-777777777777" \
-  -d '{"orderId":"ORDER_ID","providerTransactionId":"txn-settle-001","status":"settled"}'
-```
+```bashcurl -X POST http://localhost:3000/webhooks/payments/settlement 
+-H "Content-Type: application/json" 
+-H "Idempotency-Key: 33333333-4444-5555-6666-777777777777" 
+-d '{"orderId":"ORDER_ID","providerTransactionId":"txn-settle-001","status":"settled"}'
 
 기대 결과:
 
@@ -224,12 +209,10 @@ curl -X POST http://localhost:3000/webhooks/payments/settlement \
 
 ### GraphQL 조회
 
-```bash
-curl -X POST http://localhost:3000/graphql \
-  -H "Content-Type: application/json" \
-  -H "Authorization: Bearer JWT_TOKEN" \
-  -d '{"query":"query { myOrders(limit: 10) { id status paymentStatus quantity totalAmount } myTickets(limit: 10) { id ticketNumber status } }"}'
-```
+```bashcurl -X POST http://localhost:3000/graphql 
+-H "Content-Type: application/json" 
+-H "Authorization: Bearer JWT_TOKEN" 
+-d '{"query":"query { myOrders(limit: 10) { id status paymentStatus quantity totalAmount } myTickets(limit: 10) { id ticketNumber status } }"}'
 
 ## 실제로 확인한 것
 
@@ -257,67 +240,51 @@ curl -X POST http://localhost:3000/graphql \
 
 ## 테스트
 
-```bash
-npm test -- --runInBand
+```bashnpm test -- --runInBand
 npm run test:redis
 npm run test:concurrency
-```
 
 ## 부하 테스트
 
-```bash
-npm run load-test:baseline
+```bashnpm run load-test:baseline
 npm run load-test:spike
 npm run load-test:sustained
 npm run load-test:callbacks
-```
 
 결과 저장:
 
-```bash
-npm run load-test:baseline:report
+```bashnpm run load-test:baseline:report
 npm run load-test:spike:report
 npm run load-test:sustained:report
 npm run load-test:callbacks:report
-```
 
 ### k6 설치
 
 Windows 기준 예시:
 
-```bash
-winget install k6.k6
-```
+```bashwinget install k6.k6
 
 설치 확인:
 
-```bash
-k6 version
-```
+```bashk6 version
 
 ### 실행 전 준비
 
 앱과 의존성이 먼저 떠 있어야 한다.
 
-```bash
-docker compose up -d postgres redis
+```bashdocker compose up -d postgres redis
 docker compose up -d app
-```
 
 상태 확인:
 
-```bash
-curl http://localhost:3000/health
+```bashcurl http://localhost:3000/health
 curl http://localhost:3000/ready
-```
 
 ### 환경 변수
 
 조회 시나리오는 `BASE_URL`만 있으면 된다.
 
-```powershell
-$env:BASE_URL="http://localhost:3000"
-```
+```powershell$env:BASE_URL="http://localhost:3000"
 
 쓰기 시나리오는 아래 값을 같이 넣는 편이 안전하다.
 
@@ -327,12 +294,12 @@ $env:BASE_URL="http://localhost:3000"
 
 PowerShell 예시:
 
-```powershell
-$env:BASE_URL="http://localhost:3000"
+```powershell$env:BASE_URL="http://localhost:3000"
 $env:LOAD_TEST_USER_ID="USER_ID"
 $env:LOAD_TEST_EVENT_ID="EVENT_ID"
 $env:LOAD_TEST_TIER_ID="TIER_ID"
-```
+
+쓰기 시나리오는 단일 user를 다수 VU가 공유하는 micro-benchmark 형태로 작성되어 있어, 동일 user에 대한 lock 경합 측정에 가깝다. distinct user N명이 같은 event에 몰리는 본격 flash-sale 모델은 후속 과제로 남아 있다.
 
 ### 시나리오 설명
 
@@ -376,12 +343,10 @@ callback 시나리오는 duplicate 응답이 나와도 괜찮지만, 티켓 수�
 
 ## Docker 명령
 
-```bash
-npm run docker:build
+```bashnpm run docker:build
 npm run docker:up
 npm run docker:down
 npm run docker:logs
-```
 
 ## Terraform
 
@@ -389,13 +354,11 @@ npm run docker:logs
 
 기본 순서:
 
-```bash
-cd terraform
+```bashcd terraform
 terraform init
 terraform fmt -check -recursive
 terraform validate
 terraform plan
-```
 
 예시 변수 파일:
 

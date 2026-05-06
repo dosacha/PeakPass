@@ -1,7 +1,7 @@
 import { PoolClient } from 'pg';
 import { v4 as uuid } from 'uuid';
 import { Reservation, CreateReservationInput } from '../models/reservation';
-import { NotFoundError } from '../errors';
+import { NotFoundError, ValidationError } from '../errors';
 import { InventoryService } from './inventory.service';
 import {
   deleteReservationHold,
@@ -51,6 +51,29 @@ export class ReservationService {
     input: CreateReservationInput,
     client: PoolClient,
   ): Promise<Reservation> {
+    // tier_id가 events.pricing 안의 id와 일치하는지 진입 시점에 검증한다.
+    //
+    // 이 검증을 하지 않으면 무효한 tier_id로 reservation이 생성되어 좌석을 hold하고,
+    // 그 후 checkout이 와서야 tier lookup 실패로 거부된다. 그 사이 좌석은 5분간
+    // 점유된 상태로 남고 sweeper가 풀어줄 때까지 다른 사용자의 reservation을 막는다.
+    // 단순한 입력 검증이지만 작은 DoS 벡터를 차단하는 의미가 있다.
+    //
+    // events.pricing은 event 생성 시 박히고 사실상 immutable이므로 plain SELECT로
+    // 충분하다. FOR UPDATE는 뒤이은 inventory.adjustAvailableSeats가 잡는다.
+    const tierCheckResult = await client.query<{ pricing: Array<{ id: string }> }>(
+      `SELECT pricing::jsonb as "pricing" FROM events WHERE id = $1`,
+      [input.eventId],
+    );
+    if (tierCheckResult.rows.length === 0) {
+      throw new NotFoundError('Event', input.eventId);
+    }
+    const tierExists = tierCheckResult.rows[0].pricing.some(
+      (tier) => tier.id === input.tierId,
+    );
+    if (!tierExists) {
+      throw new ValidationError(`Pricing tier not found: ${input.tierId}`);
+    }
+
     // events 행을 명시적으로 잠궈서 동시 reservation/checkout과 직렬화한다.
     await this.inventory.adjustAvailableSeats(input.eventId, -input.quantity, client);
 

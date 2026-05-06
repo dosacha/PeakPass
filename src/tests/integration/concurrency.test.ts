@@ -7,9 +7,9 @@ import { initRedis, closeRedis, getRedis } from '@/infra/redis/client';
 import { loadConfig } from '@/infra/config';
 import { initLogger } from '@/infra/logger';
 import { v4 as uuid } from 'uuid';
-import { CheckoutService } from '@/core/services/checkout.service';
+import { CheckoutService, CheckoutResult } from '@/core/services/checkout.service';
 import { ReservationService } from '@/core/services/reservation.service';
-import { ConflictError } from '@/core/errors';
+import { ConflictError, ValidationError } from '@/core/errors';
 
 type CheckoutInput = {
   eventId: string;
@@ -345,4 +345,55 @@ describe('concurrency integration tests', () => {
     },
     15000,
   );
+
+  // concurrency.test.ts에 추가 권장
+  it('returns idempotent order when same idempotency_key arrives concurrently', async () => {
+    const { eventId, tierId, userIds } = await setupEventAndUsers({ seats: 5, userCount: 1 });
+    const idempotencyKey = uuid();
+
+    const checkoutService = new CheckoutService();
+    const input = {
+      eventId,
+      userId: userIds[0],
+      quantity: 1,
+      tierId,
+      idempotencyKey,
+    };
+
+    const results = await Promise.allSettled([
+      serializableTransactionWithRetry((c) => checkoutService.checkout(input, c)),
+      serializableTransactionWithRetry((c) => checkoutService.checkout(input, c)),
+      serializableTransactionWithRetry((c) => checkoutService.checkout(input, c)),
+    ]);
+
+    // 셋 다 fulfilled여야 한다 (advisory lock으로 23505 발생 안 함)
+    expect(results.every((r) => r.status === 'fulfilled')).toBe(true);
+
+    // 셋 다 같은 order id를 받아야 한다 (idempotent)
+    const orderIds = results
+      .filter((r): r is PromiseFulfilledResult<CheckoutResult> => r.status === 'fulfilled')
+      .map((r) => r.value.order.id);
+    expect(new Set(orderIds).size).toBe(1);
+
+    // 좌석은 1개만 차감
+    expect(await getAvailableSeats(eventId)).toBe(4);
+  });
+
+  // reservation tier 검증 (concurrency.test.ts에 추가 권장)
+  it('rejects reservation when tier_id does not exist in event.pricing', async () => {
+    const { eventId, userIds } = await setupEventAndUsers({ seats: 5, userCount: 1 });
+    const reservationService = new ReservationService();
+
+    await expect(
+      reservationService.createReservation({
+        eventId,
+        userId: userIds[0],
+        quantity: 1,
+        tierId: 'non-existent-tier-id',
+      }),
+    ).rejects.toThrow(ValidationError);
+
+    // 좌석은 차감되지 않아야 함
+    expect(await getAvailableSeats(eventId)).toBe(5);
+  });
 });
