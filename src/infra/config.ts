@@ -76,6 +76,14 @@ const envSchema = z.object({
   //   - false: JWT 있을 때만 일치 강제, 없으면 body 신뢰 + warn 로그 (demo override)
   ENFORCE_AUTH_USER_MATCH: booleanFromEnv(true),
 
+  // POST /events 운영자 전용 가드.
+  //   - false (default): 모든 호출을 403으로 거부 (티켓팅 서비스에서 이벤트 생성은 일반
+  //     사용자 기능이 아니라 운영자 기능이므로 안전한 기본값을 명시)
+  //   - true: ENFORCE_AUTH_USER_MATCH=true이면 JWT의 role='admin' 필요,
+  //     ENFORCE_AUTH_USER_MATCH=false(demo) 환경에서는 flag만 보고 통과
+  // 본 프로젝트는 별도 admin 도메인을 두지 않으므로 demo/seed 흐름 외에는 켜지 말 것.
+  ENABLE_ADMIN_EVENT_WRITE: booleanFromEnv(false),
+
   // GraphQL query 복잡도 상한.
   // didResolveOperation 단계에서 계산된 complexity가 이 값을 초과하면 거부한다.
   // 의도: 악의/실수로 들어오는 깊은 nested query 또는 큰 limit 인자로 인한 DB 폭주 방어.
