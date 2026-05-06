@@ -138,11 +138,9 @@ dist
 vite.config.js.timestamp-*
 vite.config.ts.timestamp-*
 
-# Local-only interview prep docs
-docs/INTERVIEW_PRACTICE_4_STEPS.md
-docs/INTERVIEW_STORIES.md
-docs/PORTFOLIO_DOCUMENTATION.md
-docs/TECHNICAL_QA.md
+# Local-only docs (면접 prep, portfolio 정리, 개인 작업 노트 등)
+# 이 디렉토리는 git tracking에서 제외되며, 본인 로컬에서만 참조한다.
+docs/_private/
 
 .env.prod
 docker-compose.prod.yml
