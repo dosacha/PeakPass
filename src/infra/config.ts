@@ -1,6 +1,8 @@
 import 'dotenv/config';
 import { z } from 'zod';
 
+const DEVELOPMENT_JWT_SECRET = 'dev-secret-change-in-production-32chars';
+
 // 환경변수에서 boolean을 안전하게 읽는다.
 // `z.coerce.boolean()`은 자바스크립트 `Boolean(string)` 룰을 따라
 // 빈 문자열을 제외한 모든 string("false"·"0"·"FALSE" 등)을 true로 변환하는 함정이 있다.
@@ -43,7 +45,7 @@ const envSchema = z.object({
   REDIS_POOL_SIZE: z.coerce.number().default(10),
 
   // 애플리케이션 설정
-  JWT_SECRET: z.string().default('dev-secret-change-in-production'),
+  JWT_SECRET: z.string().min(32).default(DEVELOPMENT_JWT_SECRET),
   API_KEY: z.string().default('dev-api-key-change-in-production'),
 
   // 외부 서비스 설정
@@ -105,7 +107,7 @@ function assertProductionInvariants(config: Config): void {
     return;
   }
 
-  if (config.JWT_SECRET === 'dev-secret-change-in-production') {
+  if (config.JWT_SECRET === DEVELOPMENT_JWT_SECRET) {
     throw new Error('JWT_SECRET must be set in production environment');
   }
 
@@ -140,6 +142,16 @@ function assertProductionInvariants(config: Config): void {
     throw new Error(
       'RATE_LIMIT_FAIL_MODE must be "closed" in production environment ' +
         '(open mode disables rate limiting on Redis failure, exposing checkout/webhook to flooding)',
+    );
+  }
+
+  // ENABLE_RATE_LIMITING=false는 Redis 장애 fail-open과 별개로 rate limit layer를
+  // 명시적으로 우회한다. production에서는 flood 방어가 빠진 채 checkout/reservation/webhook
+  // write 경로가 열리므로 설정 실수를 fail-fast로 막는다.
+  if (!config.ENABLE_RATE_LIMITING) {
+    throw new Error(
+      'ENABLE_RATE_LIMITING must be true in production environment ' +
+        '(false disables rate limiting on checkout/reservation/webhook write paths)',
     );
   }
 }

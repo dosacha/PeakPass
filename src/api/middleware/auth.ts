@@ -4,9 +4,6 @@ import jwt from 'jsonwebtoken';
 import { getConfig } from '@/infra/config';
 import { ForbiddenError, UnauthorizedError } from '@/core/errors';
 
-const logger = getLogger();
-const config = getConfig();
-
 export interface AuthUser {
   id: string;
   email: string;
@@ -14,6 +11,9 @@ export interface AuthUser {
 }
 
 export function extractUserFromToken(token: string): AuthUser | null {
+  const config = getConfig();
+  const logger = getLogger();
+
   try {
     const decoded = jwt.verify(token, config.JWT_SECRET) as jwt.JwtPayload;
     return {
@@ -36,6 +36,7 @@ export function extractTokenFromHeader(authHeader: string | undefined): string |
 }
 
 export async function jwtAuthMiddleware(request: FastifyRequest, reply: FastifyReply) {
+  const logger = getLogger();
   const token = extractTokenFromHeader(request.headers.authorization);
 
   if (!token) {
@@ -76,6 +77,7 @@ export function assertBodyUserMatchesAuth(
   bodyUserId: string,
 ): void {
   const cfg = getConfig();
+  const logger = getLogger();
   const authUser = request.user;
 
   if (authUser) {

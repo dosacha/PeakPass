@@ -49,8 +49,14 @@ export class CheckoutService {
     //   (23505)으로 깨지고, retry 대상도 아니므로 500으로 새어나간다.
     //
     // 해결: pg_advisory_xact_lock으로 idempotency_key 단위 mutual exclusion.
+    //
+    // 면접용 컨텍스트: hashtext()는 int4(32-bit)라 birthday paradox 기준 서로 다른
+    // idempotency key가 약 6.5만 개 누적되면 충돌 확률이 ~50%까지 오른다. 충돌은
+    // correctness bug는 아니지만 무관한 checkout이 같은 advisory lock queue에 묶여
+    // contention을 만든다. PG 11+의 hashtextextended(text, seed)는 bigint를 반환하므로
+    // advisory lock 키 공간을 64-bit로 넓힌다.
     await client.query(
-      `SELECT pg_advisory_xact_lock(hashtext($1))`,
+      `SELECT pg_advisory_xact_lock(hashtextextended($1, 0))`,
       [input.idempotencyKey],
     );
 

@@ -18,7 +18,7 @@
 
 ## 체크아웃 흐름
 
-핵심 코드는 [checkout.service.ts](C:/Users/dosac/projects/PeakPass/src/core/services/checkout.service.ts)와 [checkouts.ts](C:/Users/dosac/projects/PeakPass/src/api/rest/checkouts.ts)에 있다.
+핵심 코드는 [checkout.service.ts](../src/core/services/checkout.service.ts)와 [checkouts.ts](../src/api/rest/checkouts.ts)에 있다.
 
 ### 1. 멱등성 선검사
 
@@ -26,11 +26,13 @@
 - 서비스 내부에서 `orders.idempotency_key`로 기존 주문 조회
 - 이미 처리된 키면 기존 주문 반환
 
-### 2. 예약 유효성 확인
+### 2. 예약 atomic 전환
 
-- `reservationId`가 있으면 `ReservationService.isReservationValidWithClient()` 호출
-- Redis hold가 남아 있으면 먼저 참조
-- Redis에 없으면 DB 상태와 `expires_at` 확인
+- `reservationId`가 있으면 checkout 트랜잭션 안에서 `UPDATE reservations ... RETURNING` 수행
+- 조건은 `status = 'active'`, `expires_at > NOW()`, user/event/tier/quantity 일치까지 한 번에 검증
+- 이 한 쿼리가 row lock, 유효성 검증, `converted` 전환을 함께 처리
+- affected row가 0이면 존재 여부, 만료, 상태, payload mismatch를 분리해 404/409 반환
+- checkout 경로는 Redis hold를 읽지 않음. Redis hold는 정합성 layer가 아니라 read-side/UX 보조 계층
 
 ### 3. 이벤트 행 잠금
 
@@ -47,9 +49,9 @@ FOR UPDATE
 ### 4. 주문 생성과 재고 차감
 
 - `orders` INSERT
-- `events.available_seats = available_seats - quantity`
+- reservation이 없으면 `events.available_seats = available_seats - quantity`
+- reservation이 있으면 이미 soft hold로 차감된 좌석을 order 점유로 이전
 - `payment_records` INSERT with `pending`
-- reservation이 있으면 `converted` 처리
 
 ### 5. 커밋 이후 외부 부작용
 
@@ -62,7 +64,7 @@ checkout 시점에는 티켓을 발급하지 않는다.
 
 ## settlement webhook 흐름
 
-핵심 코드는 [payments.ts](C:/Users/dosac/projects/PeakPass/src/api/rest/payments.ts)와 [checkout.service.ts](C:/Users/dosac/projects/PeakPass/src/core/services/checkout.service.ts)에 있다.
+핵심 코드는 [payments.ts](../src/api/rest/payments.ts)와 [checkout.service.ts](../src/core/services/checkout.service.ts)에 있다.
 
 ### settled webhook
 
@@ -87,15 +89,18 @@ checkout 시점에는 티켓을 발급하지 않는다.
 
 ## 예약 hold 흐름
 
-핵심 코드는 [reservation.service.ts](C:/Users/dosac/projects/PeakPass/src/core/services/reservation.service.ts)에 있다.
+핵심 코드는 [reservation.service.ts](../src/core/services/reservation.service.ts)에 있다.
 
 - 예약 생성은 DB 트랜잭션으로 먼저 저장
+- 생성 트랜잭션에서 `events.available_seats`를 즉시 차감해 soft hold를 잡음
 - 커밋 이후 `setReservationHold()`로 Redis TTL hold 저장
-- 예약 release / convert는 DB 상태를 먼저 바꾸고 커밋 이후 Redis hold 삭제
+- Redis hold는 `GET /reservations/:id` 응답 가속과 만료 시각 표시를 위한 보조 캐시
+- checkout은 Redis hold를 읽지 않고 DB atomic UPDATE로만 reservation을 검증·전환
+- 예약 release / expire / checkout convert는 DB 상태를 먼저 바꾸고 커밋 이후 Redis hold 삭제
 
 ## DB 제약과 모델링
 
-실제 제약은 [001_init_schema.sql](C:/Users/dosac/projects/PeakPass/src/infra/migrations/001_init_schema.sql), [002_ticket_number_sequence.sql](C:/Users/dosac/projects/PeakPass/src/infra/migrations/002_ticket_number_sequence.sql), [003_payment_provider_transaction_unique.sql](C:/Users/dosac/projects/PeakPass/src/infra/migrations/003_payment_provider_transaction_unique.sql)에 있다.
+실제 제약은 [001_init_schema.sql](../src/infra/migrations/001_init_schema.sql), [002_ticket_number_sequence.sql](../src/infra/migrations/002_ticket_number_sequence.sql), [003_payment_provider_transaction_unique.sql](../src/infra/migrations/003_payment_provider_transaction_unique.sql)에 있다.
 
 대표 예시:
 
