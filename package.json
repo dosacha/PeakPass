@@ -12,6 +12,7 @@
     "test:watch": "jest --watch",
     "test:coverage": "jest --coverage",
     "test:concurrency": "jest --runInBand --config jest.integration.cjs src/tests/integration/concurrency.test.ts",
+    "test:webhook": "jest --runInBand --config jest.integration.cjs src/tests/integration/webhook-idempotency.test.ts",
     "test:redis": "jest --runInBand --config jest.integration.cjs src/tests/integration/redis.test.ts",
     "lint": "eslint src --ext .ts",
     "lint:fix": "eslint src --ext .ts --fix",
