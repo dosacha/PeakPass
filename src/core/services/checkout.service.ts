@@ -3,14 +3,13 @@ import { v4 as uuid } from 'uuid';
 import Decimal from 'decimal.js';
 import { Order, CreateOrderInput } from '../models/order';
 import { Ticket, generateTicketNumber } from '../models/ticket';
-import { Event } from '../models/event';
 import {
-  InsufficientInventoryError,
   ValidationError,
   NotFoundError,
   ConflictError,
 } from '../errors';
 import { ReservationService } from './reservation.service';
+import { InventoryService } from './inventory.service';
 import { getLogger } from '@/infra/logger';
 import { PaymentWebhookInput } from '../models/payment';
 
@@ -19,9 +18,20 @@ export interface CheckoutResult {
   tickets: Ticket[];
 }
 
+type PaymentTransition =
+  | { kind: 'settle' }
+  | { kind: 'fail' };
+
+type WebhookOutcome =
+  | { kind: 'idempotent_settled'; order: Order; tickets: Ticket[] }
+  | { kind: 'idempotent_failed'; order: Order }
+  | { kind: 'newly_settled'; order: Order; tickets: Ticket[] }
+  | { kind: 'newly_failed'; order: Order };
+
 export class CheckoutService {
   private logger = getLogger();
   private reservationService = new ReservationService();
+  private inventory = new InventoryService();
 
   async checkout(input: CreateOrderInput, client: PoolClient): Promise<CheckoutResult> {
     const existingOrder = await this.getOrderByIdempotencyKey(input.idempotencyKey, client);
@@ -48,57 +58,71 @@ export class CheckoutService {
     if (input.reservationId) {
       const convertResult = await client.query(
         `UPDATE reservations
-         SET status = 'converted'
-         WHERE id = $1 AND status = 'active' AND expires_at > NOW()
-         RETURNING id`,
-        [input.reservationId],
+        SET status = 'converted'
+        WHERE id = $1
+          AND user_id = $2
+          AND event_id = $3
+          AND tier_id = $4
+          AND quantity = $5
+          AND status = 'active'
+          AND expires_at > NOW()
+        RETURNING id, user_id, event_id, tier_id, quantity`,
+        [input.reservationId, input.userId, input.eventId, input.tierId, input.quantity],
       );
 
       if (convertResult.rowCount === 0) {
-        // Lazy expire: 만료된 reservation이 좌석을 점유하고 있으면 그 자리에서 정리한다.
-        // expireReservationWithClient는 status가 'active'가 아니면 noop이므로
-        // 이미 release/expire된 경우에도 안전하다.
-        await this.reservationService.expireReservationWithClient(input.reservationId, client);
-        throw new ConflictError('Reservation has expired or is no longer valid');
+        // 정확한 사유 분기
+        const reservationCheck = await client.query(
+          `SELECT user_id, event_id, tier_id, quantity, status, expires_at FROM reservations WHERE id = $1`,
+          [input.reservationId],
+        );
+        if (reservationCheck.rows.length === 0) {
+          throw new NotFoundError('Reservation', input.reservationId);
+        }
+        const r = reservationCheck.rows[0];
+        if (r.status !== 'active' || new Date(r.expires_at) <= new Date()) {
+          await this.reservationService.expireReservationWithClient(input.reservationId, client);
+          throw new ConflictError('Reservation has expired or is no longer valid');
+        }
+        // 여기까지 오면 payload mismatch
+        this.logger.warn(
+          {
+            reservationId: input.reservationId,
+            reservationUserId: r.user_id,
+            checkoutUserId: input.userId,
+            reservationEventId: r.event_id,
+            checkoutEventId: input.eventId,
+          },
+          'Checkout payload does not match reservation',
+        );
+        throw new ConflictError('Checkout payload does not match reservation');
       }
 
       seatsAlreadyHeld = true;
     }
 
-    const eventLock = await client.query<Event>(
+    const eventResult = await client.query<{
+      id: string;
+      pricing: Array<{ id: string; price: number }>;
+    }>(
       `
       SELECT
-        id, total_seats as "totalSeats", available_seats as "availableSeats",
-        pricing
+        id,
+        pricing::jsonb as "pricing"
       FROM events
       WHERE id = $1
-      FOR UPDATE
       `,
       [input.eventId],
     );
 
-    if (eventLock.rows.length === 0) {
+    if (eventResult.rows.length === 0) {
       throw new NotFoundError('Event', input.eventId);
     }
 
-    const event = eventLock.rows[0];
+    const event = eventResult.rows[0];
 
     // 좌석 검증은 reservation 없이 들어온 직접 checkout 경로에서만 한다.
     // reservation 경로는 reservation 단계에서 이미 좌석을 점유했다.
-    if (!seatsAlreadyHeld) {
-      if (event.availableSeats < input.quantity) {
-        this.logger.warn(
-          {
-            eventId: input.eventId,
-            available: event.availableSeats,
-            requested: input.quantity,
-          },
-          'Insufficient inventory during checkout',
-        );
-        throw new InsufficientInventoryError(event.availableSeats, input.quantity);
-      }
-    }
-
     const tier = event.pricing.find((candidate) => candidate.id === input.tierId);
     if (!tier) {
       throw new ValidationError(`Pricing tier not found: ${input.tierId}`);
@@ -149,13 +173,10 @@ export class CheckoutService {
     // 좌석 차감도 직접 checkout 경로에서만 한다.
     // reservation 경로의 좌석 점유는 그대로 order의 점유로 이전된다.
     if (!seatsAlreadyHeld) {
-      await client.query(
-        `
-        UPDATE events
-        SET available_seats = available_seats - $1
-        WHERE id = $2
-        `,
-        [input.quantity, input.eventId],
+      const newAvailable = await this.inventory.adjustAvailableSeats(
+        input.eventId,
+        -input.quantity,
+        client,
       );
 
       this.logger.info(
@@ -163,7 +184,7 @@ export class CheckoutService {
           orderId,
           eventId: input.eventId,
           seatsDeducted: input.quantity,
-          newAvailable: event.availableSeats - input.quantity,
+          newAvailable,
         },
         'Inventory deducted for checkout (no reservation)',
       );
@@ -299,7 +320,7 @@ export class CheckoutService {
       `
       SELECT
         id, order_id as "orderId", event_id as "eventId", user_id as "userId",
-        ticket_number as "ticketNumber", qr_code as "qrCode",
+        ticket_number as "ticketNumber",
         status, created_at as "createdAt", updated_at as "updatedAt"
       FROM tickets WHERE order_id = $1
       `,
@@ -366,7 +387,6 @@ export class CheckoutService {
         event_id as "eventId",
         user_id as "userId",
         ticket_number as "ticketNumber",
-        qr_code as "qrCode",
         status,
         created_at as "createdAt",
         updated_at as "updatedAt"
@@ -390,7 +410,6 @@ export class CheckoutService {
         event_id as "eventId",
         user_id as "userId",
         ticket_number as "ticketNumber",
-        qr_code as "qrCode",
         status,
         created_at as "createdAt",
         updated_at as "updatedAt"
@@ -414,95 +433,120 @@ export class CheckoutService {
       throw new NotFoundError('Order', input.orderId);
     }
 
-    const existingTickets = await this.getTicketsByOrderId(order.id, client);
+    const transition: PaymentTransition =
+      input.status === 'settled' ? { kind: 'settle' } : { kind: 'fail' };
+    const outcome = await this.applyTransition(order, transition, input, idempotencyKey, client);
 
-    if (input.status === 'settled') {
-      if (order.status === 'paid') {
+    return this.mapOutcomeToResponse(outcome);
+  }
+
+  private async applyTransition(
+    order: Order,
+    transition: PaymentTransition,
+    input: PaymentWebhookInput,
+    idempotencyKey: string,
+    client: PoolClient,
+  ): Promise<WebhookOutcome> {
+    if (transition.kind === 'settle') {
+      return this.handleSettle(order, input, idempotencyKey, client);
+    }
+
+    return this.handleFail(order, input, idempotencyKey, client);
+  }
+
+  private async handleSettle(
+    order: Order,
+    input: PaymentWebhookInput,
+    idempotencyKey: string,
+    client: PoolClient,
+  ): Promise<WebhookOutcome> {
+    if (order.status === 'paid') {
+      const tickets = await this.getTicketsByOrderId(order.id, client);
+      return { kind: 'idempotent_settled', order, tickets };
+    }
+
+    if (order.status === 'cancelled') {
+      throw new ConflictError('Cancelled order cannot be settled');
+    }
+
+    await this.insertPaymentRecord(
+      order.id,
+      'settled',
+      input.providerTransactionId,
+      idempotencyKey,
+      client,
+    );
+
+    const paidOrder = await this.markOrderAsPaid(order.id, client);
+    const existingTickets = await this.getTicketsByOrderId(order.id, client);
+    const tickets = existingTickets.length > 0
+      ? existingTickets
+      : await this.issueTicketsForOrder(paidOrder, client);
+
+    return { kind: 'newly_settled', order: paidOrder, tickets };
+  }
+
+  private async handleFail(
+    order: Order,
+    input: PaymentWebhookInput,
+    idempotencyKey: string,
+    client: PoolClient,
+  ): Promise<WebhookOutcome> {
+    if (order.status === 'paid') {
+      const tickets = await this.getTicketsByOrderId(order.id, client);
+      return { kind: 'idempotent_settled', order, tickets };
+    }
+
+    if (order.status === 'cancelled') {
+      return { kind: 'idempotent_failed', order };
+    }
+
+    await this.insertPaymentRecord(
+      order.id,
+      'failed',
+      input.providerTransactionId,
+      idempotencyKey,
+      client,
+    );
+    await this.inventory.adjustAvailableSeats(order.eventId, order.quantity, client);
+    const cancelledOrder = await this.cancelOrder(order.id, client);
+
+    return { kind: 'newly_failed', order: cancelledOrder };
+  }
+
+  private mapOutcomeToResponse(
+    outcome: WebhookOutcome,
+  ): CheckoutResult & { paymentStatus: string; duplicate: boolean } {
+    switch (outcome.kind) {
+      case 'idempotent_settled':
         return {
-          order,
-          tickets: existingTickets,
+          order: outcome.order,
+          tickets: outcome.tickets,
           paymentStatus: 'settled',
           duplicate: true,
         };
-      }
-
-      if (order.status === 'cancelled') {
-        throw new ConflictError('Cancelled order cannot be settled');
-      }
-
-      await this.insertPaymentRecord(
-        order.id,
-        'settled',
-        input.providerTransactionId,
-        idempotencyKey,
-        client,
-      );
-
-      const paidOrder = await this.markOrderAsPaid(order.id, client);
-      const issuedTickets = existingTickets.length > 0
-        ? existingTickets
-        : await this.issueTicketsForOrder(paidOrder, client);
-
-      return {
-        order: paidOrder,
-        tickets: issuedTickets,
-        paymentStatus: 'settled',
-        duplicate: false,
-      };
+      case 'newly_settled':
+        return {
+          order: outcome.order,
+          tickets: outcome.tickets,
+          paymentStatus: 'settled',
+          duplicate: false,
+        };
+      case 'idempotent_failed':
+        return {
+          order: outcome.order,
+          tickets: [],
+          paymentStatus: 'failed',
+          duplicate: true,
+        };
+      case 'newly_failed':
+        return {
+          order: outcome.order,
+          tickets: [],
+          paymentStatus: 'failed',
+          duplicate: false,
+        };
     }
-
-    if (order.status === 'paid') {
-      return {
-        order,
-        tickets: existingTickets,
-        paymentStatus: 'settled',
-        duplicate: true,
-      };
-    }
-
-    if (order.status !== 'cancelled') {
-      await this.insertPaymentRecord(
-        order.id,
-        'failed',
-        input.providerTransactionId,
-        idempotencyKey,
-        client,
-      );
-
-      // 좌석 원복은 차감(`checkout`)과 같은 락 패턴을 사용한다.
-      // SERIALIZABLE 격리만으로도 정합성은 유지되지만, 명시적 FOR UPDATE를 두면:
-      //   1. 차감/원복 경로의 락 모델이 대칭이라 코드 의도가 분명함
-      //   2. 격리수준이 낮아져도 (REPEATABLE READ 등) 동작이 안전함
-      //   3. 동시 실패 webhook 다수 진입 시 SSI abort/retry 대신 lock-wait로 직렬화돼 비용이 적음
-      await client.query(
-        `SELECT id FROM events WHERE id = $1 FOR UPDATE`,
-        [order.eventId],
-      );
-
-      await client.query(
-        `
-        UPDATE events
-        SET available_seats = available_seats + $1
-        WHERE id = $2
-        `,
-        [order.quantity, order.eventId],
-      );
-
-      const cancelledOrder = await this.cancelOrder(order.id, client);
-      return {
-        order: cancelledOrder,
-        tickets: [],
-        paymentStatus: 'failed',
-        duplicate: false,
-      };
-    }
-
-    return {
-      order,
-      tickets: [],
-      paymentStatus: 'failed',
-      duplicate: true,
-    };
   }
 
   private async issueTicketsForOrder(order: Order, client: PoolClient): Promise<Ticket[]> {
@@ -526,7 +570,7 @@ export class CheckoutService {
         VALUES ($1, $2, $3, $4, $5, 'active')
         RETURNING
           id, order_id as "orderId", event_id as "eventId", user_id as "userId",
-          ticket_number as "ticketNumber", qr_code as "qrCode",
+          ticket_number as "ticketNumber",
           status, created_at as "createdAt", updated_at as "updatedAt"
         `,
         [ticketId, order.id, order.eventId, order.userId, ticketNumber],
@@ -545,48 +589,55 @@ export class CheckoutService {
     providerTransactionId: string,
     idempotencyKey: string,
     client: PoolClient,
-  ): Promise<void> {
-    try {
-      await client.query(
-        `
+  ): Promise<{ inserted: boolean; conflictingOrderId: string | null }> {
+    const result = await client.query<{
+      id: string;
+      orderId: string;
+      inserted: boolean;
+    }>(
+      `
+      WITH attempted AS (
         INSERT INTO payment_records (
           id, order_id, status, provider_transaction_id, idempotency_key, webhook_received_at
         )
         VALUES ($1, $2, $3, $4, $5, NOW())
-        `,
-        [uuid(), orderId, status, providerTransactionId, idempotencyKey],
-      );
-    } catch (err) {
-      if ((err as { code?: string }).code === '23505') {
-        // 같은 providerTransactionId 가 같은 order 의 idempotent retry 인지,
-        // 아니면 다른 order 로 잘못 들어온 충돌인지 구분한다.
-        const existing = await client.query<{ order_id: string }>(
-          'SELECT order_id FROM payment_records WHERE provider_transaction_id = $1',
-          [providerTransactionId],
-        );
-        
-        if (existing.rows[0] && existing.rows[0].order_id !== orderId) {
-          this.logger.error(
-            {
-              orderId,
-              conflictingOrderId: existing.rows[0].order_id,
-              providerTransactionId,
-            },
-            'providerTransactionId reused across different orders',
-          );
-          throw new ConflictError(
-            'providerTransactionId already used for a different order',
-          );
-        }
-        
+        ON CONFLICT (provider_transaction_id) WHERE provider_transaction_id IS NOT NULL DO NOTHING
+        RETURNING id, order_id as "orderId"
+      )
+      SELECT a.id, a."orderId", true as inserted
+      FROM attempted a
+      UNION ALL
+      SELECT pr.id, pr.order_id as "orderId", false as inserted
+      FROM payment_records pr
+      WHERE pr.provider_transaction_id = $4
+        AND NOT EXISTS (SELECT 1 FROM attempted)
+      `,
+      [uuid(), orderId, status, providerTransactionId, idempotencyKey],
+    );
+    const row = result.rows[0];
+    if (!row) {
+      throw new Error('insertPaymentRecord: no row returned');
+    }
+
+    if (row.inserted || row.orderId === orderId) {
+      if (!row.inserted) {
         this.logger.warn(
           { orderId, providerTransactionId },
           'Duplicate payment record (same order) ignored',
         );
-        return;
       }
-      
-      throw err;
+
+      return { inserted: row.inserted, conflictingOrderId: null };
     }
+
+    this.logger.error(
+      {
+        orderId,
+        conflictingOrderId: row.orderId,
+        providerTransactionId,
+      },
+      'providerTransactionId reused across different orders',
+    );
+    throw new ConflictError('providerTransactionId already used for a different order');
   }
 }

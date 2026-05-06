@@ -1,7 +1,8 @@
 import { PoolClient } from 'pg';
 import { v4 as uuid } from 'uuid';
 import { Reservation, CreateReservationInput } from '../models/reservation';
-import { InsufficientInventoryError, NotFoundError } from '../errors';
+import { NotFoundError } from '../errors';
+import { InventoryService } from './inventory.service';
 import {
   deleteReservationHold,
   getReservationHold,
@@ -15,6 +16,7 @@ const RESERVATION_TTL_SECONDS = REDIS_TTL.RESERVATION_HOLD;
 
 export class ReservationService {
   private logger = getLogger();
+  private inventory = new InventoryService();
 
   async createReservation(input: CreateReservationInput): Promise<Reservation> {
     const pool = getPostgresPool();
@@ -50,26 +52,9 @@ export class ReservationService {
     client: PoolClient,
   ): Promise<Reservation> {
     // events 행을 명시적으로 잠궈서 동시 reservation/checkout과 직렬화한다.
-    const eventResult = await client.query<{ available_seats: number }>(
-      `SELECT available_seats FROM events WHERE id = $1 FOR UPDATE`,
-      [input.eventId],
-    );
-
-    if (eventResult.rows.length === 0) {
-      throw new NotFoundError('Event', input.eventId);
-    }
-
-    const { available_seats } = eventResult.rows[0];
-    if (available_seats < input.quantity) {
-      throw new InsufficientInventoryError(available_seats, input.quantity);
-    }
+    await this.inventory.adjustAvailableSeats(input.eventId, -input.quantity, client);
 
     // 좌석 즉시 차감 (soft hold)
-    await client.query(
-      `UPDATE events SET available_seats = available_seats - $1 WHERE id = $2`,
-      [input.quantity, input.eventId],
-    );
-
     const reservationId = uuid();
     const expiresAt = new Date(Date.now() + RESERVATION_TTL_SECONDS * 1000);
 
@@ -268,11 +253,7 @@ export class ReservationService {
       return;
     }
 
-    await client.query(`SELECT id FROM events WHERE id = $1 FOR UPDATE`, [event_id]);
-    await client.query(
-      `UPDATE events SET available_seats = available_seats + $1 WHERE id = $2`,
-      [quantity, event_id],
-    );
+    await this.inventory.adjustAvailableSeats(event_id, quantity, client);
 
     await client.query(`UPDATE reservations SET status = $1 WHERE id = $2`, [
       finalStatus,
