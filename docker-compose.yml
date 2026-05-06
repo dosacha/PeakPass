@@ -60,6 +60,7 @@ services:
       PORT: 3000
       DB_POOL_MIN: 2
       DB_POOL_MAX: 10
+      ENFORCE_AUTH_USER_MATCH: 'false'
     ports:
       - "3000:3000"
     volumes:

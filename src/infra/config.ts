@@ -64,8 +64,8 @@ const envSchema = z.object({
 
   // 인증 정책:
   //   - true: JWT 미존재 시 401, JWT subject != body.userId 시 403
-  //   - false (default, 호환): JWT 있을 때만 일치 강제, 없으면 body 신뢰 + warn 로그
-  ENFORCE_AUTH_USER_MATCH: booleanFromEnv(false),
+  //   - false: JWT 있을 때만 일치 강제, 없으면 body 신뢰 + warn 로그 (demo override)
+  ENFORCE_AUTH_USER_MATCH: booleanFromEnv(true),
 
   // GraphQL query 복잡도 상한.
   // didResolveOperation 단계에서 계산된 complexity가 이 값을 초과하면 거부한다.
