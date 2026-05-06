@@ -15,10 +15,12 @@ import { storeIdempotencyResult } from '@/api/middleware/idempotency';
 import { assertBodyUserMatchesAuth } from '@/api/middleware/auth';
 
 /**
- * NOTE (known limitation):
- *   This route currently trusts `userId` from the request body in demo override mode.
- *   In ENFORCE_AUTH_USER_MATCH=true (production default), the authenticated subject
- *   (JWT `sub`) is cross-checked against `input.userId`. See README "Limitations".
+ * 정책 (현재 코드 기준):
+ *   - POST /checkouts: body.userId는 ENFORCE_AUTH_USER_MATCH=true (production default)
+ *     일 때 JWT subject와 일치 검증. ENFORCE_AUTH_USER_MATCH=false (demo override)일
+ *     때만 body userId를 그대로 신뢰하며 production에서는 fail-fast로 거부됨.
+ *   - GET /checkouts/:orderId: 본인 order만 조회. 미인증/소유자 mismatch는
+ *     모두 404로 응답해 order 존재 여부가 누설되지 않도록 한다.
  */
 
 export async function registerCheckoutRoutes(app: FastifyInstance) {
@@ -83,6 +85,15 @@ export async function registerCheckoutRoutes(app: FastifyInstance) {
   app.get<{ Params: { orderId: string } }>('/checkouts/:orderId', async (request, reply) => {
     const { orderId } = request.params;
     const config = getConfig();
+
+    // auth 가드를 DB 조회 *전에* 통과시킨다.
+    // 무인증 요청이 어차피 401로 끊길 거라면 DB connection을 잡을 이유가 없다.
+    if (config.ENFORCE_AUTH_USER_MATCH && !request.user?.id) {
+      return reply.code(401).send({
+        error: { code: 'UNAUTHENTICATED', message: 'Authentication required' },
+      });
+    }
+
     const client = await pool.connect();
 
     try {
@@ -91,7 +102,6 @@ export async function registerCheckoutRoutes(app: FastifyInstance) {
       // Ownership 검증.
       //
       // ENFORCE_AUTH_USER_MATCH=true (production default):
-      //   - 인증되지 않은 요청 → 401
       //   - order.userId != request.user.id → 404 (order 존재 자체를 숨겨 enumeration 방지)
       //
       // ENFORCE_AUTH_USER_MATCH=false (demo override):
@@ -101,17 +111,13 @@ export async function registerCheckoutRoutes(app: FastifyInstance) {
       // order가 존재하지 않을 때와 ownership mismatch가 *같은 404 응답*인 것은 의도된 설계다.
       // 응답을 분기하면 order 존재 여부가 timing/응답 차이로 누설된다.
       if (config.ENFORCE_AUTH_USER_MATCH) {
-        if (!request.user?.id) {
-          return reply.code(401).send({
-            error: { code: 'UNAUTHENTICATED', message: 'Authentication required' },
-          });
-        }
-        if (!order || order.userId !== request.user.id) {
+        // 위에서 request.user.id 존재가 보장됨
+        if (!order || order.userId !== request.user!.id) {
           if (order) {
             logger.warn(
               {
                 orderId,
-                requestedBy: request.user.id,
+                requestedBy: request.user!.id,
                 ownerId: order.userId,
                 requestId: request.id,
               },
