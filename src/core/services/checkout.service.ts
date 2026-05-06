@@ -51,7 +51,7 @@ export class CheckoutService {
     //     reservation을 release/expire 시킬 수 있어 race condition이 생긴다.
     //   - UPDATE ... WHERE status='active' AND expires_at > NOW() RETURNING은
     //     row lock + 조건 검증 + 상태 전환을 한 쿼리로 묶는다.
-    //   - affected = 0이면 invalid (released/expired/만료시간 초과).
+    //   - affected = 0이면 invalid (released/expired/만료시간 초과/payload mismatch).
     //
     // reservation 단계에서 좌석은 이미 차감되어 있으므로 checkout은 좌석을 *추가 차감하지 않는다*.
     let seatsAlreadyHeld = false;
@@ -101,6 +101,14 @@ export class CheckoutService {
       seatsAlreadyHeld = true;
     }
 
+    // events row를 INSERT 이전에 FOR UPDATE로 일찍 잠근다.
+    //
+    // 이유: orders가 events를 FK로 참조하므로 INSERT INTO orders는
+    // events row에 *암묵적 SHARE lock*을 건다. 이 SHARE lock 상태에서
+    // 뒤에 InventoryService.adjustAvailableSeats가 FOR UPDATE를 시도하면
+    // 동시 트랜잭션끼리 서로의 SHARE lock 해제를 기다리며 deadlock(40P01)이
+    // 발생한다. 첫 SELECT 시점에 FOR UPDATE를 명시해 모든 동시 트랜잭션이
+    // 같은 lock 순서를 따르도록 직렬화한다.
     const eventResult = await client.query<{
       id: string;
       pricing: Array<{ id: string; price: number }>;
@@ -111,6 +119,7 @@ export class CheckoutService {
         pricing::jsonb as "pricing"
       FROM events
       WHERE id = $1
+      FOR UPDATE
       `,
       [input.eventId],
     );
@@ -121,8 +130,6 @@ export class CheckoutService {
 
     const event = eventResult.rows[0];
 
-    // 좌석 검증은 reservation 없이 들어온 직접 checkout 경로에서만 한다.
-    // reservation 경로는 reservation 단계에서 이미 좌석을 점유했다.
     const tier = event.pricing.find((candidate) => candidate.id === input.tierId);
     if (!tier) {
       throw new ValidationError(`Pricing tier not found: ${input.tierId}`);
@@ -172,6 +179,8 @@ export class CheckoutService {
 
     // 좌석 차감도 직접 checkout 경로에서만 한다.
     // reservation 경로의 좌석 점유는 그대로 order의 점유로 이전된다.
+    // (events row는 위쪽 SELECT FOR UPDATE 시점에 이미 잠겨 있으므로
+    //  여기서의 adjustAvailableSeats는 같은 트랜잭션의 lock을 재사용한다.)
     if (!seatsAlreadyHeld) {
       const newAvailable = await this.inventory.adjustAvailableSeats(
         input.eventId,
@@ -336,7 +345,7 @@ export class CheckoutService {
     offset: number,
     client: PoolClient,
   ): Promise<Array<Order & { paymentStatus: string }>> {
-    const result = await client.query<
+    const result = await client.query <
       Order & { paymentStatus: string }
     >(
       `
