@@ -87,14 +87,14 @@
 
 이 형태로 측정해도 **단일 event row에 대한 lock 직렬화 비용**은 의미 있는 정보이고, GraphQL read p95가 흔들리지 않는지·rate limit on/off가 throughput에 어떻게 반영되는지는 확인 가능하다. 다만 본 결과를 "운영 환경의 flash-sale RPS 추정치"로 일반화하지 말 것.
 
-## 측정 결과 (2026-05-05, 위 환경)
+## 측정 결과 (2026-05-06 갱신, 위 환경)
 
 | 시나리오 | 결과 파일 | 부하 모델 | rate limit | RPS | p95 latency | 에러율 |
 |---|---|---|---|---|---|---|
-| read spike (200 VU) | `load-test/results/spike-2026-05-05-1915.json` | GraphQL `event` 단일 id 반복 | off | 648.9 | 15.6 ms | 0% |
-| read baseline (50 VU 10분) | `load-test/results/baseline-2026-05-05-1933.json` | GraphQL `events`/`event` mix + `/health` | off | 107.4 | 18.5 ms | 0% |
-| write reservation sustained (150 VU 3분 20초) | `load-test/results/sustained-reservation-2026-05-05-2208.json` | 단일 user → 단일 event/tier reservation 반복 | **off** | 258.4 | 486 ms | 0% (51,685건 모두 성공) |
-| write reservation, rate limit on, 동일 부하 | `load-test/results/sustained-2026-05-05-2119.json` | 위와 동일 + `ENABLE_RATE_LIMITING=true` | **on** | 1,059.6 | 6.0 ms | 100% rate-limited (212,028건 거부) |
+| read spike (200 VU) | `spike-summary.json` | GraphQL `event` 단일 id 반복 | off | 653.2 | 17.9 ms | 0% |
+| read baseline (50 VU 10분) | `baseline-summary.json` | GraphQL `events`/`event` mix + `/health` | off | 109.5 | 11.5 ms | 0% |
+| write reservation sustained (150 VU) | `sustained-reservation-2026-05-05-2208.json` | 단일 user → 단일 event/tier reservation 반복 | **off** | 258.4 | 486 ms | 0% |
+| write reservation, rate limit on, 동일 부하 | `sustained-2026-05-05-2119.json` | 위와 동일 + `ENABLE_RATE_LIMITING=true` | **on** | 1,059.6 | 6.0 ms | 100% rate-limited |
 
 ### 해석
 
