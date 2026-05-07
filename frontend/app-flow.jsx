@@ -130,17 +130,23 @@ const DemoFlow = ({ state, actions }) => {
                   <div className="field-label">응답 · {events.length}개 이벤트</div>
                   <div className="event-grid" style={{marginTop:8}}>
                     {events.map(ev => {
-                      const ratio = ev.availableSeats / ev.totalSeats;
+                      // [FIX] defensive guards — backend may return events with missing
+                      // totalSeats / availableSeats / pricing fields. Without these checks
+                      // a single undefined field crashes the entire DemoFlow render tree.
+                      const total = Number(ev?.totalSeats) || 0;
+                      const available = Number(ev?.availableSeats) || 0;
+                      const pricingCount = Array.isArray(ev?.pricing) ? ev.pricing.length : 0;
+                      const ratio = total > 0 ? available / total : 0;
                       const cls = ratio < 0.1 ? "crit" : ratio < 0.3 ? "low" : "";
                       return (
                         <div key={ev.id}
                              className={`event-card ${selectedEventId === ev.id ? "selected" : ""}`}
                              onClick={() => actions.selectEvent(ev.id)}>
-                          <div className="event-date">{fmtDate(ev.startsAt)}</div>
-                          <div className="event-title">{ev.name}</div>
+                          <div className="event-date">{ev?.startsAt ? fmtDate(ev.startsAt) : "—"}</div>
+                          <div className="event-title">{ev?.name || "(이름 없음)"}</div>
                           <div className="event-meta">
-                            <span>{ev.availableSeats.toLocaleString()} / {ev.totalSeats.toLocaleString()} 좌석</span>
-                            <span>{ev.pricing.length} tiers</span>
+                            <span>{available.toLocaleString()} / {total.toLocaleString()} 좌석</span>
+                            <span>{pricingCount} tiers</span>
                           </div>
                           <div className="capacity-bar"><div className={`fill ${cls}`} style={{width: `${ratio * 100}%`}}/></div>
                         </div>
@@ -175,13 +181,13 @@ const DemoFlow = ({ state, actions }) => {
                 <div className="field-block" style={{marginTop:14}}>
                   <div className="field-label">Pricing Tier</div>
                   <div className="tier-grid">
-                    {selectedEvent.pricing.map(p => (
+                    {(selectedEvent.pricing || []).map(p => (
                       <div key={p.tierId}
                            className={`tier-card ${selectedTierId === p.tierId ? "selected" : ""}`}
                            onClick={() => actions.selectTier(p.tierId)}>
-                        <div className="tier-name">{p.name}</div>
-                        <div className="tier-price">{fmtKRW(p.price)}</div>
-                        <div className="tier-sub">정원 {p.seats.toLocaleString()}석</div>
+                        <div className="tier-name">{p?.name || "(no name)"}</div>
+                        <div className="tier-price">{fmtKRW(p?.price)}</div>
+                        <div className="tier-sub">정원 {(Number(p?.seats) || 0).toLocaleString()}석</div>
                       </div>
                     ))}
                   </div>
