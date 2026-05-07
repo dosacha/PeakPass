@@ -149,3 +149,6 @@ load-test-event.sql
 # but summary exports (small) are committed
 load-test/results/*.json
 !load-test/results/*-summary.json
+
+# SSH private key
+peakpass-key.pem
