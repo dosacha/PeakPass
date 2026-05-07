@@ -190,6 +190,11 @@ const App = () => {
   const [expandedSteps, setExpandedSteps] = useS({ s1: true, s2: false, s3: false, s4: false, s5: false, s6: false, s7: false });
   const [requests, setRequests] = useS([]);
 
+  // [FIX] Per-button in-flight indicator for Step 6 (Duplicate / Retry).
+  // A and B each track their own busy state so one button's pending request
+  // does NOT lock the other one out via the shared stepStatus.s6 = "running" flag.
+  const [dupBusy, setDupBusy] = useS({ A: false, B: false });
+
   // persist
   useE(() => localStorage.setItem("pp_api_base", apiBase), [apiBase]);
   useE(() => localStorage.setItem("pp_mode", mode), [mode]);
@@ -260,6 +265,7 @@ const App = () => {
       setRequests([]); setLookupCode("");
       setActiveStep(1);
       setExpandedSteps({ s1:true,s2:false,s3:false,s4:false,s5:false,s6:false,s7:false });
+      setDupBusy({ A: false, B: false }); // [FIX] reset per-button busy flags
     },
 
     step1: async () => {
@@ -335,29 +341,59 @@ const App = () => {
       } else setStep("s5", "error");
     },
 
+    // [FIX] runDupReplay — A 케이스 (Cache replay)
+    // - per-button busy flag(dupBusy.A)로 A 자신만 잠금. B는 영향 없음.
+    // - 성공 시 자체적으로 setStep("s6", "done") 호출 — 더 이상 다른 케이스의 상태에 의존하지 않음.
+    // - 이미 done이면 "running"으로 되돌리지 않아 progress flicker 방지 (functional update).
     runDupReplay: async () => {
       if (!order || !settlementIdemKey) return;
       if (mode === "live") return;
-      setStep("s6", "running"); setActiveStep(6);
-      const body = { orderId: order.order.id, providerTransactionId: providerTxnId, status: "settled" };
-      const res = await api.settlement(body, settlementIdemKey);
-      logReq({ method: "POST", url: "/webhooks/payments/settlement (replay)", idemKey: settlementIdemKey, status: res.status, elapsed: res.elapsed || 200,
-               request: body, response: res.data });
-      if (res.ok) setDuplicateReplay(res.data);
-      if (duplicateSemantic) setStep("s6", "done");
+      if (dupBusy.A) return; // 같은 버튼 더블클릭 방지
+      setDupBusy(prev => ({ ...prev, A: true }));
+      setStepStatus(prev => prev.s6 === "done" ? prev : { ...prev, s6: "running" });
+      setActiveStep(6);
+      try {
+        const body = { orderId: order.order.id, providerTransactionId: providerTxnId, status: "settled" };
+        const res = await api.settlement(body, settlementIdemKey);
+        logReq({ method: "POST", url: "/webhooks/payments/settlement (replay)", idemKey: settlementIdemKey, status: res.status, elapsed: res.elapsed || 200,
+                 request: body, response: res.data });
+        if (res.ok) {
+          setDuplicateReplay(res.data);
+          setStep("s6", "done");
+        } else {
+          // 한 케이스 실패해도 다른 케이스는 시도 가능해야 하므로
+          // s6 자체를 error로 떨구지 않고 idle 상태로 복귀시킴 (이미 done이면 그대로 유지).
+          setStepStatus(prev => prev.s6 === "running" ? { ...prev, s6: "idle" } : prev);
+        }
+      } finally {
+        setDupBusy(prev => ({ ...prev, A: false }));
+      }
     },
 
+    // [FIX] runDupSemantic — B 케이스 (Semantic duplicate)
+    // - 위와 동일 패턴. dupBusy.B만 사용.
     runDupSemantic: async () => {
       if (!order) return;
       if (mode === "live") return;
-      setStep("s6", "running"); setActiveStep(6);
-      const newKey = uuid();
-      const body = { orderId: order.order.id, providerTransactionId: providerTxnId, status: "settled" };
-      const res = await api.settlement(body, newKey);
-      logReq({ method: "POST", url: "/webhooks/payments/settlement (new-key, same-txn)", idemKey: newKey, status: res.status, elapsed: res.elapsed || 200,
-               request: body, response: res.data });
-      if (res.ok) setDuplicateSemantic(res.data);
-      if (duplicateReplay) setStep("s6", "done");
+      if (dupBusy.B) return; // 같은 버튼 더블클릭 방지
+      setDupBusy(prev => ({ ...prev, B: true }));
+      setStepStatus(prev => prev.s6 === "done" ? prev : { ...prev, s6: "running" });
+      setActiveStep(6);
+      try {
+        const newKey = uuid();
+        const body = { orderId: order.order.id, providerTransactionId: providerTxnId, status: "settled" };
+        const res = await api.settlement(body, newKey);
+        logReq({ method: "POST", url: "/webhooks/payments/settlement (new-key, same-txn)", idemKey: newKey, status: res.status, elapsed: res.elapsed || 200,
+                 request: body, response: res.data });
+        if (res.ok) {
+          setDuplicateSemantic(res.data);
+          setStep("s6", "done");
+        } else {
+          setStepStatus(prev => prev.s6 === "running" ? { ...prev, s6: "idle" } : prev);
+        }
+      } finally {
+        setDupBusy(prev => ({ ...prev, B: false }));
+      }
     },
 
     step7: async () => {
@@ -465,7 +501,8 @@ const App = () => {
     mode, events, selectedEventId, selectedTierId, userId, quantity,
     reservation, order, settlement, duplicateReplay, duplicateSemantic, ticketByCode, lookupCode,
     stepStatus, stepTiming, activeStep, expandedSteps, requests,
-    checkoutIdemKey, settlementIdemKey, providerTxnId
+    checkoutIdemKey, settlementIdemKey, providerTxnId,
+    dupBusy // [FIX] expose per-button busy state to DemoFlow
   };
 
   return (

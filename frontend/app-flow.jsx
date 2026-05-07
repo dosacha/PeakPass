@@ -57,7 +57,8 @@ const DemoFlow = ({ state, actions }) => {
     mode, events, selectedEventId, selectedTierId, userId, quantity,
     reservation, order, settlement, duplicateReplay, duplicateSemantic,
     ticketByCode, stepStatus, stepTiming, requests, activeStep, expandedSteps,
-    checkoutIdemKey, settlementIdemKey, providerTxnId
+    checkoutIdemKey, settlementIdemKey, providerTxnId,
+    dupBusy = { A: false, B: false } // [FIX] per-button busy flags for Step 6
   } = state;
 
   const selectedEvent = events?.find(e => e.id === selectedEventId);
@@ -403,8 +404,9 @@ const DemoFlow = ({ state, actions }) => {
                   동일 <code style={{fontFamily:"var(--font-mono)"}}>Idempotency-Key</code>와 동일 body. Redis의 idempotency cache가 저장해 둔 기존 응답을 그대로 반환합니다.
                 </div>
                 <button className="btn btn-secondary" onClick={actions.runDupReplay}
-                        disabled={!settlement || stepStatus.s6 === "running" || liveWebhookDisabled}>
-                  <Icon name="play" size={11}/> Replay webhook
+                        disabled={!settlement || dupBusy.A || liveWebhookDisabled}>
+                  <Icon name="play" size={11}/>
+                  {dupBusy.A ? "실행 중…" : (duplicateReplay ? "Replay webhook (재실행)" : "Replay webhook")}
                 </button>
                 {duplicateReplay && (
                   <div className="dup-result">
@@ -425,8 +427,9 @@ const DemoFlow = ({ state, actions }) => {
                   <b>새로운</b> Idempotency-Key지만 동일 <code style={{fontFamily:"var(--font-mono)"}}>orderId / providerTransactionId</code>. Redis 캐시를 지나가더라도 DB <code style={{fontFamily:"var(--font-mono)"}}>UNIQUE(provider_txn_id)</code> 위반으로 방어됩니다.
                 </div>
                 <button className="btn btn-secondary" onClick={actions.runDupSemantic}
-                        disabled={!settlement || stepStatus.s6 === "running" || liveWebhookDisabled}>
-                  <Icon name="play" size={11}/> Semantic duplicate
+                        disabled={!settlement || dupBusy.B || liveWebhookDisabled}>
+                  <Icon name="play" size={11}/>
+                  {dupBusy.B ? "실행 중…" : (duplicateSemantic ? "Semantic duplicate (재실행)" : "Semantic duplicate")}
                 </button>
                 {duplicateSemantic && (
                   <div className="dup-result">
