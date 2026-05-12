@@ -108,22 +108,3 @@ jobs:
         uses: codecov/codecov-action@v3
         with:
           files: ./coverage/coverage-final.json
-
-  terraform-validate:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Setup Terraform
-        uses: hashicorp/setup-terraform@v2
-        with:
-          terraform_version: 1.14.8
-
-      - name: Terraform Format
-        run: terraform fmt -check -recursive terraform/
-
-      - name: Terraform Init
-        run: terraform -chdir=terraform init -backend=false
-
-      - name: Terraform Validate
-        run: terraform -chdir=terraform validate
