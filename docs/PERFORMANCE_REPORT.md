@@ -1,6 +1,6 @@
 # 성능 보고서
 
-이 문서는 현재 저장소에 포함된 k6 시나리오, 관찰 지점, 그리고 commit된 측정 결과를 정리한다.
+이 문서는 현재 저장소에 포함된 k6 시나리오, 관찰 지점, 그리고 commit된 측정 결과를 정리합니다.
 
 ## 포함된 부하 테스트 스크립트
 
@@ -76,24 +76,24 @@
 | Runtime | Node.js 20, PostgreSQL 16, Redis 7, 모두 Docker Compose 단일 노드 |
 | 클라이언트 | k6, 같은 머신에서 `localhost:3000`로 호출 |
 | `NODE_ENV` | `development` |
-| `ENABLE_RATE_LIMITING` | 시나리오별로 명시 (아래 표) |
+| `ENABLE_RATE_LIMITING` | 시나리오별로 명시 (아래 표 참조) |
 | `ENFORCE_AUTH_USER_MATCH` | `false` (k6 스크립트가 JWT를 발급하지 않으므로) |
 | `RATE_LIMIT_FAIL_MODE` | `closed` (default) |
 | 데이터셋 | seed.ts로 생성한 단일 이벤트 + 단일 tier, `total_seats`는 시나리오 처리량을 견딜 수 있도록 충분히 크게 설정 |
 
 ### 시나리오 부하 모델
 
-`load-test/sustained.js`는 **단일 `LOAD_TEST_USER_ID`를 다수 VU가 공유하는** micro-benchmark 형태다. 같은 user / 같은 event / 같은 tier에 대한 reservation 요청이 다수 VU에서 들어가므로, 측정 결과는 *동일 row에 대한 lock 경합* 시나리오에 가깝다. distinct user N명이 같은 event에 몰리는 본격 flash-sale 모델 측정은 후속 과제다.
+`load-test/sustained.js`는 **단일 `LOAD_TEST_USER_ID`를 다수 VU가 공유하는** micro-benchmark 형태입니다. 같은 user / 같은 event / 같은 tier에 대한 reservation 요청이 다수 VU에서 들어가므로, 측정 결과는 *동일 row에 대한 lock 경합* 시나리오에 가깝습니다. distinct user N명이 같은 event에 몰리는 본격 flash-sale 모델 측정은 후속 과제입니다.
 
-이 형태로 측정해도 **단일 event row에 대한 lock 직렬화 비용**은 의미 있는 정보이고, GraphQL read p95가 흔들리지 않는지·rate limit on/off가 throughput에 어떻게 반영되는지는 확인 가능하다. 다만 본 결과를 "운영 환경의 flash-sale RPS 추정치"로 일반화하지 말 것.
+이 형태로 측정해도 **단일 event row에 대한 lock 직렬화 비용**은 의미 있는 정보이고, GraphQL read p95가 흔들리지 않는지·rate limit on / off가 throughput에 어떻게 반영되는지는 확인 가능합니다. 다만 본 결과를 "실서비스 환경의 flash-sale RPS 추정치"로 일반화하지 말아 주세요.
 
 ## 측정 결과 (2026-05-06 갱신, 위 환경)
 
 | 시나리오 | 결과 파일 | 부하 모델 | rate limit | RPS | p95 latency | 에러율 |
 |---|---|---|---|---|---|---|
 | read spike (200 VU) | `spike-summary.json` | GraphQL `event` 단일 id 반복 | off | 653.2 | 17.9 ms | 0% |
-| read baseline (50 VU 10분) | `baseline-summary.json` | GraphQL `events`/`event` mix + `/health` | off | 109.5 | 11.5 ms | 0% |
-| write reservation sustained (150 VU) | `sustained-reservation-2026-05-05-2208.json` | 단일 user → 단일 event/tier reservation 반복 | **off** | 258.4 | 486 ms | 0% |
+| read baseline (50 VU 10분) | `baseline-summary.json` | GraphQL `events` / `event` mix + `/health` | off | 109.5 | 11.5 ms | 0% |
+| write reservation sustained (150 VU) | `sustained-reservation-2026-05-05-2208.json` | 단일 user → 단일 event / tier reservation 반복 | **off** | 258.4 | 486 ms | 0% |
 | write reservation, rate limit on, 동일 부하 | `sustained-2026-05-05-2119.json` | 위와 동일 + `ENABLE_RATE_LIMITING=true` | **on** | 1,059.6 | 6.0 ms | 100% rate-limited |
 
 ### 해석
@@ -105,7 +105,7 @@
 
 ### 본 측정의 한계 (정직한 disclaimer)
 
-1. 단일 user 부하 모델이라 *서로 다른 user가 같은 event에 몰리는* 실제 flash-sale의 lock 분포와 다르다. 진짜 oversell 방어 검증은 `src/tests/integration/concurrency.test.ts`에서 5명의 distinct user로 수행함
-2. `ENFORCE_AUTH_USER_MATCH=false`로 측정함. production 권장값(`true`)에서는 JWT 발급 흐름이 추가되며 이는 현 부하 스크립트가 모델링하지 않음
-3. 단일 노드 Docker Compose 환경. ALB/ECS 분산 환경의 cold connection, cross-AZ latency, RDS 연결 풀 동작 등은 측정 범위 밖
-4. PostgreSQL/Redis 자체의 메모리·디스크 한계는 시나리오 길이(최대 3분 20초)로는 의미 있게 드러나지 않음
+1. 단일 user 부하 모델이라 *서로 다른 user가 같은 event에 몰리는* 실제 flash-sale의 lock 분포와 다름. 진짜 oversell 방어 검증은 `src/tests/integration/concurrency.test.ts`에서 5명의 distinct user로 수행함
+2. `ENFORCE_AUTH_USER_MATCH=false`로 측정함. 권장값(`true`)에서는 JWT 발급 흐름이 추가되며 이는 현 부하 스크립트가 모델링하지 않음
+3. 단일 노드 Docker Compose 환경. 분산 환경의 cold connection, cross-region latency, DB 연결 풀 동작 등은 측정 범위 밖
+4. PostgreSQL / Redis 자체의 메모리·디스크 한계는 시나리오 길이(최대 3분 20초)로는 의미 있게 드러나지 않음

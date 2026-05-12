@@ -1,7 +1,7 @@
 # 부하 테스트 전략
 
-PeakPass는 읽기 트래픽과 쓰기 트래픽의 성격이 다르다.  
-그래서 k6 시나리오도 조회, 예약, 결제 webhook 재시도 흐름으로 나눠서 본다.
+PeakPass는 읽기 트래픽과 쓰기 트래픽의 성격이 다릅니다.
+그래서 k6 시나리오도 조회, 예약, 결제 webhook 재시도 흐름으로 나눠서 봅니다.
 
 ## 시나리오
 
@@ -9,7 +9,7 @@ PeakPass는 읽기 트래픽과 쓰기 트래픽의 성격이 다르다.
 
 - 목적: 일반 조회 트래픽 기준선 측정
 - 대상: `/health`, GraphQL `events`, GraphQL `event`
-- 스크립트: [baseline.js](./load-test/baseline.js)
+- 스크립트: [baseline.js](../load-test/baseline.js)
 
 ```bash
 npm run load-test:baseline
@@ -19,7 +19,7 @@ npm run load-test:baseline
 
 - 목적: 특정 이벤트 상세 조회가 갑자기 몰릴 때 응답성 확인
 - 대상: GraphQL `event`
-- 스크립트: [spike.js](./load-test/spike.js)
+- 스크립트: [spike.js](../load-test/spike.js)
 
 ```bash
 npm run load-test:spike
@@ -29,9 +29,9 @@ npm run load-test:spike
 
 - 목적: 플래시세일 상황에서 reservation hold API의 응답 시간과 rate limiting 동작 확인
 - 대상: `POST /reservations`
-- 스크립트: [sustained.js](./load-test/sustained.js)
+- 스크립트: [sustained.js](../load-test/sustained.js)
 
-필수 환경 변수:
+필수 환경 변수는 다음과 같습니다.
 
 - `LOAD_TEST_USER_ID`
 - 선택: `LOAD_TEST_EVENT_ID`, `LOAD_TEST_TIER_ID`
@@ -44,9 +44,9 @@ npm run load-test:sustained
 
 - 목적: 같은 settlement webhook이 여러 번 들어와도 중복 발급이 생기지 않는지 확인
 - 대상: `POST /webhooks/payments/settlement`
-- 스크립트: [payment-callback.js](./load-test/payment-callback.js)
+- 스크립트: [payment-callback.js](../load-test/payment-callback.js)
 
-필수 환경 변수:
+필수 환경 변수는 다음과 같습니다.
 
 - `LOAD_TEST_USER_ID`
 - `LOAD_TEST_EVENT_ID`
@@ -67,10 +67,10 @@ npm run load-test:callbacks
 
 ## 해석 포인트
 
-- browse 시나리오에서 p95가 안정적이면 read-side cache와 DB 조회가 균형을 유지하는 것으로 본다
-- event detail spike에서 tail latency가 급격히 올라가면 hot key cache 전략을 다시 본다
-- reservation 부하에서 429가 적절히 발생하면 rate limit이 동작하는 것으로 본다
-- payment callback 부하에서 duplicate 응답은 늘 수 있지만 티켓 수가 늘면 안 된다
+- browse 시나리오에서 p95가 안정적이면 read-side cache와 DB 조회가 균형을 유지하는 것으로 봄
+- event detail spike에서 tail latency가 급격히 올라가면 hot key cache 전략을 다시 봄
+- reservation 부하에서 429가 적절히 발생하면 rate limit이 동작하는 것으로 봄
+- payment callback 부하에서 duplicate 응답은 늘 수 있지만 티켓 수가 늘면 안 됨
 
 ## 권장 실행 순서
 
@@ -83,6 +83,6 @@ npm run load-test:callbacks
 ## 현재 메모
 
 - 스크립트는 현재 REST write-side와 GraphQL read-side 구조에 맞춰 갱신함
-- baseline / spike / sustained-reservation / sustained-rate-limit 측정 결과를 commit으로 고정 (`load-test/results/`)
+- baseline / spike / sustained-reservation / sustained-rate-limit 측정 결과를 commit으로 고정함 (`load-test/results/`)
 - 측정 결과 해석은 `docs/PERFORMANCE_REPORT.md`의 "측정 결과" 섹션 참조
 - payment-callback 시나리오는 HMAC `X-Webhook-Timestamp` 서명 헤더 반영 후 결과 파일 추가 예정

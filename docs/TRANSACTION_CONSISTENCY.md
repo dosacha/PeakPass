@@ -1,6 +1,6 @@
 # 트랜잭션과 정합성
 
-이 문서는 PeakPass에서 가장 중요한 정합성 규칙과 이를 코드에서 어떻게 지키는지 정리한다.
+이 문서는 PeakPass에서 가장 중요한 정합성 규칙과 이를 코드에서 어떻게 지키는지 정리합니다.
 
 ## 핵심 불변식
 
@@ -18,7 +18,7 @@
 
 ## 체크아웃 흐름
 
-핵심 코드는 [checkout.service.ts](../src/core/services/checkout.service.ts)와 [checkouts.ts](../src/api/rest/checkouts.ts)에 있다.
+핵심 코드는 [checkout.service.ts](../src/core/services/checkout.service.ts)와 [checkouts.ts](../src/api/rest/checkouts.ts)에 있습니다.
 
 ### 1. 멱등성 선검사
 
@@ -31,8 +31,8 @@
 - `reservationId`가 있으면 checkout 트랜잭션 안에서 `UPDATE reservations ... RETURNING` 수행
 - 조건은 `status = 'active'`, `expires_at > NOW()`, user/event/tier/quantity 일치까지 한 번에 검증
 - 이 한 쿼리가 row lock, 유효성 검증, `converted` 전환을 함께 처리
-- affected row가 0이면 존재 여부, 만료, 상태, payload mismatch를 분리해 404/409 반환
-- checkout 경로는 Redis hold를 읽지 않음. Redis hold는 정합성 layer가 아니라 read-side/UX 보조 계층
+- affected row가 0이면 존재 여부, 만료, 상태, payload mismatch를 분리해 404 / 409 반환
+- checkout 경로는 Redis hold를 읽지 않음. Redis hold는 정합성 layer가 아니라 read-side / UX 보조 계층
 
 ### 3. 이벤트 행 잠금
 
@@ -59,12 +59,12 @@ FOR UPDATE
 - reservation hold 삭제
 - 멱등성 성공 결과 캐시 저장
 
-checkout 시점에는 티켓을 발급하지 않는다.  
-이 순서가 중요한 이유는, 결제 확정 전 티켓이 먼저 생기는 문제를 막기 위해서다.
+checkout 시점에는 티켓을 발급하지 않습니다.
+이 순서가 중요한 이유는, 결제 확정 전 티켓이 먼저 생기는 문제를 막기 위해서입니다.
 
 ## settlement webhook 흐름
 
-핵심 코드는 [payments.ts](../src/api/rest/payments.ts)와 [checkout.service.ts](../src/core/services/checkout.service.ts)에 있다.
+핵심 코드는 [payments.ts](../src/api/rest/payments.ts)와 [checkout.service.ts](../src/core/services/checkout.service.ts)에 있습니다.
 
 ### settled webhook
 
@@ -89,7 +89,7 @@ checkout 시점에는 티켓을 발급하지 않는다.
 
 ## 예약 hold 흐름
 
-핵심 코드는 [reservation.service.ts](../src/core/services/reservation.service.ts)에 있다.
+핵심 코드는 [reservation.service.ts](../src/core/services/reservation.service.ts)에 있습니다.
 
 - 예약 생성은 DB 트랜잭션으로 먼저 저장
 - 생성 트랜잭션에서 `events.available_seats`를 즉시 차감해 soft hold를 잡음
@@ -100,9 +100,9 @@ checkout 시점에는 티켓을 발급하지 않는다.
 
 ## DB 제약과 모델링
 
-실제 제약은 [001_init_schema.sql](../src/infra/migrations/001_init_schema.sql), [002_ticket_number_sequence.sql](../src/infra/migrations/002_ticket_number_sequence.sql), [003_payment_provider_transaction_unique.sql](../src/infra/migrations/003_payment_provider_transaction_unique.sql)에 있다.
+실제 제약은 [001_init_schema.sql](../src/infra/migrations/001_init_schema.sql), [002_ticket_number_sequence.sql](../src/infra/migrations/002_ticket_number_sequence.sql), [003_payment_provider_transaction_unique.sql](../src/infra/migrations/003_payment_provider_transaction_unique.sql)에 있습니다.
 
-대표 예시:
+대표 예시는 다음과 같습니다.
 
 - `events.available_seats >= 0`
 - `orders.idempotency_key` 고유성
@@ -110,7 +110,7 @@ checkout 시점에는 티켓을 발급하지 않는다.
 - `payment_records.provider_transaction_id` 고유 인덱스
 - `ticket_number_seq` 기반 전역 티켓 번호 생성
 
-## 면접에서 설명할 포인트
+## 핵심 정리
 
 - Redis는 빠르지만 source of truth가 아님
 - oversell 방지의 핵심은 Redis 락이 아니라 PostgreSQL 트랜잭션과 행 잠금

@@ -1,11 +1,11 @@
 # GraphQL 예시
 
-현재 GraphQL 엔드포인트는 `POST /graphql`이다.  
-개발 환경에서는 `GET /graphql`로 Apollo Sandbox HTML 진입도 가능하다.
+현재 GraphQL 엔드포인트는 `POST /graphql`입니다.
+개발 환경에서는 `GET /graphql`로 Apollo Sandbox HTML 진입도 가능합니다.
 
 ## 이벤트 목록
 
-목록 화면은 가벼운 필드만 가져온다. `description`, `pricing`, `my*` 컨텍스트는 상세 화면에서만 요청한다.
+목록 화면은 가벼운 필드만 가져옵니다. `description`, `pricing`, `my*` 컨텍스트는 상세 화면에서만 요청합니다.
 
 ```graphql
 query EventListPage($limit: Int, $offset: Int) {
@@ -29,7 +29,7 @@ query EventListPage($limit: Int, $offset: Int) {
 
 ## 이벤트 상세
 
-상세 화면은 같은 이벤트 데이터 소스에서 무거운 설명, 가격 등급, 인증 사용자 컨텍스트를 한 번에 조합한다.
+상세 화면은 같은 이벤트 데이터 소스에서 무거운 설명, 가격 등급, 인증 사용자 컨텍스트를 한 번에 조합합니다.
 
 ```graphql
 query EventDetailPage($eventId: ID!) {
@@ -60,7 +60,7 @@ query EventDetailPage($eventId: ID!) {
 
 ## 내 주문
 
-`myOrders`는 실제 `orders`와 `payment_records`를 읽는다.
+`myOrders`는 실제 `orders`와 `payment_records`를 읽습니다.
 
 ```graphql
 query MyOrders($limit: Int, $offset: Int) {
@@ -78,7 +78,7 @@ query MyOrders($limit: Int, $offset: Int) {
 
 ## 내 티켓
 
-`myTickets`는 실제 `tickets`를 읽고, nested field는 DataLoader로 묶어 조회한다.
+`myTickets`는 실제 `tickets`를 읽고, nested field는 DataLoader로 묶어 조회합니다.
 
 ```graphql
 query MyTickets($limit: Int, $offset: Int) {
@@ -104,7 +104,7 @@ query MyTickets($limit: Int, $offset: Int) {
 
 ## 티켓 코드 조회
 
-`ticketByCode`는 게이트 검증용 공개 DTO만 반환한다. 사용자 식별 정보, 주문, 결제 정보는 노출하지 않는다.
+`ticketByCode`는 게이트 검증용 공개 DTO만 반환합니다. 사용자 식별 정보, 주문, 결제 정보는 노출하지 않습니다.
 
 ```graphql
 query TicketByCode($code: String!) {
@@ -120,6 +120,8 @@ query TicketByCode($code: String!) {
 ```
 
 ## curl 예시
+
+> 아래 명령은 로컬(`http://localhost:3000`) 기준입니다. `http://localhost:3000`을 `https://peak-pass.com`으로 바꾸면 라이브 API에 그대로 적용할 수 있습니다.
 
 이벤트 목록:
 
@@ -148,7 +150,7 @@ curl -X POST http://localhost:3000/graphql \
 
 ## 실제 검증 메모
 
-실제로 확인한 대표 응답:
+실제로 확인한 대표 응답은 다음과 같습니다.
 
 - `events` 목록은 목록 화면에 필요한 필드만 조회
 - `event` 상세는 `pricing`, `myActiveReservation`, `myTicketCount`를 한 번에 조합

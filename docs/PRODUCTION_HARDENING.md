@@ -1,6 +1,6 @@
-# 운영 하드닝
+# 애플리케이션 안정성
 
-이 문서는 현재 코드에 들어가 있는 운영 관점 기능과 아직 남아 있는 과제를 정리한다.
+이 문서는 현재 코드에 들어가 있는 애플리케이션 안정성 관련 기능과 아직 남아 있는 과제를 정리합니다.
 
 ## 현재 구현된 항목
 
@@ -11,7 +11,7 @@
 
 관련 파일:
 
-- [health.ts](./src/api/health.ts)
+- [health.ts](../src/api/health.ts)
 
 동작:
 
@@ -26,12 +26,12 @@
 
 관련 파일:
 
-- [logger.ts](./src/infra/logger.ts)
-- [app.ts](./src/api/app.ts)
+- [logger.ts](../src/infra/logger.ts)
+- [app.ts](../src/api/app.ts)
 
 ### 요청 ID
 
-- `x-request-id`가 있으면 재사용
+- `x-request-id`가 있으면 재사용함
 - 없으면 서버가 새 UUID 생성
 
 ### graceful shutdown
@@ -47,14 +47,14 @@
 
 ### 결제 settlement 이후 발급
 
-- checkout은 주문을 `pending`으로 만든다
-- `POST /webhooks/payments/settlement`가 `settled` 상태를 받으면 주문을 `paid`로 전이하고 티켓을 발급한다
-- 같은 webhook 재전송 시 중복 발급이 생기지 않도록 처리한다
+- checkout은 주문을 `pending`으로 만듦
+- `POST /webhooks/payments/settlement`가 `settled` 상태를 받으면 주문을 `paid`로 전이하고 티켓을 발급함
+- 같은 webhook 재전송 시 중복 발급이 생기지 않도록 처리함
 
 ## 실제로 확인한 항목
 
-- Docker Compose 환경에서 `/health` 정상 응답 확인
-- Docker Compose 환경에서 `/ready` 정상 응답 확인
+- 로컬 환경에서 `/health` 정상 응답 확인
+- 로컬 환경에서 `/ready` 정상 응답 확인
 - checkout 이후 `pending` 주문 확인
 - settlement webhook 이후 `paid` 전이와 티켓 발급 확인
 - duplicate settlement webhook에 대해 중복 티켓 미발급 확인
@@ -62,6 +62,4 @@
 ## 아직 남은 과제
 
 - GraphQL query complexity 제한 실제 연결
-- CloudWatch 로그 수집과 알람 검증
-- Terraform CLI 기반 배포 검증
 - 최신 load test 결과 반영
