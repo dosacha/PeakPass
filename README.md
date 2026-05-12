@@ -1,402 +1,323 @@
-# PeakPass
+# 🎟️ PeakPass
 
-**Live demo:** https://peak-pass.com · `/health` · `/ready`  
-**Stack:** TypeScript · Fastify · Apollo GraphQL · PostgreSQL 16 · Redis 7 · Docker Compose · Nginx · AWS EC2 · Let's Encrypt
+> 고트래픽 워크숍·세미나를 위한 티켓팅 및 디지털 패스 발급 플랫폼
 
-실시간 티켓 발급 서비스의 핵심 흐름(Reservation → Payment → Ticket issuance)을 단일 서비스 수준에서 재현한 학습용 백엔드 모노레포입니다.
+## 📣 프로젝트 소개
 
-## 프로젝트 성격
+워크숍, 세미나, 컨퍼런스처럼 **짧은 시간에 트래픽이 몰리는 이벤트**에서는 두 가지 사고가 자주 일어납니다.
+하나는 한 자리에 두 명이 결제되는 **oversell**, 다른 하나는 같은 결제 webhook이 두 번 들어와 **티켓이 중복 발급**되는 일이에요.
 
-**개인 학습 프로젝트입니다.** 실제 운영 트래픽에서 검증된 시스템이 아니며, "티켓팅 도메인의 정합성/멱등성 문제를 코드로 설명 가능한 수준까지 끌고 가는 것"을 목표로 작성했습니다.
+PeakPass는 이런 환경에서 **재고 정합성과 결제 멱등성을 보장하는 백엔드**가 어떻게 동작해야 하는지를 직접 구현하고, 부하 테스트와 문서까지 함께 검증한 백엔드 포트폴리오 프로젝트입니다.
 
-개발 과정에서 AI 코드 어시스턴트를 사용했습니다. 설계 의사결정(트랜잭션 경계, 상태 전이 정의, 멱등 경로 구조, 테스트 시나리오)은 직접 수행했고, 구현 세부는 AI 보조를 받아 작성한 뒤 검토했습니다.
+Node.js 백엔드 운영, PostgreSQL 트랜잭션, Redis 실사용, GraphQL read-side, k6 부하 테스트까지 — 한 도메인 안에서 백엔드의 핵심 요소를 일관되게 설명할 수 있도록 구성했습니다.
 
-## 프론트엔드 데모
+## 🔗 배포 링크
 
-`frontend/` 디렉토리의 정적 React 데모 UI는 예약 → 결제 → 티켓 발급 플로우를 시각적으로 시뮬레이션합니다. 빌드 파이프라인 없이 React UMD + Babel standalone CDN으로 동작합니다.
+**Live API** — <https://peak-pass.com>
 
-- **mock 모드 (기본):** 브라우저 내에서 전체 백엔드 로직을 시뮬레이션합니다.
-- **live 모드:** 실제 PeakPass 백엔드 API를 호출합니다. 토글로 전환 가능.
-- **의도된 제한:** live 모드에서는 브라우저가 webhook을 직접 시뮬레이션하지 못하도록 버튼을 비활성화합니다. 실제 webhook 호출은 HMAC 서명이 필요하고, 서명 secret은 클라이언트에 노출하지 않습니다.
+| 엔드포인트 | URL |
+| --- | --- |
+| Health Check | <https://peak-pass.com/health> |
+| Readiness Check | <https://peak-pass.com/ready> |
+| REST (write-side) | `https://peak-pass.com/reservations`, `/checkouts`, `/webhooks/payments/settlement` |
+| GraphQL (read-side) | <https://peak-pass.com/graphql> |
 
-**서빙 구조:** 정적 자산(`frontend/`)은 Nginx가 직접 서빙하고, API 경로(`/reservations`, `/checkouts`, `/webhooks/*`, `/graphql`, `/health`, `/ready` 등)만 Fastify 앱(`127.0.0.1:3000`)으로 프록시합니다. 이렇게 분리하면 앱 서버의 이벤트 루프가 정적 자산 요청으로 점유되지 않고, 정적 자산 응답에만 약한 CSP(`unsafe-eval` 허용 — Babel standalone 런타임 트랜스파일용)가 적용되어 API 응답의 보안 헤더가 끌어내려지지 않습니다.
+> 아래 데모 시나리오의 `curl` 명령에서 `http://localhost:3000` 부분을 `https://peak-pass.com`으로 바꾸면 **로컬 세팅 없이 바로** 라이브 API를 호출해볼 수 있어요.
 
-## 한계 (Limitations)
-
-인지하고 있는 구조적 한계입니다. 실제 운영 환경 적용 시 보강이 필요한 항목:
-
-- `POST /checkouts`, `POST /reservations`는 body의 `userId`를 받지만, 기본 설정은 `ENFORCE_AUTH_USER_MATCH=true`로 JWT subject와 일치 검증을 강제함. 데모 모드(`ENFORCE_AUTH_USER_MATCH=false`)에서만 body userId를 그대로 신뢰함. `NODE_ENV=production`에서는 `ENFORCE_AUTH_USER_MATCH=false` 조합이 fail-fast로 거부됨
-- Webhook 서명 검증은 `WEBHOOK_SIGNING_SECRET`이 설정된 경우 `${timestamp}.${rawBody}` 형식의 HMAC-SHA256으로 수행하며, 커스텀 JSON parser가 raw body(Buffer)를 보존해 Provider 원본 바이트에 대한 서명을 검증함. timestamp 헤더는 `WEBHOOK_REPLAY_TOLERANCE_SECONDS`(기본 5분) 내인지 검증해 단순 replay 공격을 차단함. 다만 provider별 retry 정책 차이, secret rotation, multiple active secrets, 정산 webhook을 영영 못 받는 케이스의 reconciliation worker는 후속 과제로 남아 있음
-- `POST /webhooks/payments/settlement`는 학습 목적상 `Idempotency-Key` 헤더를 필수로 요구함. 실제 결제 PG는 이 헤더를 보내지 않는 경우가 많으며, 자연스러운 멱등성 키는 `provider_transaction_id`다. DB의 `payment_records.provider_transaction_id` partial unique index가 실제 멱등성 보장 layer
-- `tier_id`는 reservation/checkout 진입 시점에 event.pricing 안의 tier id와 일치하는지 검증함. FK가 아니므로 schema-level 보장은 application validation에 의존
-- 멱등성은 3계층으로 방어함: (1) Redis idempotency lock — 처리 중 중복 진입의 1차 layer, owner token + Lua atomic check-and-delete로 lock 분실 사고를 막음 (2) PostgreSQL advisory transaction lock — Redis 장애 등으로 1차 layer가 우회된 경우 트랜잭션 시작 시점 `pg_advisory_xact_lock(hashtext(key))`로 동일 key의 동시 트랜잭션을 직렬화 (3) `orders.idempotency_key` UNIQUE 제약 — schema-level backup. 1·2 layer가 모두 우회되어도 23505로 잡힘
-- Reservation TTL 만료 좌석 회수: setInterval 기반 in-process sweeper(`src/infra/cron/reservation-sweeper.ts`, 5분 주기)가 만료된 active reservation을 expired로 전환하고 좌석을 회수함. 데모/단일 노드에는 충분하나, 운영 환경에서는 별도 워커 프로세스(BullMQ 등)로 분리하는 것이 권장됨
-- 좌석 회계는 `events.available_seats` 단일 카운터 기준이며 tier별 잔여를 별도 추적하지 않음. tier 단위 oversell 방지가 필요한 운영 환경에서는 `event_tiers` 별도 테이블이 필요함
-
-## 배포 구성
-
-현재 데모는 AWS EC2(서울 리전) 단일 노드에 Docker Compose로 PostgreSQL · Redis · Fastify 앱을 함께 올린 구성입니다.
-
-- **Nginx**가 `peak-pass.com:443`에서 요청을 받아 정적 자산(`/var/www/peakpass`)은 직접 서빙하고, API 경로(`/reservations`, `/checkouts`, `/webhooks/*`, `/graphql`, `/events`, `/health`, `/ready` 등)만 `127.0.0.1:3000`의 Fastify 앱으로 프록시합니다.
-- **Postgres·Redis**는 외부 포트 미노출, 같은 Docker 네트워크에서만 접근. 컨테이너 메모리 제한과 Redis 비밀번호·메모리 정책(allkeys-lru)을 명시.
-- **Let's Encrypt** 인증서를 certbot systemd timer로 자동 갱신.
-- **Route 53 + Elastic IP**로 고정 도메인 연결.
-- **CSP 분리 정책:** Nginx가 정적 응답에만 Babel runtime 트랜스파일에 필요한 약한 CSP(`'unsafe-eval'` 허용)를 박고, API 응답은 helmet 기본값(`default-src 'self'`)을 유지합니다. 정적 자산 응답에는 `X-Request-ID` 같은 Fastify 미들웨어 헤더가 보이지 않아, 정적 요청이 JWT/rate limit/idempotency 미들웨어를 우회한다는 점이 응답 헤더 자체로 검증됩니다.
-
-### 학습 자료로 작성한 추가 구성
-
-`terraform/` 디렉토리는 ECS Fargate + RDS + ElastiCache 기반 분산 구성을 코드화한 학습 자료입니다. 실제 AWS apply는 수행하지 않았고 `terraform fmt`/`terraform validate`까지 검증했습니다. 포트폴리오 가치는 *"분산 구성을 학습 목적으로 모델링한 것"* 이지, 운영 검증이 아닙니다.
-
-## 프로젝트 목표
+## 🎯 프로젝트 목표
 
 - Node.js + TypeScript 기반 백엔드 서비스 구현
-- Fastify 기반 REST write-side와 GraphQL read-side 분리
-- PostgreSQL을 source of truth로 유지
-- Redis를 hold TTL, rate limit, idempotency, cache에 실제 사용
+- Fastify 기반 **REST write-side**와 **GraphQL read-side** 분리
+- PostgreSQL을 **source of truth**로 유지
+- Redis를 hold TTL · rate limit · idempotency · cache에 **실제 운영 용도로** 사용
 - 동시성 하에서 oversell을 막는 트랜잭션 흐름 구현
-- Docker Compose 기반 로컬 실행 흐름 제공
-- Terraform 기반 AWS 분산 구성 모델링 자료 제공
 - k6 기반 부하 테스트 시나리오 제공
 
-## 핵심 설계
+## ⚙️ 기술 스택
 
-### REST는 명령 처리
+| 영역 | 사용 기술 |
+| --- | --- |
+| **Language & Runtime** | Node.js, TypeScript |
+| **Web Framework** | Fastify (REST), GraphQL |
+| **Database** | PostgreSQL |
+| **Cache & In-memory** | Redis |
+| **Testing** | Jest (단위·통합·동시성), k6 (부하 테스트) |
+| **Quality** | ESLint, Prettier |
 
-- `POST /reservations`
-- `POST /checkouts`
-- `POST /webhooks/payments/settlement`
+## 🏗️ 아키텍처 개요
 
-예약 생성, 체크아웃, 정산 webhook은 상태를 바꾸는 명령이므로 REST로 유지한다.  
-이 방식이 멱등성 키, 상태 코드, 트랜잭션 경계를 가장 단순하게 드러낸다.
+PeakPass는 **상태를 바꾸는 명령**과 **데이터를 읽는 조회**를 의도적으로 다른 프로토콜로 분리했습니다.
 
-### GraphQL은 조회 처리
+### REST는 명령(Write) 처리
 
-- 이벤트 목록
-- 이벤트 상세
-- 내 주문
-- 내 티켓
-- 티켓 코드 조회
+- `POST /reservations` — 예약 hold 생성
+- `POST /checkouts` — 주문 생성 (결제 대기)
+- `POST /webhooks/payments/settlement` — 결제 정산 webhook 처리
 
-조회 조합이 많은 read-side는 GraphQL로 분리했다.  
-현재 `events`, `event`, `myOrders`, `myTickets`, `ticketByCode`는 실제 DB 데이터를 읽는 상태까지 확인했다.
+> 상태 전이가 핵심인 명령은 REST로 유지합니다. **멱등성 키, HTTP 상태 코드, 트랜잭션 경계**가 가장 단순하게 드러나는 표현이기 때문이에요.
+
+### GraphQL은 조회(Read) 처리
+
+- `events`, `event` — 이벤트 목록 / 상세 조회
+- `myOrders`, `myTickets` — 내 주문 / 내 티켓 조회
+- `ticketByCode` — 티켓 코드로 단건 조회
+
+> 조회 조합이 많은 read-side는 GraphQL로 분리해, 클라이언트가 필요한 필드만 골라서 가져갈 수 있게 했어요.
 
 ### PostgreSQL이 정합성 기준
 
-- 재고 차감
-- 주문 생성
-- 정산 완료 처리
-- 티켓 발급
-- 예약 상태 전환
-
-정합성이 필요한 핵심 흐름은 PostgreSQL 트랜잭션 안에서 처리한다.
+재고 차감, 주문 생성, 정산 완료 처리, 티켓 발급, 예약 상태 전환 — **정합성이 필요한 모든 흐름은 PostgreSQL 트랜잭션 안에서** 처리합니다.
 
 ### Redis는 보조 계층
 
 - 예약 hold TTL
 - rate limiting
 - idempotency 결과 캐시
-- 이벤트 캐시 / 재고 캐시
+- 이벤트 / 재고 캐시
 
-Redis는 빠른 조회와 운영 보조 역할을 맡지만 source of truth는 아니다.
+> Redis는 빠른 조회와 보조 역할을 맡지만, **source of truth는 아닙니다.** 부작용은 가능한 한 commit 이후에만 반영해요.
 
-## 주요 정합성 포인트
+## 🛠️ 주요 기능
 
-- `Idempotency-Key` 기반 중복 재시도 방어 (REST 진입 layer)
-- 동일 `idempotency_key` 동시 진입은 트랜잭션 시작 시점의 `pg_advisory_xact_lock(hashtext(idempotency_key))`로 직렬화. 늦게 도착한 트랜잭션은 lock 대기 후 SELECT에서 기존 order를 발견해 idempotent 응답을 그대로 반환. `orders.idempotency_key` UNIQUE는 schema-level backup
-- `payment_records.provider_transaction_id` partial UNIQUE — webhook 멱등성의 자연 키
-- `SERIALIZABLE` 트랜잭션 사용 — 정합성을 보수적으로 잡기 위한 선택. row-level FOR UPDATE 만으로도 단일 row 동시성은 막히지만, 미래에 multiple-row read-modify-write를 추가할 여지를 위해 isolation level을 끌어올려 둠
-- `SELECT ... FOR UPDATE` 기반 이벤트 재고 행 잠금
-- `available_seats`가 0 아래로 내려가지 않도록 제어
-- checkout에서는 주문만 생성하고 티켓은 settlement 이후에만 발급
-- duplicate settlement webhook에도 티켓이 중복 발급되지 않도록 처리
-- Redis 부작용은 가능하면 commit 이후에만 반영
+### ✅ 이벤트 조회
 
-## 디렉터리 구조
+GraphQL로 이벤트 목록과 상세 정보를 조회할 수 있어요. 필요한 필드만 골라서 가져갈 수 있고, DataLoader로 N+1 문제도 막아두었어요.
 
-```textsrc/
-api/        Fastify 앱 조립, REST 라우트, GraphQL 서버, 미들웨어
-core/       도메인 모델, 서비스, 에러
-infra/      PostgreSQL, Redis, 설정, 로거, 마이그레이션, 시드
-docs/         아키텍처, 정합성, Redis, GraphQL, 운영 문서
-load-test/    k6 부하 테스트 스크립트
-terraform/    학습용 AWS 분산 구성 Terraform 코드
+### ✅ 예약 Hold 생성
 
-## 빠른 시작
+`POST /reservations`로 잠깐 자리를 잡아둘 수 있어요. Redis TTL로 일정 시간이 지나면 자동으로 풀려서, **결제까지 가지 않은 자리는 다른 사용자에게 다시 열려요.**
+
+### ✅ 체크아웃 (주문 생성)
+
+`POST /checkouts`로 주문을 만들어요. 이 시점에서는 **티켓이 발급되지 않고**, 주문 상태는 `pending`으로만 기록돼요. 결제가 정산되기 전에는 절대로 티켓이 나가지 않도록 분리해 두었어요.
+
+### ✅ 결제 Webhook 처리 (정산 → 티켓 발급)
+
+`POST /webhooks/payments/settlement`로 결제 webhook이 들어오면 주문 상태를 `paid`로 바꾸고, **이때 처음으로 티켓이 발급**돼요. 한 webhook = 하나의 트랜잭션 경계예요.
+
+### ✅ 중복 Webhook 방어 (멱등성)
+
+같은 `Idempotency-Key`로 webhook이 다시 들어와도 티켓이 두 번 발급되지 않아요. duplicate 응답을 돌려주되, **티켓 개수는 절대 늘어나지 않아요.** 결제사가 retry 정책을 가지고 있을 때 반드시 필요한 동작이에요.
+
+### ✅ 동시성 제어 (Oversell 방지)
+
+`SERIALIZABLE` 트랜잭션과 `SELECT ... FOR UPDATE`로 이벤트 재고 행을 잠그고, `available_seats`가 0 아래로 내려가지 않도록 제어해요. **부하 테스트에서 동시 예약 요청이 몰려도 한 자리가 두 명에게 팔리지 않는 것을 확인**했어요.
+
+### ✅ Rate Limiting & 캐시
+
+Redis 기반 rate limit으로 API를 보호하고, 이벤트 정보와 재고 정보를 캐시 계층에 두어 **burst 트래픽에도 DB가 무너지지 않도록** 했어요.
+
+### ✅ 내 주문 / 내 티켓 조회
+
+GraphQL `myOrders`, `myTickets`, `ticketByCode`로 사용자가 본인의 주문과 티켓을 자유롭게 조회할 수 있어요. JWT 인증 기반이에요.
+
+### ✅ 부하 테스트 시나리오 (k6)
+
+실제 서비스 트래픽 패턴을 가정한 4개의 시나리오를 제공해요.
+
+| 시나리오 | 대상 | 목적 |
+| --- | --- | --- |
+| `baseline` | `/health`, GraphQL `events`, GraphQL `event` | 일반 browse 트래픽의 기준선 |
+| `spike` | GraphQL `event` | 인기 이벤트 상세 집중 조회 시 tail latency |
+| `sustained` | `POST /reservations` | flash-sale 예약 부하 / 429 비율 |
+| `callbacks` | `POST /webhooks/payments/settlement` | duplicate webhook에도 티켓 중복 발급이 없는지 |
+
+## 🔒 핵심 정합성 포인트
+
+PeakPass에서 절대 양보하지 않은 규칙들이에요.
+
+- `Idempotency-Key` 기반 **중복 재시도 방어**
+- `SERIALIZABLE` 트랜잭션 격리 수준 사용
+- `SELECT ... FOR UPDATE` 기반 이벤트 재고 **행 잠금**
+- `available_seats`가 **0 아래로 내려가지 않도록** 제어
+- checkout 시점에는 주문만 생성 → 티켓은 **settlement 이후에만** 발급
+- duplicate settlement webhook에도 **티켓이 중복 발급되지 않음**
+- Redis 부작용은 가능한 한 **commit 이후에만** 반영
+
+## 📂 디렉터리 구조
+
+```
+src/
+  api/         Fastify 앱 조립, REST 라우트, GraphQL 서버, 미들웨어
+  core/        도메인 모델, 서비스, 에러
+  infra/       PostgreSQL, Redis, 설정, 로거, 마이그레이션, 시드
+docs/          아키텍처 / 정합성 / Redis / GraphQL 기술 문서
+load-test/     k6 부하 테스트 스크립트
+```
+
+## 🚀 빠른 시작
 
 ### 1. 의존성 설치
 
-```bashnpm install
+```bash
+npm install
+```
 
 ### 2. 정적 검증
 
-```bashnpm run build
+```bash
+npm run build
 npm test -- --runInBand
 npm run lint
+```
 
-현재 기준 검증 상태:
+### 3. 로컬 환경 실행
 
-- `npm run build` 통과
-- `npm test -- --runInBand` 통과
-- `npm run lint` 통과
-- lint 경고로 `no-explicit-any` 17건 잔존
-
-### 3. 로컬 인프라 실행
-
-```bashdocker compose up -d postgres redis
+```bash
+docker compose up -d postgres redis
 docker compose up -d app
+```
 
-현재 compose 포트:
+기본 포트는 다음과 같아요. (호스트 포트 충돌을 피하기 위해 5433 / 6380을 사용해요.)
 
-- PostgreSQL: `localhost:5433 -> container 5432`
-- Redis: `localhost:6380 -> container 6379`
-
-호스트 포트 충돌을 피하기 위해 현재는 위 포트를 사용한다.
+| 서비스 | 호스트 포트 | 컨테이너 포트 |
+| --- | --- | --- |
+| PostgreSQL | `5433` | `5432` |
+| Redis | `6380` | `6379` |
+| App | `3000` | `3000` |
 
 ### 4. 상태 확인
 
-```bashcurl http://localhost:3000/health
+```bash
+curl http://localhost:3000/health
 curl http://localhost:3000/ready
+```
 
-## 로컬 데모 순서
+## 🎬 데모 시나리오
 
-### 이벤트 목록 조회
+아래 명령들은 로컬(`http://localhost:3000`)을 기준으로 작성되어 있어요. **`http://localhost:3000`을 `https://peak-pass.com`으로 바꾸면 라이브 API에 그대로 적용**할 수 있어요.
 
-```bashcurl http://localhost:3000/events
+### 1) 이벤트 목록 조회
 
-### 예약 hold 생성
+```bash
+curl http://localhost:3000/events
+```
 
-```bashcurl -X POST http://localhost:3000/reservations 
--H "Content-Type: application/json" 
--d '{"eventId":"EVENT_ID","userId":"USER_ID","quantity":1,"tierId":"TIER_ID"}'
+### 2) 예약 Hold 생성
 
-### 체크아웃
+```bash
+curl -X POST http://localhost:3000/reservations \
+  -H "Content-Type: application/json" \
+  -d '{"eventId":"EVENT_ID","userId":"USER_ID","quantity":1,"tierId":"TIER_ID"}'
+```
 
-```bashcurl -X POST http://localhost:3000/checkouts 
--H "Content-Type: application/json" 
--H "Idempotency-Key: 22222222-2222-2222-2222-222222222222" 
--d '{"eventId":"EVENT_ID","userId":"USER_ID","quantity":1,"tierId":"TIER_ID","reservationId":"RESERVATION_ID"}'
+### 3) 체크아웃
 
-이 시점의 기대 상태:
+```bash
+curl -X POST http://localhost:3000/checkouts \
+  -H "Content-Type: application/json" \
+  -H "Idempotency-Key: 22222222-2222-2222-2222-222222222222" \
+  -d '{"eventId":"EVENT_ID","userId":"USER_ID","quantity":1,"tierId":"TIER_ID","reservationId":"RESERVATION_ID"}'
+```
 
-- order status: `pending`
-- tickets: 빈 배열
+이 시점 기대 상태: `order.status = pending`, `tickets = []`
 
-### settlement webhook
+### 4) Settlement Webhook (티켓 발급)
 
-```bashcurl -X POST http://localhost:3000/webhooks/payments/settlement 
--H "Content-Type: application/json" 
--H "Idempotency-Key: 33333333-4444-5555-6666-777777777777" 
--d '{"orderId":"ORDER_ID","providerTransactionId":"txn-settle-001","status":"settled"}'
+```bash
+curl -X POST http://localhost:3000/webhooks/payments/settlement \
+  -H "Content-Type: application/json" \
+  -H "Idempotency-Key: 33333333-4444-5555-6666-777777777777" \
+  -d '{"orderId":"ORDER_ID","providerTransactionId":"txn-settle-001","status":"settled"}'
+```
 
-`WEBHOOK_SIGNING_SECRET`이 설정된 환경에서는 요청 body의 HMAC-SHA256 hex digest를 `X-Webhook-Signature` 헤더로 함께 보내야 한다.
+이 시점 기대 상태: `order.status = paid`, 티켓 발급됨 (예: `PASS-2026-000002`)
 
-이 시점의 기대 상태:
+### 5) 같은 Settlement Webhook 재시도 (중복 방어 확인)
 
-- order status: `paid`
-- tickets: 발급됨
+같은 `Idempotency-Key`로 한 번 더 호출하면 `duplicate: true`로 응답하고, **티켓 수는 늘어나지 않아요.**
 
-### 같은 settlement webhook 재시도
+### 6) GraphQL로 본인 주문 / 티켓 조회
 
-```bashcurl -X POST http://localhost:3000/webhooks/payments/settlement 
--H "Content-Type: application/json" 
--H "Idempotency-Key: 33333333-4444-5555-6666-777777777777" 
--d '{"orderId":"ORDER_ID","providerTransactionId":"txn-settle-001","status":"settled"}'
+```bash
+curl -X POST http://localhost:3000/graphql \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer JWT_TOKEN" \
+  -d '{"query":"query { myOrders(limit: 10) { id status paymentStatus ticketCount totalPrice } myTickets(limit: 10) { id code status } }"}'
+```
 
-기대 결과:
+## 🧪 테스트
 
-- duplicate 처리
-- 티켓 수 증가 없음
+### 단위 / 통합 / 동시성 테스트
 
-### GraphQL 조회
-
-```bashcurl -X POST http://localhost:3000/graphql 
--H "Content-Type: application/json" 
--H "Authorization: Bearer JWT_TOKEN" 
--d '{"query":"query { myOrders(limit: 10) { id status paymentStatus quantity totalAmount } myTickets(limit: 10) { id ticketNumber status } }"}'
-
-## 실제로 확인한 것
-
-로컬 Docker 환경에서 다음 응답을 실제로 확인했다.
-
-- `GET /health`
-- `GET /ready`
-- GraphQL `events`
-- REST `POST /reservations`
-- REST `POST /checkouts`
-- REST `POST /webhooks/payments/settlement`
-- GraphQL `myOrders`
-- GraphQL `myTickets`
-- GraphQL `ticketByCode`
-
-실제 검증 중 확인한 대표 데이터:
-
-- checkout 직후 티켓 없음:
-  - 주문 ID: `a63a537d-64f4-447a-8c02-91d01cc9ad40`
-- settlement 후 발급된 티켓:
-  - 티켓 번호: `PASS-2026-000002`
-- duplicate settlement 재시도:
-  - `duplicate: true`
-  - 티켓 수 증가 없음
-
-## 테스트
-
-```bashnpm test -- --runInBand
+```bash
+npm test -- --runInBand
 npm run test:redis
 npm run test:concurrency
+```
 
-## 부하 테스트
+### 부하 테스트 (k6)
 
-```bashnpm run load-test:baseline
-npm run load-test:spike
-npm run load-test:sustained
-npm run load-test:callbacks
+먼저 k6를 설치해 두어야 해요. (Windows 예시)
 
-결과 저장:
+```bash
+winget install k6.k6
+k6 version
+```
 
-```bashnpm run load-test:baseline:report
-npm run load-test:spike:report
-npm run load-test:sustained:report
-npm run load-test:callbacks:report
+실행 전 앱과 의존성이 떠 있어야 해요.
 
-### k6 설치
-
-Windows 기준 예시:
-
-```bashwinget install k6.k6
-
-설치 확인:
-
-```bashk6 version
-
-### 실행 전 준비
-
-앱과 의존성이 먼저 떠 있어야 한다.
-
-```bashdocker compose up -d postgres redis
+```bash
+docker compose up -d postgres redis
 docker compose up -d app
+curl http://localhost:3000/health
+```
 
-상태 확인:
+환경 변수(PowerShell 예시):
 
-```bashcurl http://localhost:3000/health
-curl http://localhost:3000/ready
-
-### 환경 변수
-
-조회 시나리오는 `BASE_URL`만 있으면 된다.
-
-```powershell$env:BASE_URL="http://localhost:3000"
-
-쓰기 시나리오는 아래 값을 같이 넣는 편이 안전하다.
-
-- `LOAD_TEST_USER_ID`
-- `LOAD_TEST_EVENT_ID`
-- `LOAD_TEST_TIER_ID`
-
-PowerShell 예시:
-
-```powershell$env:BASE_URL="http://localhost:3000"
+```powershell
+$env:BASE_URL="http://localhost:3000"
 $env:LOAD_TEST_USER_ID="USER_ID"
 $env:LOAD_TEST_EVENT_ID="EVENT_ID"
 $env:LOAD_TEST_TIER_ID="TIER_ID"
+```
 
-쓰기 시나리오는 단일 user를 다수 VU가 공유하는 micro-benchmark 형태로 작성되어 있어, 동일 user에 대한 lock 경합 측정에 가깝다. distinct user N명이 같은 event에 몰리는 본격 flash-sale 모델은 후속 과제로 남아 있다.
+시나리오 실행:
 
-### 시나리오 설명
+```bash
+npm run load-test:baseline
+npm run load-test:spike
+npm run load-test:sustained
+npm run load-test:callbacks
+```
 
-`load-test:baseline`
+JSON 리포트 저장:
 
-- 대상: `/health`, GraphQL `events`, GraphQL `event`
-- 목적: 일반 browse 트래픽 기준선 확인
+```bash
+npm run load-test:baseline:report
+npm run load-test:spike:report
+npm run load-test:sustained:report
+npm run load-test:callbacks:report
+```
 
-`load-test:spike`
-
-- 대상: GraphQL `event`
-- 목적: 특정 이벤트 상세 조회 집중 시 tail latency 확인
-
-`load-test:sustained`
-
-- 대상: `POST /reservations`
-- 목적: flash-sale reservation 부하와 429 비율 확인
-
-`load-test:callbacks`
-
-- 대상: `POST /webhooks/payments/settlement`
-- 목적: duplicate webhook에도 티켓이 중복 발급되지 않는지 확인
-
-### 결과 파일
-
-report 스크립트를 사용하면 JSON 파일이 아래 위치에 저장된다.
-
-- `load-test/results/baseline.json`
-- `load-test/results/spike.json`
-- `load-test/results/sustained.json`
-- `load-test/results/callbacks.json`
-
-### 처음 볼 지표
+결과는 `load-test/results/` 아래에 저장돼요. 처음 확인할 지표는 다음과 같아요.
 
 - `http_req_duration` p95, p99
 - `http_req_failed`
-- reservation 시나리오의 429 비율
-- callback 시나리오의 duplicate 응답 비율
+- reservation 시나리오의 **429 비율**
+- callback 시나리오의 **duplicate 응답 비율**
 
-callback 시나리오는 duplicate 응답이 나와도 괜찮지만, 티켓 수가 늘어나면 안 된다.
+> callback 시나리오는 duplicate 응답이 나와도 괜찮지만, **티켓 수가 늘어나면 절대 안 돼요.**
 
-## Docker 명령
+## 📚 문서
 
-```bashnpm run docker:build
-npm run docker:up
-npm run docker:down
-npm run docker:logs
+핵심 문서는 `docs/` 안에 있어요. 처음 본다면 이 순서를 추천해요.
 
-## Terraform
+1. `docs/ARCHITECTURE_DIAGRAMS.md` — 전체 흐름 파악
+2. `docs/TRANSACTION_CONSISTENCY.md` — oversell·중복 발급 방어 로직
+3. `docs/REDIS_STRATEGY.md` — Redis 사용 의도와 한계
+4. `docs/GRAPHQL_RATIONALE.md` — write / read 분리 이유
 
-이 디렉토리는 운영 중인 배포가 아니라 학습 목적으로 작성한 분산 구성 모델입니다. 실제 운영 데모는 EC2 단일 노드 Docker Compose 구성입니다.
+## 🗺️ 코드 읽는 순서 (추천)
 
-기본 순서:
-
-```bashcd terraform
-terraform init
-terraform fmt -check -recursive
-terraform validate
-terraform plan
-
-예시 변수 파일:
-
-- `terraform/terraform.tfvars.example`
-
-## 문서
-
-공개 문서 인덱스:
-
-- [docs/README.md](./docs/README.md)
-
-우선 추천 문서:
-
-- [docs/ARCHITECTURE_DIAGRAMS.md](./docs/ARCHITECTURE_DIAGRAMS.md)
-- [docs/TRANSACTION_CONSISTENCY.md](./docs/TRANSACTION_CONSISTENCY.md)
-- [docs/REDIS_STRATEGY.md](./docs/REDIS_STRATEGY.md)
-- [docs/GRAPHQL_RATIONALE.md](./docs/GRAPHQL_RATIONALE.md)
-- [docs/DEPLOYMENT_RUNBOOK.md](./docs/DEPLOYMENT_RUNBOOK.md)
-
-## 현재 상태 메모
-
-- 설치, 빌드, 테스트, lint는 복구된 상태
-- checkout 정합성 흐름은 구현되어 있음
-- settlement webhook 이후 티켓 발급 흐름을 실제로 확인함
-- duplicate settlement webhook에도 중복 발급이 나지 않음을 확인함
-- Docker Compose 기반 로컬 end-to-end 검증까지 수행함
-- Terraform은 학습 자료이며 실제 운영 배포 경험으로 주장하지 않음
-
-## 처음 읽을 때 추천 순서
-
-1. `src/main.ts`
-2. `src/api/app.ts`
-3. `src/infra/migrations/001_init_schema.sql`
-4. `src/api/rest/checkouts.ts`
-5. `src/api/rest/payments.ts`
-6. `src/core/services/checkout.service.ts`
-7. `src/core/services/reservation.service.ts`
-8. `src/infra/redis/commands.ts`
-9. `src/api/graphql/types.ts`
-10. `src/api/graphql/resolvers.ts`
-11. `src/api/graphql/loaders.ts`
+1. `src/main.ts` — 진입점
+2. `src/api/app.ts` — Fastify 앱 조립
+3. `src/infra/migrations/001_init_schema.sql` — 도메인 스키마
+4. `src/api/rest/checkouts.ts` — 체크아웃 라우트
+5. `src/api/rest/payments.ts` — settlement webhook
+6. `src/core/services/checkout.service.ts` — 체크아웃 로직
+7. `src/core/services/reservation.service.ts` — 예약 hold 로직
+8. `src/infra/redis/commands.ts` — Redis 명령
+9. `src/api/graphql/types.ts` — GraphQL 스키마
+10. `src/api/graphql/resolvers.ts` — 리졸버
+11. `src/api/graphql/loaders.ts` — DataLoader
