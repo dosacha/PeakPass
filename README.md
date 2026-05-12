@@ -5,9 +5,9 @@
 ## 📣 프로젝트 소개
 
 워크숍, 세미나, 컨퍼런스처럼 **짧은 시간에 트래픽이 몰리는 이벤트**에서는 두 가지 사고가 자주 일어납니다.
-하나는 한 자리에 두 명이 결제되는 **oversell**, 다른 하나는 같은 결제 webhook이 두 번 들어와 **티켓이 중복 발급**되는 일이에요.
+하나는 한 자리에 두 명이 결제되는 **oversell**, 다른 하나는 같은 결제 webhook이 두 번 들어와 **티켓이 중복 발급**되는 일입니다.
 
-PeakPass는 이런 환경에서 **재고 정합성과 결제 멱등성을 보장하는 백엔드**가 어떻게 동작해야 하는지를 직접 구현하고, 부하 테스트와 문서까지 함께 검증한 백엔드 포트폴리오 프로젝트입니다.
+PeakPass는 이런 환경에서 **재고 정합성과 결제 멱등성을 보장하는 백엔드**가 어떻게 동작해야 하는지를 직접 구현하고, 부하 테스트와 문서까지 함께 검증한 백엔드 프로젝트입니다.
 
 Node.js 백엔드 운영, PostgreSQL 트랜잭션, Redis 실사용, GraphQL read-side, k6 부하 테스트까지 — 한 도메인 안에서 백엔드의 핵심 요소를 일관되게 설명할 수 있도록 구성했습니다.
 
@@ -20,9 +20,17 @@ Node.js 백엔드 운영, PostgreSQL 트랜잭션, Redis 실사용, GraphQL read
 | Health Check | <https://peak-pass.com/health> |
 | Readiness Check | <https://peak-pass.com/ready> |
 | REST (write-side) | `https://peak-pass.com/reservations`, `/checkouts`, `/webhooks/payments/settlement` |
-| GraphQL (read-side) | <https://peak-pass.com/graphql> |
+| GraphQL (read-side) | `POST https://peak-pass.com/graphql` |
 
-> 아래 데모 시나리오의 `curl` 명령에서 `http://localhost:3000` 부분을 `https://peak-pass.com`으로 바꾸면 **로컬 세팅 없이 바로** 라이브 API를 호출해볼 수 있어요.
+> 아래 데모 시나리오의 `curl` 명령에서 `http://localhost:3000` 부분을 `https://peak-pass.com`으로 바꾸면 **로컬 세팅 없이 바로** 라이브 API를 호출해볼 수 있습니다.
+
+GraphQL 엔드포인트는 POST 전용 API입니다.
+
+```bash
+curl -X POST https://peak-pass.com/graphql \
+  -H "Content-Type: application/json" \
+  -d '{"query":"query { events { id title } }"}'
+```
 
 ## 🎯 프로젝트 목표
 
@@ -54,7 +62,7 @@ PeakPass는 **상태를 바꾸는 명령**과 **데이터를 읽는 조회**를 
 - `POST /checkouts` — 주문 생성 (결제 대기)
 - `POST /webhooks/payments/settlement` — 결제 정산 webhook 처리
 
-> 상태 전이가 핵심인 명령은 REST로 유지합니다. **멱등성 키, HTTP 상태 코드, 트랜잭션 경계**가 가장 단순하게 드러나는 표현이기 때문이에요.
+> 상태 전이가 핵심인 명령은 REST로 유지합니다. **멱등성 키, HTTP 상태 코드, 트랜잭션 경계**가 가장 단순하게 드러나는 표현이기 때문입니다.
 
 ### GraphQL은 조회(Read) 처리
 
@@ -62,7 +70,7 @@ PeakPass는 **상태를 바꾸는 명령**과 **데이터를 읽는 조회**를 
 - `myOrders`, `myTickets` — 내 주문 / 내 티켓 조회
 - `ticketByCode` — 티켓 코드로 단건 조회
 
-> 조회 조합이 많은 read-side는 GraphQL로 분리해, 클라이언트가 필요한 필드만 골라서 가져갈 수 있게 했어요.
+> 조회 조합이 많은 read-side는 GraphQL로 분리해, 클라이언트가 필요한 필드만 골라서 가져갈 수 있게 했습니다.
 
 ### PostgreSQL이 정합성 기준
 
@@ -75,45 +83,45 @@ PeakPass는 **상태를 바꾸는 명령**과 **데이터를 읽는 조회**를 
 - idempotency 결과 캐시
 - 이벤트 / 재고 캐시
 
-> Redis는 빠른 조회와 보조 역할을 맡지만, **source of truth는 아닙니다.** 부작용은 가능한 한 commit 이후에만 반영해요.
+> Redis는 빠른 조회와 보조 역할을 맡지만, **source of truth는 아닙니다.** 부작용은 가능한 한 commit 이후에만 반영합니다.
 
 ## 🛠️ 주요 기능
 
 ### ✅ 이벤트 조회
 
-GraphQL로 이벤트 목록과 상세 정보를 조회할 수 있어요. 필요한 필드만 골라서 가져갈 수 있고, DataLoader로 N+1 문제도 막아두었어요.
+GraphQL로 이벤트 목록과 상세 정보를 조회할 수 있습니다. 필요한 필드만 골라서 가져갈 수 있고, DataLoader로 N+1 문제를 방지했습니다.
 
 ### ✅ 예약 Hold 생성
 
-`POST /reservations`로 잠깐 자리를 잡아둘 수 있어요. Redis TTL로 일정 시간이 지나면 자동으로 풀려서, **결제까지 가지 않은 자리는 다른 사용자에게 다시 열려요.**
+`POST /reservations`로 잠깐 자리를 잡아둘 수 있습니다. Redis TTL로 일정 시간이 지나면 자동으로 풀리며, **결제까지 가지 않은 자리는 다른 사용자에게 다시 열립니다.**
 
 ### ✅ 체크아웃 (주문 생성)
 
-`POST /checkouts`로 주문을 만들어요. 이 시점에서는 **티켓이 발급되지 않고**, 주문 상태는 `pending`으로만 기록돼요. 결제가 정산되기 전에는 절대로 티켓이 나가지 않도록 분리해 두었어요.
+`POST /checkouts`로 주문을 생성합니다. 이 시점에서는 **티켓이 발급되지 않고**, 주문 상태는 `pending`으로만 기록됩니다. 결제가 정산되기 전에는 절대로 티켓이 나가지 않도록 분리했습니다.
 
 ### ✅ 결제 Webhook 처리 (정산 → 티켓 발급)
 
-`POST /webhooks/payments/settlement`로 결제 webhook이 들어오면 주문 상태를 `paid`로 바꾸고, **이때 처음으로 티켓이 발급**돼요. 한 webhook = 하나의 트랜잭션 경계예요.
+`POST /webhooks/payments/settlement`로 결제 webhook이 들어오면 주문 상태를 `paid`로 바꾸고, **이때 처음으로 티켓이 발급**됩니다. 한 webhook = 하나의 트랜잭션 경계입니다.
 
 ### ✅ 중복 Webhook 방어 (멱등성)
 
-같은 `Idempotency-Key`로 webhook이 다시 들어와도 티켓이 두 번 발급되지 않아요. duplicate 응답을 돌려주되, **티켓 개수는 절대 늘어나지 않아요.** 결제사가 retry 정책을 가지고 있을 때 반드시 필요한 동작이에요.
+같은 `Idempotency-Key`로 webhook이 다시 들어와도 티켓이 두 번 발급되지 않습니다. duplicate 응답을 돌려주되, **티켓 개수는 절대 늘어나지 않습니다.** 결제사가 retry 정책을 가지고 있을 때 반드시 필요한 동작입니다.
 
 ### ✅ 동시성 제어 (Oversell 방지)
 
-`SERIALIZABLE` 트랜잭션과 `SELECT ... FOR UPDATE`로 이벤트 재고 행을 잠그고, `available_seats`가 0 아래로 내려가지 않도록 제어해요. **부하 테스트에서 동시 예약 요청이 몰려도 한 자리가 두 명에게 팔리지 않는 것을 확인**했어요.
+`SERIALIZABLE` 트랜잭션과 `SELECT ... FOR UPDATE`로 이벤트 재고 행을 잠그고, `available_seats`가 0 아래로 내려가지 않도록 제어합니다. **부하 테스트에서 동시 예약 요청이 몰려도 한 자리가 두 명에게 팔리지 않는 것을 확인**했습니다.
 
 ### ✅ Rate Limiting & 캐시
 
-Redis 기반 rate limit으로 API를 보호하고, 이벤트 정보와 재고 정보를 캐시 계층에 두어 **burst 트래픽에도 DB가 무너지지 않도록** 했어요.
+Redis 기반 rate limit으로 API를 보호하고, 이벤트 정보와 재고 정보를 캐시 계층에 두어 **burst 트래픽에도 DB가 무너지지 않도록** 구성했습니다.
 
 ### ✅ 내 주문 / 내 티켓 조회
 
-GraphQL `myOrders`, `myTickets`, `ticketByCode`로 사용자가 본인의 주문과 티켓을 자유롭게 조회할 수 있어요. JWT 인증 기반이에요.
+GraphQL `myOrders`, `myTickets`, `ticketByCode`로 사용자가 본인의 주문과 티켓을 자유롭게 조회할 수 있습니다. JWT 인증 기반입니다.
 
 ### ✅ 부하 테스트 시나리오 (k6)
 
-실제 서비스 트래픽 패턴을 가정한 4개의 시나리오를 제공해요.
+실제 서비스 트래픽 패턴을 가정한 4개의 시나리오를 제공합니다.
 
 | 시나리오 | 대상 | 목적 |
 | --- | --- | --- |
@@ -122,9 +130,11 @@ GraphQL `myOrders`, `myTickets`, `ticketByCode`로 사용자가 본인의 주문
 | `sustained` | `POST /reservations` | flash-sale 예약 부하 / 429 비율 |
 | `callbacks` | `POST /webhooks/payments/settlement` | duplicate webhook에도 티켓 중복 발급이 없는지 |
 
+성능 보고서의 write 측정은 단일 user / 단일 event / 단일 tier를 공유하는 micro-benchmark입니다. 같은 row에 대한 lock 경합과 rate limit 동작을 보기 위한 결과이며, 실서비스 flash-sale RPS로 일반화하지 않습니다.
+
 ## 🔒 핵심 정합성 포인트
 
-PeakPass에서 절대 양보하지 않은 규칙들이에요.
+PeakPass에서 절대 양보하지 않은 규칙들입니다.
 
 - `Idempotency-Key` 기반 **중복 재시도 방어**
 - `SERIALIZABLE` 트랜잭션 격리 수준 사용
@@ -168,7 +178,7 @@ docker compose up -d postgres redis
 docker compose up -d app
 ```
 
-기본 포트는 다음과 같아요. (호스트 포트 충돌을 피하기 위해 5433 / 6380을 사용해요.)
+기본 포트는 다음과 같습니다. (호스트 포트 충돌을 피하기 위해 5433 / 6380을 사용합니다.)
 
 | 서비스 | 호스트 포트 | 컨테이너 포트 |
 | --- | --- | --- |
@@ -185,7 +195,7 @@ curl http://localhost:3000/ready
 
 ## 🎬 데모 시나리오
 
-아래 명령들은 로컬(`http://localhost:3000`)을 기준으로 작성되어 있어요. **`http://localhost:3000`을 `https://peak-pass.com`으로 바꾸면 라이브 API에 그대로 적용**할 수 있어요.
+아래 명령들은 로컬(`http://localhost:3000`)을 기준으로 작성되어 있습니다. **`http://localhost:3000`을 `https://peak-pass.com`으로 바꾸면 라이브 API에 그대로 적용**할 수 있습니다.
 
 ### 1) 이벤트 목록 조회
 
@@ -225,7 +235,7 @@ curl -X POST http://localhost:3000/webhooks/payments/settlement \
 
 ### 5) 같은 Settlement Webhook 재시도 (중복 방어 확인)
 
-같은 `Idempotency-Key`로 한 번 더 호출하면 `duplicate: true`로 응답하고, **티켓 수는 늘어나지 않아요.**
+같은 `Idempotency-Key`로 한 번 더 호출하면 `duplicate: true`로 응답하고, **티켓 수는 늘어나지 않습니다.**
 
 ### 6) GraphQL로 본인 주문 / 티켓 조회
 
@@ -248,14 +258,14 @@ npm run test:concurrency
 
 ### 부하 테스트 (k6)
 
-먼저 k6를 설치해 두어야 해요. (Windows 예시)
+먼저 k6를 설치해 두어야 합니다. (Windows 예시)
 
 ```bash
 winget install k6.k6
 k6 version
 ```
 
-실행 전 앱과 의존성이 떠 있어야 해요.
+실행 전 앱과 의존성이 떠 있어야 합니다.
 
 ```bash
 docker compose up -d postgres redis
@@ -290,18 +300,18 @@ npm run load-test:sustained:report
 npm run load-test:callbacks:report
 ```
 
-결과는 `load-test/results/` 아래에 저장돼요. 처음 확인할 지표는 다음과 같아요.
+결과는 `load-test/results/` 아래에 저장됩니다. 처음 확인할 지표는 다음과 같습니다.
 
 - `http_req_duration` p95, p99
 - `http_req_failed`
 - reservation 시나리오의 **429 비율**
 - callback 시나리오의 **duplicate 응답 비율**
 
-> callback 시나리오는 duplicate 응답이 나와도 괜찮지만, **티켓 수가 늘어나면 절대 안 돼요.**
+> callback 시나리오는 duplicate 응답이 나와도 괜찮지만, **티켓 수가 늘어나면 절대 안 됩니다.**
 
 ## 📚 문서
 
-핵심 문서는 `docs/` 안에 있어요. 처음 본다면 이 순서를 추천해요.
+핵심 문서는 `docs/` 안에 있습니다. 처음 본다면 이 순서를 추천합니다.
 
 1. `docs/ARCHITECTURE_DIAGRAMS.md` — 전체 흐름 파악
 2. `docs/TRANSACTION_CONSISTENCY.md` — oversell·중복 발급 방어 로직

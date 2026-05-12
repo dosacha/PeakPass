@@ -97,7 +97,7 @@ k6 run load-test/spike.js
 ```bash
 k6 run load-test/sustained.js
 
-# 조용한 모드 (요약만 출력)
+# 요약 모드
 k6 run --quiet load-test/sustained.js
 
 # 결과를 JSON으로 저장
