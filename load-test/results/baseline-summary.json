@@ -1,79 +1,9 @@
 {
     "metrics": {
-        "http_req_blocked": {
-            "avg": 0.005623857056365282,
-            "min": 0,
-            "med": 0.004,
-            "max": 10.703,
-            "p(90)": 0.009,
-            "p(95)": 0.013
-        },
-        "http_req_waiting": {
-            "med": 8.045,
-            "max": 132.554,
-            "p(90)": 21.6,
-            "p(95)": 26.725599999999993,
-            "avg": 10.378101712280925,
-            "min": 0.294
-        },
-        "data_received": {
-            "rate": 163776.5394502997,
-            "count": 98342274
-        },
-        "http_reqs": {
-            "rate": 107.27831391991155,
-            "count": 64417
-        },
-        "http_req_duration{expected_response:true}": {
-            "med": 8.112,
-            "max": 132.71,
-            "p(90)": 21.660400000000003,
-            "p(95)": 26.78159999999999,
-            "avg": 10.44247721874655,
-            "min": 0.328
-        },
-        "graphql_browse_requests": {
-            "count": 21472,
-            "rate": 35.75888284906687
-        },
-        "data_sent": {
-            "count": 19206785,
-            "rate": 31986.455603679904
-        },
-        "http_req_sending": {
-            "avg": 0.019082540323202703,
-            "min": 0.002,
-            "med": 0.013,
-            "max": 10.318,
-            "p(90)": 0.032,
-            "p(95)": 0.043
-        },
-        "checks": {
-            "passes": 150304,
-            "fails": 0,
-            "value": 1
-        },
         "vus": {
             "value": 1,
             "min": 1,
             "max": 50
-        },
-        "http_req_connecting": {
-            "max": 0.656,
-            "p(90)": 0,
-            "p(95)": 0,
-            "avg": 0.00038246115155937097,
-            "min": 0,
-            "med": 0
-        },
-        "http_req_failed": {
-            "passes": 0,
-            "fails": 64417,
-            "value": 0
-        },
-        "iterations": {
-            "count": 21472,
-            "rate": 35.75888284906687
         },
         "vus_max": {
             "value": 50,
@@ -81,117 +11,187 @@
             "max": 50
         },
         "http_req_tls_handshaking": {
+            "p(95)": 0,
             "avg": 0,
             "min": 0,
             "med": 0,
             "max": 0,
+            "p(90)": 0
+        },
+        "checks": {
+            "passes": 149155,
+            "fails": 15,
+            "value": 0.9998994435878528
+        },
+        "http_req_failed": {
+            "passes": 0,
+            "fails": 63931,
+            "value": 0
+        },
+        "http_req_waiting": {
+            "p(90)": 26.541,
+            "p(95)": 32.29899999999999,
+            "avg": 12.862074955811611,
+            "min": 0.274,
+            "med": 8.89,
+            "max": 648.976
+        },
+        "data_sent": {
+            "count": 19061878,
+            "rate": 31719.306667296332
+        },
+        "graphql_browse_requests": {
+            "count": 21310,
+            "rate": 35.46022197183745
+        },
+        "iteration_duration": {
+            "avg": 1040.1644519694537,
+            "min": 1004.113792,
+            "med": 1034.2416875,
+            "max": 1675.576875,
+            "p(90)": 1060.2805506,
+            "p(95)": 1068.2292814
+        },
+        "http_req_blocked": {
+            "avg": 0.00650318311929845,
+            "min": 0,
+            "med": 0.003,
+            "max": 19.047,
+            "p(90)": 0.008,
+            "p(95)": 0.011
+        },
+        "http_req_duration": {
+            "med": 8.963,
+            "max": 649.052,
+            "p(90)": 26.61,
+            "p(95)": 32.37649999999998,
+            "avg": 12.940252271980764,
+            "min": 0.307
+        },
+        "iterations": {
+            "count": 21310,
+            "rate": 35.46022197183745
+        },
+        "browse_errors": {
+            "passes": 15,
+            "fails": 63915,
+            "thresholds": {
+                "rate<0.03": false
+            },
+            "value": 0.0002346316283435007
+        },
+        "http_req_connecting": {
+            "max": 1.05,
             "p(90)": 0,
-            "p(95)": 0
+            "p(95)": 0,
+            "avg": 0.00031064741674617945,
+            "min": 0,
+            "med": 0
+        },
+        "http_req_sending": {
+            "avg": 0.02410068667781934,
+            "min": 0.002,
+            "med": 0.013,
+            "max": 61.065,
+            "p(90)": 0.031,
+            "p(95)": 0.041
         },
         "http_req_receiving": {
-            "max": 9.242,
-            "p(90)": 0.075,
-            "p(95)": 0.098,
-            "avg": 0.045292966142476826,
-            "min": 0.008,
-            "med": 0.037
+            "min": 0.009,
+            "med": 0.038,
+            "max": 52.672,
+            "p(90)": 0.083,
+            "p(95)": 0.106,
+            "avg": 0.054076629491169495
+        },
+        "http_req_duration{expected_response:true}": {
+            "avg": 12.940252271980764,
+            "min": 0.307,
+            "med": 8.963,
+            "max": 649.052,
+            "p(90)": 26.61,
+            "p(95)": 32.37649999999998
+        },
+        "data_received": {
+            "count": 97600485,
+            "rate": 162408.95648329382
         },
         "browse_latency_ms": {
-            "min": 1.061,
-            "med": 11.202,
-            "max": 132.71,
-            "p(90)": 24.34,
-            "p(95)": 29.16585,
-            "avg": 13.190976760432106,
+            "max": 649.052,
+            "p(90)": 29.901300000000003,
+            "p(95)": 34.52605,
+            "avg": 16.326138315344974,
+            "min": 0.938,
+            "med": 12.9775,
             "thresholds": {
                 "p(95)<800": false,
                 "p(99)<1500": false
             }
         },
-        "iteration_duration": {
-            "p(95)": 1055.45954115,
-            "avg": 1032.3490175096883,
-            "min": 1004.295667,
-            "med": 1030.6344374999999,
-            "max": 1208.02675,
-            "p(90)": 1048.893558
-        },
-        "browse_errors": {
-            "passes": 0,
-            "fails": 64416,
-            "thresholds": {
-                "rate<0.03": false
-            },
-            "value": 0
-        },
-        "http_req_duration": {
-            "p(90)": 21.660400000000003,
-            "p(95)": 26.78159999999999,
-            "avg": 10.44247721874655,
-            "min": 0.328,
-            "med": 8.112,
-            "max": 132.71
+        "http_reqs": {
+            "count": 63931,
+            "rate": 106.38232993343688
         }
     },
     "setup_data": {
         "baseUrl": "http://localhost:3000",
-        "eventId": "585b3d43-fefa-40fb-b722-297612e22b55"
+        "eventId": "a5a3fc45-8f9f-495b-ac60-128851aaf493"
     },
     "root_group": {
+        "checks": {
+            "health 200": {
+                "fails": 0,
+                "name": "health 200",
+                "path": "::health 200",
+                "id": "8e4f90a842a57472549a6b2cf699032d",
+                "passes": 21310
+            },
+            "browse status 200": {
+                "path": "::browse status 200",
+                "id": "e542ff1dc8ea45c2813bb630606f4349",
+                "passes": 21310,
+                "fails": 0,
+                "name": "browse status 200"
+            },
+            "browse graphql data": {
+                "path": "::browse graphql data",
+                "id": "1b61c81f491fe337de14f08792ecd795",
+                "passes": 21310,
+                "fails": 0,
+                "name": "browse graphql data"
+            },
+            "browse latency < 500ms": {
+                "name": "browse latency < 500ms",
+                "path": "::browse latency < 500ms",
+                "id": "50c582c674e9108c0df2c534d1d62152",
+                "passes": 21310,
+                "fails": 0
+            },
+            "detail status 200": {
+                "name": "detail status 200",
+                "path": "::detail status 200",
+                "id": "4b99591b6f850cc5704a9b8fd757eb6a",
+                "passes": 21310,
+                "fails": 0
+            },
+            "detail graphql data": {
+                "fails": 0,
+                "name": "detail graphql data",
+                "path": "::detail graphql data",
+                "id": "79c5508c49053feac895e138df2f43bf",
+                "passes": 21310
+            },
+            "detail latency < 600ms": {
+                "name": "detail latency < 600ms",
+                "path": "::detail latency < 600ms",
+                "id": "85dbfcd5bb91ec7b879609f13a7bb5e2",
+                "passes": 21295,
+                "fails": 15
+            }
+        },
+        "name": "",
         "path": "",
         "id": "d41d8cd98f00b204e9800998ecf8427e",
-        "groups": {},
-        "checks": {
-                "health 200": {
-                    "name": "health 200",
-                    "path": "::health 200",
-                    "id": "8e4f90a842a57472549a6b2cf699032d",
-                    "passes": 21472,
-                    "fails": 0
-                },
-                "browse status 200": {
-                    "path": "::browse status 200",
-                    "id": "e542ff1dc8ea45c2813bb630606f4349",
-                    "passes": 21472,
-                    "fails": 0,
-                    "name": "browse status 200"
-                },
-                "browse graphql data": {
-                    "name": "browse graphql data",
-                    "path": "::browse graphql data",
-                    "id": "1b61c81f491fe337de14f08792ecd795",
-                    "passes": 21472,
-                    "fails": 0
-                },
-                "browse latency < 500ms": {
-                    "fails": 0,
-                    "name": "browse latency < 500ms",
-                    "path": "::browse latency < 500ms",
-                    "id": "50c582c674e9108c0df2c534d1d62152",
-                    "passes": 21472
-                },
-                "detail status 200": {
-                    "fails": 0,
-                    "name": "detail status 200",
-                    "path": "::detail status 200",
-                    "id": "4b99591b6f850cc5704a9b8fd757eb6a",
-                    "passes": 21472
-                },
-                "detail graphql data": {
-                    "name": "detail graphql data",
-                    "path": "::detail graphql data",
-                    "id": "79c5508c49053feac895e138df2f43bf",
-                    "passes": 21472,
-                    "fails": 0
-                },
-                "detail latency < 600ms": {
-                    "name": "detail latency < 600ms",
-                    "path": "::detail latency < 600ms",
-                    "id": "85dbfcd5bb91ec7b879609f13a7bb5e2",
-                    "passes": 21472,
-                    "fails": 0
-                }
-            },
-        "name": ""
+        "groups": {}
     }
 }
