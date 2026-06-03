@@ -72,9 +72,10 @@ export default function (data) {
   const headers = { 'Content-Type': 'application/json' };
 
   const healthResponse = http.get(`${data.baseUrl}/health`, { headers });
-  check(healthResponse, {
+  const healthOk = check(healthResponse, {
     'health 200': (response) => response.status === 200,
-  }) || browseErrors.add(1);
+  });
+  browseErrors.add(!healthOk);
 
   const browseResponse = http.post(
     `${data.baseUrl}/graphql`,
@@ -92,11 +93,12 @@ export default function (data) {
   browseLatency.add(browseResponse.timings.duration);
 
   const browseJson = parseJson(browseResponse);
-  check(browseResponse, {
+  const browseOk = check(browseResponse, {
     'browse status 200': (response) => response.status === 200,
     'browse graphql data': () => Boolean(browseJson && browseJson.data && browseJson.data.events),
     'browse latency < 500ms': (response) => response.timings.duration < 500,
-  }) || browseErrors.add(1);
+  });
+  browseErrors.add(!browseOk);
 
   sleep(0.3);
 
@@ -112,11 +114,12 @@ export default function (data) {
 
     browseLatency.add(detailResponse.timings.duration);
     const detailJson = parseJson(detailResponse);
-    check(detailResponse, {
+    const detailOk = check(detailResponse, {
       'detail status 200': (response) => response.status === 200,
       'detail graphql data': () => Boolean(detailJson && detailJson.data && detailJson.data.event),
       'detail latency < 600ms': (response) => response.timings.duration < 600,
-    }) || browseErrors.add(1);
+    });
+    browseErrors.add(!detailOk);
   }
 
   sleep(0.7);

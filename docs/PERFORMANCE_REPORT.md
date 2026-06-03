@@ -8,6 +8,8 @@
 - [spike.js](../load-test/spike.js)
 - [sustained.js](../load-test/sustained.js)
 - [payment-callback.js](../load-test/payment-callback.js)
+- [graphql-rate-limit.js](../load-test/graphql-rate-limit.js)
+- [reservation-rate-limit.js](../load-test/reservation-rate-limit.js)
 
 ## 시나리오 목적
 
@@ -30,6 +32,16 @@
 
 - 같은 settlement webhook이 반복될 때 duplicate 처리 확인
 - 이미 처리된 order에 대해 추가 티켓이 발급되지 않는지 확인
+
+### graphql rate limit
+
+- GraphQL read 경로의 rate limiter가 429를 fail-fast로 반환하는지 확인
+- 429 외 예기치 않은 오류가 섞이지 않는지 확인
+
+### reservation rate limit
+
+- reservation write 경로의 rate limiter가 429를 fail-fast로 반환하는지 확인
+- 429 / 409 / 201 외 예기치 않은 응답이 섞이지 않는지 확인
 
 ## 현재 코드와 연결된 지점
 
@@ -64,22 +76,57 @@
 
 ## 현재 메모
 
-- 스크립트는 현재 API 구조와 settlement 이후 발급 흐름을 반영함
-- baseline / spike / sustained 결과는 commit으로 고정됨 (아래 측정 결과 참조)
-- payment-callback 시나리오는 HMAC `X-Webhook-Timestamp` 서명 패턴 반영 후 결과 추가 예정 (현재 script는 secret 미설정 환경에서만 실행 가능)
+- 순수 성능/idempotency 측정과 rate limit 측정은 분리함
+- 순수 성능/idempotency 측정은 `docker-compose.perf.yml`로 rate limit을 높이고 `node dist/main.js`로 실행함
+- rate limit 측정은 기본 `docker-compose.yml` 설정을 사용함
+- `http_req_failed`는 rate limit 시나리오에서 429를 failed response로 집계하므로, 해당 시나리오는 `*_unexpected_errors`를 성공 기준으로 봄
 
-## 측정 환경 (2026-05-05)
+## 측정 환경 (2026-06-03)
 
 | 항목 | 값 |
 |---|---|
-| Hardware | 로컬 개발 머신 (Windows + WSL2 또는 Docker Desktop) |
-| Runtime | Node.js 20, PostgreSQL 16, Redis 7, 모두 Docker Compose 단일 노드 |
+| Hardware | 로컬 개발 머신 (Docker Desktop) |
+| Runtime | Node.js 18 컨테이너, PostgreSQL 16, Redis 7, 모두 Docker Compose 단일 노드 |
 | 클라이언트 | k6, 같은 머신에서 `localhost:3000`로 호출 |
 | `NODE_ENV` | `development` |
-| `ENABLE_RATE_LIMITING` | 시나리오별로 명시 (아래 표 참조) |
+| 순수 성능 환경 | `docker-compose.yml` + `docker-compose.perf.yml` |
+| rate limit 환경 | 기본 `docker-compose.yml` |
 | `ENFORCE_AUTH_USER_MATCH` | `false` (k6 스크립트가 JWT를 발급하지 않으므로) |
 | `RATE_LIMIT_FAIL_MODE` | `closed` (default) |
-| 데이터셋 | seed.ts로 생성한 단일 이벤트 + 단일 tier, `total_seats`는 시나리오 처리량을 견딜 수 있도록 충분히 크게 설정 |
+| 데이터셋 | seed.ts로 생성한 이벤트 2개, user 3개 |
+
+### 실행 모드
+
+순수 성능/idempotency 측정:
+
+```bash
+docker compose -f docker-compose.yml -f docker-compose.perf.yml up -d --force-recreate app
+
+until curl -sf http://localhost:3000/ready > /dev/null; do
+  sleep 2
+done
+
+docker compose -f docker-compose.yml -f docker-compose.perf.yml exec redis redis-cli FLUSHDB
+```
+
+이 모드는 다음 값을 사용합니다.
+
+| 변수 | 값 |
+|---|---:|
+| `GRAPHQL_RATE_LIMIT_MAX_REQUESTS` | `100000` |
+| `RATE_LIMIT_MAX_REQUESTS` | `100000` |
+
+Rate limit 측정:
+
+```bash
+docker compose up -d --force-recreate app
+
+until curl -sf http://localhost:3000/ready > /dev/null; do
+  sleep 2
+done
+
+docker compose exec redis redis-cli FLUSHDB
+```
 
 ### 시나리오 부하 모델
 
@@ -87,21 +134,23 @@
 
 이 형태로 측정해도 **단일 event row에 대한 lock 직렬화 비용**은 의미 있는 정보이고, GraphQL read p95가 흔들리지 않는지·rate limit on / off가 throughput에 어떻게 반영되는지는 확인 가능합니다. 다만 본 결과를 "실서비스 환경의 flash-sale RPS 추정치"로 일반화하지 말아 주세요.
 
-## 측정 결과 (2026-05-06 갱신, 위 환경)
+## 측정 결과 (2026-06-03 갱신, 위 환경)
 
 | 시나리오 | 결과 파일 | 부하 모델 | rate limit | RPS | p95 latency | 에러율 |
 |---|---|---|---|---|---|---|
-| read spike (200 VU) | `spike-summary.json` | GraphQL `event` 단일 id 반복 | off | 653.2 | 17.9 ms | 0% |
-| read baseline (50 VU 10분) | `baseline-summary.json` | GraphQL `events` / `event` mix + `/health` | off | 109.5 | 11.5 ms | 0% |
-| write reservation sustained (150 VU) | `sustained-reservation-2026-05-05-2208.json` | 단일 user → 단일 event / tier reservation 반복 | **off** | 258.4 | 486 ms | 0% |
-| write reservation, rate limit on, 동일 부하 | `sustained-2026-05-05-2119.json` | 위와 동일 + `ENABLE_RATE_LIMITING=true` | **on** | 1,059.6 | 6.0 ms | 100% rate-limited |
+| read baseline (50 VU 10분) | `baseline-summary.json` | GraphQL `events` / `event` mix + `/health` | perf override | 107.3 HTTP req/s | `browse_latency_ms` p95 29.2 ms | `browse_errors` 0.00% |
+| read spike (200 VU) | `spike-summary.json` | GraphQL `event` 단일 id 반복 | perf override | 663.6 HTTP req/s | `event_detail_spike_latency_ms` p95 5.7 ms | `event_detail_spike_errors` 0.00% |
+| payment callback duplicate retry (50 VU) | console output | 단일 order에 settlement webhook 반복 | perf override | 271.6 HTTP req/s | `payment_callback_latency_ms` p95 5.0 ms | `payment_callback_errors` 0.00% |
+| GraphQL rate limit | console output | GraphQL `events` 반복 | default | 197.5 HTTP req/s | `graphql_rate_limit_latency_ms` p95 4.0 ms | `graphql_unexpected_errors` 0.00%, 99.13% rate-limited |
+| reservation rate limit | console output | 단일 user → 단일 event / tier reservation 반복 | default | 240.3 HTTP req/s | `reservation_rate_limit_latency_ms` p95 3.3 ms | `reservation_unexpected_errors` 0.00%, 99.94% rate-limited |
 
 ### 해석
 
-- **read 경로**: 200 VU spike에서도 p95 16 ms로 흔들리지 않음 (cache hit + 단순 SELECT)
-- **write 경로 (rate limit off)**: SERIALIZABLE + FOR UPDATE + Redis hold를 모두 거치는 *완전한* reservation 흐름에서 258 RPS, 0% 에러. p95 486 ms는 단일 row lock 경합의 직렬화 cost가 그대로 반영된 결과
-- **write 경로 (rate limit on)**: 1,060 RPS의 사실상 100%가 fail-fast 거부됨 (p95 6 ms) → fail-closed 정책의 정량 검증. 같은 user_id가 RATE_LIMIT_MAX_REQUESTS(default 5) / RATE_LIMIT_WINDOW_MS(default 60000) 안에서만 통과하므로 윈도우 첫 5건 이후 모든 요청이 차단됨
-- **payment-callback**: 결과 미고정 (HMAC header 반영 후 추가 예정)
+- **read 경로**: rate limit을 높인 perf 환경에서 baseline과 200 VU spike 모두 0% 오류로 통과함. spike p95 5.7 ms로 hot event detail read가 안정적으로 처리됨
+- **payment callback**: 단일 order에 settlement webhook을 반복해도 대부분 duplicate로 안정 처리됨. `payment_callback_duplicates=19055`, `payment_callback_errors=0.00%`
+- **GraphQL rate limit**: 기본 설정에서 99.13%가 rate-limited 되었고, 예기치 않은 오류는 0%임. read limiter가 fail-fast로 동작함
+- **reservation rate limit**: 기본 설정에서 99.94%가 rate-limited 되었고, 예기치 않은 오류는 0%임. write limiter가 fail-fast로 동작함
+- **HTTP failed 해석**: rate limit 시나리오에서 `http_req_failed`가 99%대로 나오는 것은 429가 k6의 HTTP failed response로 집계되기 때문이며, 성공 기준은 커스텀 unexpected error 지표임
 
 ### 본 측정의 한계 (정직한 disclaimer)
 

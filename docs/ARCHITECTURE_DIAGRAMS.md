@@ -13,7 +13,7 @@ flowchart LR
       Fastify[Fastify]
       REST[REST 명령 API]
       GQL[GraphQL 조회 API]
-      MW[인증 / 레이트 리미트 / 멱등성]
+      MW[인증 / Rate Limit / 멱등성]
       Service[도메인 서비스]
     end
 

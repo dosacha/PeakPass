@@ -81,11 +81,12 @@ export default function (data) {
   spikeLatency.add(response.timings.duration);
 
   const json = parseJson(response);
-  check(response, {
+  const detailOk = check(response, {
     'detail status 200': (current) => current.status === 200,
     'detail graphql data': () => Boolean(json && json.data && json.data.event),
     'detail latency < 1000ms': (current) => current.timings.duration < 1000,
-  }) || spikeErrors.add(1);
+  });
+  spikeErrors.add(!detailOk);
 
   sleep(Math.random() * 0.3);
 }

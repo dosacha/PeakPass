@@ -137,11 +137,12 @@ export default function (data) {
     callbackDuplicates.add(1);
   }
 
-  check(response, {
+  const callbackOk = check(response, {
     'callback status 200': () => response.status === 200,
     'callback order returned': () => accepted,
     'callback payment status settled': () => json && json.paymentStatus === 'settled',
-  }) || callbackErrors.add(1);
+  });
+  callbackErrors.add(!callbackOk);
 
   sleep(Math.random() * 0.2);
 }

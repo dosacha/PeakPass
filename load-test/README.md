@@ -23,6 +23,43 @@ npm install
 
 ## 테스트 시나리오
 
+### 시나리오 구분
+
+순수 성능 측정과 rate limit 동작 측정은 분리해서 실행합니다.
+
+- 순수 성능: `baseline.js`, `spike.js`
+  - 목적: 정상 200 응답의 p95/p99, DB/API 처리량 확인
+  - 권장: 테스트 환경에서 `GRAPHQL_RATE_LIMIT_MAX_REQUESTS`를 충분히 크게 설정
+- Rate limit 측정: `graphql-rate-limit.js`, `reservation-rate-limit.js`
+  - 목적: 429 발생 여부, 차단 비율, 차단 시 latency 확인
+  - 권장: 기본 rate limit 설정을 유지
+- 예약 경합/방어 흐름: `sustained.js`, `payment-callback.js`
+  - 목적: 예약 경합, 중복 webhook, idempotency 방어 확인
+
+순수 성능 측정용 예시:
+
+```bash
+docker compose -f docker-compose.yml -f docker-compose.perf.yml up -d --force-recreate app
+docker compose exec redis redis-cli FLUSHDB
+```
+
+이 모드는 rate limit을 높이고, dev watcher 대신 빌드된 `dist/main.js`를 실행합니다.
+
+Rate limit 측정용 예시:
+
+```bash
+docker compose up -d --force-recreate app
+docker compose exec redis redis-cli FLUSHDB
+
+npm run load-test:rate-limit:graphql
+
+BASE_URL=http://localhost:3000 \
+LOAD_TEST_USER_ID=USER_ID \
+LOAD_TEST_EVENT_ID=EVENT_ID \
+LOAD_TEST_TIER_ID=TIER_ID \
+npm run load-test:rate-limit:reservations
+```
+
 ### 1. Baseline (기본 부하)
 **목적**: 정상 트래픽 상황에서의 성능 측정
 
@@ -72,8 +109,7 @@ k6 run load-test/spike.js
 
 **분석 포인트**:
 - 갑작스러운 요청 급증 시 큐 대기 시간 증가 여부
-- 레이트 리미터 작동 확인 (정상적으로 요청 제한되는가)
-- 에러 메시지 타입 분석 (타임아웃 vs 리소스 부족 vs 레이트 리미트)
+- 에러 메시지 타입 분석 (타임아웃 vs 리소스 부족)
 - 시스템 회복 시간 (200 VU → 0 VU 후 정상화까지 걸리는 시간)
 
 ---

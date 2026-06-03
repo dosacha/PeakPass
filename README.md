@@ -27,9 +27,9 @@ Node.js 백엔드 운영, PostgreSQL 트랜잭션, Redis 실사용, GraphQL read
 GraphQL 엔드포인트는 POST 전용 API입니다.
 
 ```bash
-curl -X POST https://peak-pass.com/graphql \
+curl -X POST http://localhost:3000/graphql \
   -H "Content-Type: application/json" \
-  -d '{"query":"query { events { id title } }"}'
+  -d '{"query":"query { events { id name } }"}'
 ```
 
 ## 🎯 프로젝트 목표
@@ -37,7 +37,7 @@ curl -X POST https://peak-pass.com/graphql \
 - Node.js + TypeScript 기반 백엔드 서비스 구현
 - Fastify 기반 **REST write-side**와 **GraphQL read-side** 분리
 - PostgreSQL을 **source of truth**로 유지
-- Redis를 hold TTL · rate limit · idempotency · cache에 **실제 운영 용도로** 사용
+- Redis를 hold TTL · rate limit · idempotency · cache에 **운영 용도로** 사용
 - 동시성 하에서 oversell을 막는 트랜잭션 흐름 구현
 - k6 기반 부하 테스트 시나리오 제공
 
@@ -273,6 +273,22 @@ docker compose up -d app
 curl http://localhost:3000/health
 ```
 
+순수 성능/idempotency 측정처럼 rate limit을 높여야 하는 경우:
+
+```bash
+docker compose -f docker-compose.yml -f docker-compose.perf.yml up -d --force-recreate app
+docker compose exec redis redis-cli FLUSHDB
+```
+
+`docker-compose.perf.yml`은 k6 실행 중 dev watcher가 재시작되지 않도록 `npm run build` 후 `npm run start`로 앱을 실행합니다.
+
+Rate limit 동작 자체를 측정하는 경우:
+
+```bash
+docker compose up -d --force-recreate app
+docker compose exec redis redis-cli FLUSHDB
+```
+
 환경 변수(PowerShell 예시):
 
 ```powershell
@@ -291,6 +307,13 @@ npm run load-test:sustained
 npm run load-test:callbacks
 ```
 
+Rate limit 전용 시나리오:
+
+```bash
+npm run load-test:rate-limit:graphql
+npm run load-test:rate-limit:reservations
+```
+
 JSON 리포트 저장:
 
 ```bash
@@ -298,6 +321,8 @@ npm run load-test:baseline:report
 npm run load-test:spike:report
 npm run load-test:sustained:report
 npm run load-test:callbacks:report
+npm run load-test:rate-limit:graphql:report
+npm run load-test:rate-limit:reservations:report
 ```
 
 결과는 `load-test/results/` 아래에 저장됩니다. 처음 확인할 지표는 다음과 같습니다.
