@@ -22,6 +22,15 @@ Node.js 백엔드 운영, PostgreSQL 트랜잭션, Redis 실사용, GraphQL read
 | REST (write-side) | `https://peak-pass.com/reservations`, `/checkouts`, `/webhooks/payments/settlement` |
 | GraphQL (read-side) | `POST https://peak-pass.com/graphql` |
 
+### Live demo sessions
+
+The browser demo can obtain a short-lived token for one fixed seed user through
+`POST /demo/session`. It is disabled by default and must be explicitly enabled
+with `ENABLE_DEMO_SESSION=true`, including in production. The endpoint always
+uses `DEMO_USER_EMAIL`; clients cannot select a user, email, or role. Its JWT is
+kept only in browser memory and is not a substitute for real user login or
+production access control.
+
 > 아래 데모 시나리오의 `curl` 명령에서 `http://localhost:3000` 부분을 `https://peak-pass.com`으로 바꾸면 **로컬 세팅 없이 바로** 라이브 API를 호출해볼 수 있습니다.
 
 GraphQL 엔드포인트는 POST 전용 API입니다.

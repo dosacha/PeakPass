@@ -78,6 +78,12 @@ const envSchema = z.object({
   //   - false: JWT 있을 때만 일치 강제, 없으면 body 신뢰 + warn 로그 (demo override)
   ENFORCE_AUTH_USER_MATCH: booleanFromEnv(true),
 
+  // Live demo session. This remains disabled unless an operator explicitly
+  // enables it, including in production.
+  ENABLE_DEMO_SESSION: booleanFromEnv(false),
+  DEMO_USER_EMAIL: z.string().email().default('user1@example.com'),
+  DEMO_SESSION_TTL_SECONDS: z.coerce.number().int().min(60).max(900).default(600),
+
   // POST /events 운영자 전용 가드.
   //   - false (default): 모든 호출을 403으로 거부 (티켓팅 서비스에서 이벤트 생성은 일반
   //     사용자 기능이 아니라 운영자 기능이므로 안전한 기본값을 명시)

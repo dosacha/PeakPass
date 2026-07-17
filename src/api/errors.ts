@@ -1,4 +1,5 @@
 import { FastifyReply } from 'fastify';
+import { ZodError } from 'zod';
 import { getLogger } from '@/infra/logger';
 import { AppError } from '@/core/errors';
 
@@ -94,6 +95,13 @@ export function handleValidationError(
   sendErrorResponse(reply, 400, 'VALIDATION_ERROR', 'Request validation failed', requestId, {
     issues,
   });
+}
+
+export function toValidationIssues(error: ZodError): Array<{ path: string; message: string }> {
+  return error.issues.map((issue) => ({
+    path: issue.path.map(String).join('.') || 'body',
+    message: issue.message,
+  }));
 }
 
 export function handleHttpError(

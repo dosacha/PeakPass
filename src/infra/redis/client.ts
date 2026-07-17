@@ -62,6 +62,7 @@ export const redisKeys = {
   rateLimitReservation: (userId: string) => `peakpass:ratelimit:reservation:${userId}`,
   rateLimitWebhook: (userId: string) => `peakpass:ratelimit:webhook:${userId}`,
   rateLimitGraphql: (userId: string) => `peakpass:ratelimit:graphql:${userId}`,
+  rateLimitDemoSession: (ip: string) => `peakpass:ratelimit:demo-session:${ip}`,
   idempotencyKey: (key: string) => `peakpass:idempotency:${key}`,
   idempotencyLock: (key: string) => `peakpass:idempotency:lock:${key}`,
   inventoryCount: (eventId: string) => `peakpass:inventory:${eventId}:count`,

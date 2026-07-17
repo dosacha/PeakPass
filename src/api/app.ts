@@ -4,7 +4,13 @@ import helmetPlugin from '@fastify/helmet';
 import { randomUUID } from 'crypto';
 import { getLogger } from '@/infra/logger';
 import { AppError } from '@/core/errors';
-import { handleAppError, handleUnexpectedError } from './errors';
+import { ZodError } from 'zod';
+import {
+  handleAppError,
+  handleUnexpectedError,
+  handleValidationError,
+  toValidationIssues,
+} from './errors';
 import { createApolloServer, registerGraphQLRoute } from './graphql/server';
 import { registerHealthChecks } from './health';
 
@@ -81,6 +87,11 @@ export async function createApp() {
   fastify.setErrorHandler((err, request, reply) => {
     const requestId = request.id || 'unknown';
 
+    if (err instanceof ZodError) {
+      handleValidationError(toValidationIssues(err), reply, requestId);
+      return;
+    }
+
     if (err instanceof AppError) {
       handleAppError(err, reply, requestId);
       return;
@@ -99,11 +110,13 @@ export async function createApp() {
   const { registerPaymentRoutes } = await import('./rest/payments');
   const { registerReservationRoutes } = await import('./rest/reservations');
   const { registerCheckoutRoutes } = await import('./rest/checkouts');
+  const { registerDemoSessionRoutes } = await import('./rest/demo');
 
   await registerEventRoutes(fastify);
   await registerPaymentRoutes(fastify);
   await registerReservationRoutes(fastify);
   await registerCheckoutRoutes(fastify);
+  await registerDemoSessionRoutes(fastify);
   
   return fastify;
 }
