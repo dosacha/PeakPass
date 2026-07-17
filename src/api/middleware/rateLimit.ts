@@ -20,7 +20,13 @@ const logger = getLogger();
 //
 // 결제 경로의 폭주 방어 layer가 leak되는 위험이 단순 503보다 크므로 default 'closed'를
 // 권장. production에서는 config가 fail-closed를 강제한다.
-type RateLimitAction = 'checkout' | 'reservation' | 'webhook' | 'graphql' | 'demoSession';
+type RateLimitAction =
+  | 'checkout'
+  | 'reservation'
+  | 'webhook'
+  | 'graphql'
+  | 'demoSession'
+  | 'demoSettlement';
 
 interface RouteRateLimit {
   action: RateLimitAction;
@@ -45,6 +51,18 @@ export function resolveRouteRateLimit(url: string): RouteRateLimit | null {
 
     return {
       action: 'demoSession',
+      limit: 10,
+      windowMs: 60_000,
+    };
+  }
+
+  if (url.split('?')[0] === '/demo/settlement') {
+    if (!config.ENABLE_DEMO_SESSION) {
+      return null;
+    }
+
+    return {
+      action: 'demoSettlement',
       limit: 10,
       windowMs: 60_000,
     };

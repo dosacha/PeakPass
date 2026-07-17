@@ -97,7 +97,7 @@ export async function deleteReservationHold(reservationId: string): Promise<void
  */
 export async function checkRateLimit(
   userId: string,
-  action: 'checkout' | 'reservation' | 'webhook' | 'graphql' | 'demoSession',
+  action: 'checkout' | 'reservation' | 'webhook' | 'graphql' | 'demoSession' | 'demoSettlement',
   limit: number,
   windowMs: number,
   failMode: 'open' | 'closed' = 'closed',
@@ -112,6 +112,7 @@ export async function checkRateLimit(
     webhook: redisKeys.rateLimitWebhook(userId),
     graphql: redisKeys.rateLimitGraphql(userId),
     demoSession: redisKeys.rateLimitDemoSession(userId),
+    demoSettlement: redisKeys.rateLimitDemoSettlement(userId),
   };
   const key = keyByAction[action];
 

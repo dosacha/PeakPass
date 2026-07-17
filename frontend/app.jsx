@@ -306,6 +306,12 @@ const App = () => {
       if (mode === "mock") return mockServer.settlement(body, idemKey);
       return callLive(apiBase, "POST", "/webhooks/payments/settlement", body, { "Idempotency-Key": idemKey });
     },
+    async demoSettlement(body, idemKey, token) {
+      return callLive(apiBase, "POST", "/demo/settlement", body, {
+        "Idempotency-Key": idemKey,
+        "Authorization": `Bearer ${token}`,
+      });
+    },
     async health() {
       if (mode === "mock") return mockServer.health();
       return callLive(apiBase, "GET", "/health");
@@ -445,12 +451,40 @@ const App = () => {
 
     step5: async () => {
       if (!order) return;
-      if (mode === "live") return;
       setStep("s5", "running"); setActiveStep(5);
       actions.gotoStep(5);
       const key = settlementIdemKey || uuid();
-      const txn = providerTxnId || `txn-demo-${Date.now()}`;
       if (!settlementIdemKey) setSettlementIdemKey(key);
+
+      if (mode === "live") {
+        try {
+          let session = await ensureLiveDemoSession();
+          const body = { orderId: order.order.id };
+          let res = await api.demoSettlement(body, key, session.token);
+
+          if (isInvalidLiveToken(res)) {
+            logReq({ method: "POST", url: "/demo/settlement", idemKey: key, status: res.status, elapsed: res.elapsed || 200,
+                     request: body, response: res.data });
+            clearLiveDemoSession();
+            session = await ensureLiveDemoSession();
+            res = await api.demoSettlement(body, key, session.token);
+          }
+
+          logReq({ method: "POST", url: "/demo/settlement", idemKey: key, status: res.status, elapsed: res.elapsed || 200,
+                   request: body, response: res.data });
+          if (res.ok) {
+            setSettlement(res.data);
+            setTiming("s5", res.elapsed || 200);
+            setStep("s5", "done");
+            if (res.data?.tickets?.[0]?.ticketNumber) setLookupCode(res.data.tickets[0].ticketNumber);
+          } else setStep("s5", "error");
+        } catch {
+          setStep("s5", "error");
+        }
+        return;
+      }
+
+      const txn = providerTxnId || `txn-demo-${Date.now()}`;
       if (!providerTxnId) setProviderTxnId(txn);
       const body = { orderId: order.order.id, providerTransactionId: txn, status: "settled" };
       const res = await api.settlement(body, key);
@@ -470,7 +504,39 @@ const App = () => {
     // - 이미 done이면 "running"으로 되돌리지 않아 progress flicker 방지 (functional update).
     runDupReplay: async () => {
       if (!order || !settlementIdemKey) return;
-      if (mode === "live") return;
+      if (mode === "live") {
+        if (dupBusy.A) return;
+        setDupBusy(prev => ({ ...prev, A: true }));
+        setStepStatus(prev => prev.s6 === "done" ? prev : { ...prev, s6: "running" });
+        setActiveStep(6);
+        try {
+          let session = await ensureLiveDemoSession();
+          const body = { orderId: order.order.id };
+          let res = await api.demoSettlement(body, settlementIdemKey, session.token);
+
+          if (isInvalidLiveToken(res)) {
+            logReq({ method: "POST", url: "/demo/settlement (replay)", idemKey: settlementIdemKey, status: res.status, elapsed: res.elapsed || 200,
+                     request: body, response: res.data });
+            clearLiveDemoSession();
+            session = await ensureLiveDemoSession();
+            res = await api.demoSettlement(body, settlementIdemKey, session.token);
+          }
+
+          logReq({ method: "POST", url: "/demo/settlement (replay)", idemKey: settlementIdemKey, status: res.status, elapsed: res.elapsed || 200,
+                   request: body, response: res.data });
+          if (res.ok) {
+            setDuplicateReplay(res.data);
+            setStep("s6", "done");
+          } else {
+            setStepStatus(prev => prev.s6 === "running" ? { ...prev, s6: "idle" } : prev);
+          }
+        } catch {
+          setStepStatus(prev => prev.s6 === "running" ? { ...prev, s6: "idle" } : prev);
+        } finally {
+          setDupBusy(prev => ({ ...prev, A: false }));
+        }
+        return;
+      }
       if (dupBusy.A) return; // 같은 버튼 더블클릭 방지
       setDupBusy(prev => ({ ...prev, A: true }));
       setStepStatus(prev => prev.s6 === "done" ? prev : { ...prev, s6: "running" });
@@ -497,7 +563,40 @@ const App = () => {
     // - 위와 동일 패턴. dupBusy.B만 사용.
     runDupSemantic: async () => {
       if (!order) return;
-      if (mode === "live") return;
+      if (mode === "live") {
+        if (dupBusy.B) return;
+        setDupBusy(prev => ({ ...prev, B: true }));
+        setStepStatus(prev => prev.s6 === "done" ? prev : { ...prev, s6: "running" });
+        setActiveStep(6);
+        try {
+          const newKey = uuid();
+          let session = await ensureLiveDemoSession();
+          const body = { orderId: order.order.id };
+          let res = await api.demoSettlement(body, newKey, session.token);
+
+          if (isInvalidLiveToken(res)) {
+            logReq({ method: "POST", url: "/demo/settlement (new-key, same-transaction)", idemKey: newKey, status: res.status, elapsed: res.elapsed || 200,
+                     request: body, response: res.data });
+            clearLiveDemoSession();
+            session = await ensureLiveDemoSession();
+            res = await api.demoSettlement(body, newKey, session.token);
+          }
+
+          logReq({ method: "POST", url: "/demo/settlement (new-key, same-transaction)", idemKey: newKey, status: res.status, elapsed: res.elapsed || 200,
+                   request: body, response: res.data });
+          if (res.ok) {
+            setDuplicateSemantic(res.data);
+            setStep("s6", "done");
+          } else {
+            setStepStatus(prev => prev.s6 === "running" ? { ...prev, s6: "idle" } : prev);
+          }
+        } catch {
+          setStepStatus(prev => prev.s6 === "running" ? { ...prev, s6: "idle" } : prev);
+        } finally {
+          setDupBusy(prev => ({ ...prev, B: false }));
+        }
+        return;
+      }
       if (dupBusy.B) return; // 같은 버튼 더블클릭 방지
       setDupBusy(prev => ({ ...prev, B: true }));
       setStepStatus(prev => prev.s6 === "done" ? prev : { ...prev, s6: "running" });

@@ -54,5 +54,10 @@ describe('API validation and demo route protection', () => {
       limit: 10,
       windowMs: 60_000,
     });
+    expect(resolveRouteRateLimit('/demo/settlement')).toEqual({
+      action: 'demoSettlement',
+      limit: 10,
+      windowMs: 60_000,
+    });
   });
 });

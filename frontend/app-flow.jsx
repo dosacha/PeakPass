@@ -67,7 +67,8 @@ const DemoFlow = ({ state, actions }) => {
   const orderStatus = order?.order?.status;
   const paymentStatus = settlement?.paymentStatus || settlement?.order?.paymentStatus;
   const tickets = settlement?.tickets || order?.tickets || [];
-  const liveWebhookDisabled = mode === "live";
+  const isLiveDemo = mode === "live";
+  const liveSessionReady = !isLiveDemo || !!liveSessionUserId;
 
   const pct = Math.round((Object.values(stepStatus).filter(s => s === "done").length / 7) * 100);
 
@@ -93,7 +94,7 @@ const DemoFlow = ({ state, actions }) => {
               <button className="btn btn-ghost" onClick={actions.reset} style={{color:"#dfe8f2"}}>
                 <Icon name="reset" size={13}/> Reset
               </button>
-              <button className="btn btn-warn" onClick={actions.runAll} disabled={liveWebhookDisabled}>
+              <button className="btn btn-warn" onClick={actions.runAll} disabled={isLiveDemo}>
                 <Icon name="play" size={12}/> Run Full Demo
               </button>
             </div>
@@ -341,7 +342,7 @@ const DemoFlow = ({ state, actions }) => {
           {/* STEP 5 */}
           <StepCard
             n="5" title="Settlement Webhook — 티켓 발급"
-            endpoint="/webhooks/payments/settlement" method="POST"
+            endpoint={isLiveDemo ? "/demo/settlement" : "/webhooks/payments/settlement"} method="POST"
             status={stepStatus.s5}
             active={activeStep === 5}
             expanded={expandedSteps.s5}
@@ -351,9 +352,9 @@ const DemoFlow = ({ state, actions }) => {
             <div style={{fontSize:13, color:"var(--ink-2)"}}>
               PG사가 보낸 정산 webhook을 처리합니다. 이 시점에만 <code style={{fontFamily:"var(--font-mono)"}}>tickets</code>가 생성됩니다.
             </div>
-            {liveWebhookDisabled && (
+            {isLiveDemo && (
               <div className="field-hint" style={{marginTop:8}}>
-                Live mode disables browser-triggered webhooks. Real webhook calls require an HMAC signature, and the signing secret must never be exposed to the client. Use mock mode for this step.
+                Live demo uses the authenticated demo settlement endpoint. The real webhook remains HMAC-protected and its signing secret never reaches the browser.
               </div>
             )}
             <div className="idem-ribbon">
@@ -366,11 +367,13 @@ const DemoFlow = ({ state, actions }) => {
             <div className="grid-2">
               <div>
                 <div className="field-label" style={{marginBottom:4}}>Request Body</div>
-                <JsonView value={order ? {
+                <JsonView value={order ? (isLiveDemo ? {
+                  orderId: order.order?.id
+                } : {
                   orderId: order.order?.id,
                   providerTransactionId: providerTxnId,
                   status: "settled"
-                } : null}/>
+                }) : null}/>
               </div>
               <div>
                 <div className="field-label" style={{marginBottom:4}}>Response</div>
@@ -379,8 +382,8 @@ const DemoFlow = ({ state, actions }) => {
             </div>
             <div className="btn-row" style={{marginTop:12}}>
               <button className="btn btn-danger" onClick={actions.step5}
-                      disabled={!order || stepStatus.s5 === "running" || liveWebhookDisabled}>
-                <Icon name="play" size={11}/> POST /webhooks/payments/settlement
+                      disabled={!order || stepStatus.s5 === "running" || !liveSessionReady}>
+                <Icon name="play" size={11}/> POST {isLiveDemo ? "/demo/settlement" : "/webhooks/payments/settlement"}
               </button>
             </div>
             {settlement && (
@@ -420,11 +423,13 @@ const DemoFlow = ({ state, actions }) => {
                   <span className="status-pill info"><span className="dot"/>A</span>
                   Cache replay — same Idempotency-Key
                 </h4>
-                <div className="dup-desc">
-                  동일 <code style={{fontFamily:"var(--font-mono)"}}>Idempotency-Key</code>와 동일 body. Redis의 idempotency cache가 저장해 둔 기존 응답을 그대로 반환합니다.
+              <div className="dup-desc">
+                  {isLiveDemo
+                    ? <>동일 <code style={{fontFamily:"var(--font-mono)"}}>Idempotency-Key</code>와 동일 주문을 다시 전송합니다. 인증된 demo settlement 경로가 기존 paid order와 티켓을 반환하며, 브라우저는 webhook 서명이나 비밀값을 전송하지 않습니다.</>
+                    : <>동일 <code style={{fontFamily:"var(--font-mono)"}}>Idempotency-Key</code>와 동일 body. Redis의 idempotency cache가 저장해 둔 기존 응답을 그대로 반환합니다.</>}
                 </div>
                 <button className="btn btn-secondary" onClick={actions.runDupReplay}
-                        disabled={!settlement || dupBusy.A || liveWebhookDisabled}>
+                        disabled={!settlement || dupBusy.A || !liveSessionReady}>
                   <Icon name="play" size={11}/>
                   {dupBusy.A ? "실행 중…" : (duplicateReplay ? "Replay webhook (재실행)" : "Replay webhook")}
                 </button>
@@ -443,11 +448,13 @@ const DemoFlow = ({ state, actions }) => {
                   <span className="status-pill info"><span className="dot"/>B</span>
                   Semantic duplicate — same provider transaction
                 </h4>
-                <div className="dup-desc">
-                  <b>새로운</b> Idempotency-Key지만 동일 <code style={{fontFamily:"var(--font-mono)"}}>orderId / providerTransactionId</code>. Redis 캐시를 지나가더라도 DB <code style={{fontFamily:"var(--font-mono)"}}>UNIQUE(provider_txn_id)</code> 위반으로 방어됩니다.
+              <div className="dup-desc">
+                  {isLiveDemo
+                    ? <><b>새로운</b> Idempotency-Key와 동일 <code style={{fontFamily:"var(--font-mono)"}}>orderId</code>를 전송합니다. 서버가 같은 provider transaction ID를 결정론적으로 생성하므로 payment domain service가 기존 티켓만 반환합니다.</>
+                    : <><b>새로운</b> Idempotency-Key지만 동일 <code style={{fontFamily:"var(--font-mono)"}}>orderId / providerTransactionId</code>. Redis 캐시를 지나가더라도 DB <code style={{fontFamily:"var(--font-mono)"}}>UNIQUE(provider_txn_id)</code> 위반으로 방어됩니다.</>}
                 </div>
                 <button className="btn btn-secondary" onClick={actions.runDupSemantic}
-                        disabled={!settlement || dupBusy.B || liveWebhookDisabled}>
+                        disabled={!settlement || dupBusy.B || !liveSessionReady}>
                   <Icon name="play" size={11}/>
                   {dupBusy.B ? "실행 중…" : (duplicateSemantic ? "Semantic duplicate (재실행)" : "Semantic duplicate")}
                 </button>
