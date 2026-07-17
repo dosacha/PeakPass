@@ -31,6 +31,11 @@ uses `DEMO_USER_EMAIL`; clients cannot select a user, email, or role. Its JWT is
 kept only in browser memory and is not a substitute for real user login or
 production access control.
 
+When enabled, `POST /demo/settlement` accepts the live demo JWT and a demo-user
+owned order ID to exercise the same settlement domain service without exposing
+the webhook signing secret. The actual `/webhooks/payments/settlement` endpoint
+continues to require its HMAC signature.
+
 > 아래 데모 시나리오의 `curl` 명령에서 `http://localhost:3000` 부분을 `https://peak-pass.com`으로 바꾸면 **로컬 세팅 없이 바로** 라이브 API를 호출해볼 수 있습니다.
 
 GraphQL 엔드포인트는 POST 전용 API입니다.

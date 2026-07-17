@@ -1,8 +1,10 @@
 import crypto from 'crypto';
+import Fastify from 'fastify';
 import {
   computeWebhookSignature,
   verifyWebhookSignature,
   validateTimestamp,
+  webhookSignatureMiddleware,
 } from '@/api/middleware/webhook-signature';
 
 describe('computeWebhookSignature', () => {
@@ -125,5 +127,40 @@ describe('validateTimestamp', () => {
     expect(validateTimestamp('', tolerance, nowMs)).toBe('malformed');
     expect(validateTimestamp('0', tolerance, nowMs)).toBe('malformed');
     expect(validateTimestamp('-1', tolerance, nowMs)).toBe('malformed');
+  });
+});
+
+describe('payment settlement webhook route', () => {
+  it('continues to reject an unsigned settlement webhook with 401', async () => {
+    const originalEnv = process.env;
+    process.env = {
+      ...originalEnv,
+      NODE_ENV: 'test',
+      JWT_SECRET: 'w'.repeat(32),
+      WEBHOOK_SIGNING_SECRET: 'test-webhook-signing-secret',
+    };
+
+    try {
+      const { registerPaymentRoutes } = await import('@/api/rest/payments');
+      const app = Fastify();
+      app.addHook('preHandler', webhookSignatureMiddleware);
+      await registerPaymentRoutes(app);
+      try {
+        const response = await app.inject({
+          method: 'POST',
+          url: '/webhooks/payments/settlement',
+          payload: {},
+        });
+
+        expect(response.statusCode).toBe(401);
+        expect(response.json()).toMatchObject({
+          error: { code: 'MISSING_SIGNATURE' },
+        });
+      } finally {
+        await app.close();
+      }
+    } finally {
+      process.env = originalEnv;
+    }
   });
 });
