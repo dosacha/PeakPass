@@ -90,3 +90,14 @@ export class InternalServerError extends AppError {
     this.name = 'InternalServerError';
   }
 }
+
+export class DemoSessionConfigurationError extends AppError {
+  constructor() {
+    super(
+      'DEMO_SESSION_UNAVAILABLE',
+      503,
+      'Configured demo user is unavailable',
+    );
+    this.name = 'DemoSessionConfigurationError';
+  }
+}

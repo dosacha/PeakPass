@@ -20,7 +20,7 @@ const logger = getLogger();
 //
 // 결제 경로의 폭주 방어 layer가 leak되는 위험이 단순 503보다 크므로 default 'closed'를
 // 권장. production에서는 config가 fail-closed를 강제한다.
-type RateLimitAction = 'checkout' | 'reservation' | 'webhook' | 'graphql';
+type RateLimitAction = 'checkout' | 'reservation' | 'webhook' | 'graphql' | 'demoSession';
 
 interface RouteRateLimit {
   action: RateLimitAction;
@@ -35,8 +35,20 @@ interface RouteRateLimit {
  * GraphQL은 별도 한도를 사용한다. write 경로의 5/60s를 그대로 쓰면 화면 1개 렌더링에
  * 호출되는 events/event/myOrders 등이 1초도 안 되어 한도를 소진한다.
  */
-function resolveRouteRateLimit(url: string): RouteRateLimit | null {
+export function resolveRouteRateLimit(url: string): RouteRateLimit | null {
   const config = getConfig();
+
+  if (url.split('?')[0] === '/demo/session') {
+    if (!config.ENABLE_DEMO_SESSION) {
+      return null;
+    }
+
+    return {
+      action: 'demoSession',
+      limit: 10,
+      windowMs: 60_000,
+    };
+  }
 
   if (url.includes('/checkouts')) {
     return {
@@ -85,7 +97,9 @@ export async function rateLimitMiddleware(
     return;
   }
 
-  const userId = request.user?.id || request.ip || 'anonymous';
+  const userId = route.action === 'demoSession'
+    ? request.ip || 'anonymous'
+    : request.user?.id || request.ip || 'anonymous';
 
   const { allowed, count, resetAt, redisAvailable } = await checkRateLimit(
     userId,

@@ -163,6 +163,11 @@ const App = () => {
   const [apiBase, setApiBase] = useS(defaultApiBase);
   const [mode, setMode] = useS(() => localStorage.getItem("pp_mode") || "mock");
   const [userId, setUserId] = useS(() => localStorage.getItem("pp_user_id") || window.SEED_USER_ID);
+  const [liveSession, setLiveSession] = useS(null);
+  const [liveSessionStatus, setLiveSessionStatus] = useS("idle");
+  const [liveSessionError, setLiveSessionError] = useS("");
+  const liveSessionRef = useR(null);
+  const liveSessionInFlightRef = useR(null);
 
   const [events, setEvents] = useS(null);
   const [selectedEventId, setSelectedEventId] = useS(() => localStorage.getItem("pp_event_id") || null);
@@ -195,12 +200,84 @@ const App = () => {
   // does NOT lock the other one out via the shared stepStatus.s6 = "running" flag.
   const [dupBusy, setDupBusy] = useS({ A: false, B: false });
 
-  // persist
+  const clearLiveDemoSession = useC(() => {
+    liveSessionRef.current = null;
+    liveSessionInFlightRef.current = null;
+    setLiveSession(null);
+    setLiveSessionStatus("idle");
+    setLiveSessionError("");
+  }, []);
+
+  const ensureLiveDemoSession = useC(async () => {
+    if (mode !== "live") {
+      throw new Error("Live demo sessions are available only in Live mode");
+    }
+
+    const current = liveSessionRef.current;
+    if (current && Date.parse(current.expiresAt) > Date.now() + 30_000) {
+      return current;
+    }
+
+    if (liveSessionInFlightRef.current) {
+      return liveSessionInFlightRef.current;
+    }
+
+    setLiveSessionStatus("loading");
+    setLiveSessionError("");
+
+    const request = (async () => {
+      try {
+        const response = await callLive(apiBase, "POST", "/demo/session");
+        const session = response.data;
+        const isValidSession = response.ok &&
+          session &&
+          typeof session.token === "string" &&
+          typeof session.userId === "string" &&
+          typeof session.email === "string" &&
+          typeof session.expiresAt === "string" &&
+          Number.isFinite(Date.parse(session.expiresAt));
+
+        if (!isValidSession) {
+          throw new Error("Unable to start live demo session");
+        }
+
+        const nextSession = {
+          token: session.token,
+          userId: session.userId,
+          email: session.email,
+          expiresAt: session.expiresAt,
+        };
+        liveSessionRef.current = nextSession;
+        setLiveSession(nextSession);
+        setLiveSessionStatus("active");
+        return nextSession;
+      } catch (error) {
+        liveSessionRef.current = null;
+        setLiveSession(null);
+        setLiveSessionStatus("error");
+        setLiveSessionError("Unable to start live demo session");
+        throw error;
+      } finally {
+        liveSessionInFlightRef.current = null;
+      }
+    })();
+
+    liveSessionInFlightRef.current = request;
+    return request;
+  }, [apiBase, mode]);
+
+  const isInvalidLiveToken = (response) =>
+    response.status === 401 && response.data?.error?.code === "INVALID_TOKEN";
+
+  // Persist only non-sensitive UI preferences. The live JWT must never leave memory.
   useE(() => localStorage.setItem("pp_api_base", apiBase), [apiBase]);
   useE(() => localStorage.setItem("pp_mode", mode), [mode]);
   useE(() => localStorage.setItem("pp_user_id", userId), [userId]);
   useE(() => { if (selectedEventId) localStorage.setItem("pp_event_id", selectedEventId); }, [selectedEventId]);
   useE(() => { if (selectedTierId) localStorage.setItem("pp_tier_id", selectedTierId); }, [selectedTierId]);
+  useE(() => {
+    clearLiveDemoSession();
+  }, [apiBase, mode, clearLiveDemoSession]);
 
   // mark step helpers
   const setStep = (k, s) => setStepStatus(prev => ({ ...prev, [k]: s }));
@@ -213,13 +290,17 @@ const App = () => {
       if (mode === "mock") return mockServer.graphql(query, variables);
       return callLive(apiBase, "POST", "/graphql", { query, variables });
     },
-    async reservations(body) {
+    async reservations(body, token) {
       if (mode === "mock") return mockServer.reservations(body);
-      return callLive(apiBase, "POST", "/reservations", body);
+      return callLive(apiBase, "POST", "/reservations", body,
+        token ? { "Authorization": `Bearer ${token}` } : {});
     },
-    async checkouts(body, idemKey) {
+    async checkouts(body, idemKey, token) {
       if (mode === "mock") return mockServer.checkouts(body, idemKey);
-      return callLive(apiBase, "POST", "/checkouts", body, { "Idempotency-Key": idemKey });
+      return callLive(apiBase, "POST", "/checkouts", body, {
+        "Idempotency-Key": idemKey,
+        ...(token ? { "Authorization": `Bearer ${token}` } : {})
+      });
     },
     async settlement(body, idemKey) {
       if (mode === "mock") return mockServer.settlement(body, idemKey);
@@ -266,6 +347,7 @@ const App = () => {
       setActiveStep(1);
       setExpandedSteps({ s1:true,s2:false,s3:false,s4:false,s5:false,s6:false,s7:false });
       setDupBusy({ A: false, B: false }); // [FIX] reset per-button busy flags
+      clearLiveDemoSession();
     },
 
     step1: async () => {
@@ -292,15 +374,35 @@ const App = () => {
       if (!selectedEvent || !selectedTier) return;
       setStep("s3", "running"); setActiveStep(3);
       actions.gotoStep(3);
-      const body = { eventId: selectedEvent.id, userId, quantity, tierId: selectedTier.tierId };
-      const res = await api.reservations(body);
-      logReq({ method: "POST", url: "/reservations", status: res.status, elapsed: res.elapsed || 200,
-               request: body, response: res.data });
-      if (res.ok) {
-        setReservation(res.data);
-        setTiming("s3", res.elapsed || 200);
-        setStep("s3", "done");
-      } else setStep("s3", "error");
+      try {
+        let session = mode === "live" ? await ensureLiveDemoSession() : null;
+        let body = {
+          eventId: selectedEvent.id,
+          userId: session?.userId || userId,
+          quantity,
+          tierId: selectedTier.tierId
+        };
+        let res = await api.reservations(body, session?.token);
+
+        if (mode === "live" && isInvalidLiveToken(res)) {
+          logReq({ method: "POST", url: "/reservations", status: res.status, elapsed: res.elapsed || 200,
+                   request: body, response: res.data });
+          clearLiveDemoSession();
+          session = await ensureLiveDemoSession();
+          body = { ...body, userId: session.userId };
+          res = await api.reservations(body, session.token);
+        }
+
+        logReq({ method: "POST", url: "/reservations", status: res.status, elapsed: res.elapsed || 200,
+                 request: body, response: res.data });
+        if (res.ok) {
+          setReservation(res.data);
+          setTiming("s3", res.elapsed || 200);
+          setStep("s3", "done");
+        } else setStep("s3", "error");
+      } catch {
+        setStep("s3", "error");
+      }
     },
 
     step4: async () => {
@@ -309,15 +411,36 @@ const App = () => {
       actions.gotoStep(4);
       const key = checkoutIdemKey || uuid();
       if (!checkoutIdemKey) setCheckoutIdemKey(key);
-      const body = { eventId: selectedEvent.id, userId, quantity, tierId: selectedTier.tierId, reservationId: reservation.id };
-      const res = await api.checkouts(body, key);
-      logReq({ method: "POST", url: "/checkouts", idemKey: key, status: res.status, elapsed: res.elapsed || 200,
-               request: body, response: res.data });
-      if (res.ok) {
-        setOrder(res.data);
-        setTiming("s4", res.elapsed || 200);
-        setStep("s4", "done");
-      } else setStep("s4", "error");
+      try {
+        let session = mode === "live" ? await ensureLiveDemoSession() : null;
+        let body = {
+          eventId: selectedEvent.id,
+          userId: session?.userId || userId,
+          quantity,
+          tierId: selectedTier.tierId,
+          reservationId: reservation.id
+        };
+        let res = await api.checkouts(body, key, session?.token);
+
+        if (mode === "live" && isInvalidLiveToken(res)) {
+          logReq({ method: "POST", url: "/checkouts", idemKey: key, status: res.status, elapsed: res.elapsed || 200,
+                   request: body, response: res.data });
+          clearLiveDemoSession();
+          session = await ensureLiveDemoSession();
+          body = { ...body, userId: session.userId };
+          res = await api.checkouts(body, key, session.token);
+        }
+
+        logReq({ method: "POST", url: "/checkouts", idemKey: key, status: res.status, elapsed: res.elapsed || 200,
+                 request: body, response: res.data });
+        if (res.ok) {
+          setOrder(res.data);
+          setTiming("s4", res.elapsed || 200);
+          setStep("s4", "done");
+        } else setStep("s4", "error");
+      } catch {
+        setStep("s4", "error");
+      }
     },
 
     step5: async () => {
@@ -498,7 +621,12 @@ const App = () => {
   const toggleMock = () => setMode(m => m === "mock" ? "live" : "mock");
 
   const state = {
-    mode, events, selectedEventId, selectedTierId, userId, quantity,
+    mode, events, selectedEventId, selectedTierId,
+    userId: mode === "live" ? liveSession?.userId || "" : userId,
+    liveSessionUserId: liveSession?.userId || "",
+    liveSessionExpiresAt: liveSession?.expiresAt || "",
+    liveSessionStatus, liveSessionError,
+    quantity,
     reservation, order, settlement, duplicateReplay, duplicateSemantic, ticketByCode, lookupCode,
     stepStatus, stepTiming, activeStep, expandedSteps, requests,
     checkoutIdemKey, settlementIdemKey, providerTxnId,

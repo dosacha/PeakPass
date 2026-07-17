@@ -55,6 +55,7 @@ const StepCard = ({ n, title, endpoint, method, status, active, onToggle, expand
 const DemoFlow = ({ state, actions }) => {
   const {
     mode, events, selectedEventId, selectedTierId, userId, quantity,
+    liveSessionUserId, liveSessionExpiresAt, liveSessionStatus, liveSessionError,
     reservation, order, settlement, duplicateReplay, duplicateSemantic,
     ticketByCode, stepStatus, stepTiming, requests, activeStep, expandedSteps,
     checkoutIdemKey, settlementIdemKey, providerTxnId,
@@ -201,16 +202,29 @@ const DemoFlow = ({ state, actions }) => {
                     <div className="field-hint">최대 4매 (브라우저에서만 제한, 서버는 reservation hold 로직으로 다시 검증)</div>
                   </div>
                   <div className="field-block">
+                    {mode === "live" ? (
+                      <>
+                        <div className="field-label">Live demo session</div>
+                        <input className="input small" readOnly value={liveSessionUserId || "Issued automatically at Step 3"}/>
+                        <div className="field-hint">
+                          {liveSessionStatus === "active"
+                            ? `Fixed demo user session active until ${fmtDate(liveSessionExpiresAt)}.`
+                            : "The fixed demo user and a short-lived session are issued automatically. No user ID or token input is required."}
+                          {liveSessionError && <span style={{display:"block", color:"var(--red)", marginTop:4}}>{liveSessionError}</span>}
+                        </div>
+                      </>
+                    ) : <>
                     <div className="field-label">User ID (seed)</div>
                     <input className="input small" value={userId} onChange={e => actions.setUserId(e.target.value)}/>
                     <div className="field-hint">
                       <Icon name="warn" size={11}/> 로컬에서는 <code style={{fontFamily:"var(--font-mono)"}}>npm run seed</code> 로그 또는 DB 조회로 seed userId를 확인해 입력하세요. 프론트는 백엔드 인증 구조를 변경하지 않습니다.
                     </div>
+                    </>}
                   </div>
                 </div>
 
                 <div className="btn-row" style={{marginTop:14}}>
-                  <button className="btn btn-primary" disabled={!selectedTierId || !userId} onClick={() => { actions.markStepDone("s2"); actions.gotoStep(3); }}>
+                  <button className="btn btn-primary" disabled={!selectedTierId || (mode === "mock" && !userId)} onClick={() => { actions.markStepDone("s2"); actions.gotoStep(3); }}>
                     <Icon name="check" size={12}/> 선택 확정 · 다음 단계로
                   </button>
                 </div>
@@ -237,9 +251,9 @@ const DemoFlow = ({ state, actions }) => {
             <div className="grid-2">
               <div>
                 <div className="field-label" style={{marginBottom:4}}>Request Body</div>
-                <JsonView value={selectedEvent && selectedTier && userId ? {
+                <JsonView value={selectedEvent && selectedTier && (userId || mode === "live") ? {
                   eventId: selectedEvent.id,
-                  userId,
+                  userId: userId || "Issued by live demo session",
                   quantity,
                   tierId: selectedTier.tierId
                 } : null}/>
@@ -251,7 +265,7 @@ const DemoFlow = ({ state, actions }) => {
             </div>
             <div className="btn-row" style={{marginTop:12}}>
               <button className="btn btn-danger" onClick={actions.step3}
-                      disabled={!selectedTier || !userId || stepStatus.s3 === "running"}>
+                      disabled={!selectedTier || (mode === "mock" && !userId) || stepStatus.s3 === "running"}>
                 <Icon name="play" size={11}/> POST /reservations
               </button>
             </div>
