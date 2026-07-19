@@ -52,6 +52,17 @@ export async function closeRedis(): Promise<void> {
   }
 }
 
+/**
+ * 멱등성 상태(result cache, in-flight lock)가 소속된 command.
+ *
+ * checkout과 payment settlement는 같은 idempotency middleware를 공유하므로,
+ * 서로 다른 command가 같은 raw Idempotency-Key를 쓰더라도 Redis 상태가
+ * 교차 재생되지 않도록 key namespace를 scope로 분리한다.
+ * (orders.idempotency_key와 payment_records.idempotency_key는 서로 다른
+ * 테이블이라 DB unique 제약이 이 collision을 막아주지 않는다.)
+ */
+export type IdempotencyScope = 'checkout' | 'payment-settlement';
+
 export const redisKeys = {
   eventById: (eventId: string) => `peakpass:event:${eventId}`,
   eventsList: () => 'peakpass:events:list',
@@ -64,7 +75,9 @@ export const redisKeys = {
   rateLimitGraphql: (userId: string) => `peakpass:ratelimit:graphql:${userId}`,
   rateLimitDemoSession: (ip: string) => `peakpass:ratelimit:demo-session:${ip}`,
   rateLimitDemoSettlement: (userId: string) => `peakpass:ratelimit:demo-settlement:${userId}`,
-  idempotencyKey: (key: string) => `peakpass:idempotency:${key}`,
-  idempotencyLock: (key: string) => `peakpass:idempotency:lock:${key}`,
+  idempotencyKey: (scope: IdempotencyScope, key: string) =>
+    `peakpass:idempotency:${scope}:${key}`,
+  idempotencyLock: (scope: IdempotencyScope, key: string) =>
+    `peakpass:idempotency:lock:${scope}:${key}`,
   inventoryCount: (eventId: string) => `peakpass:inventory:${eventId}:count`,
 };

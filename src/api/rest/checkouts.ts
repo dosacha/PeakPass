@@ -63,7 +63,9 @@ export async function registerCheckoutRoutes(app: FastifyInstance) {
       }
 
       await invalidateEventCache(input.eventId);
-      await storeIdempotencyResult(orderResult, 201, idempotencyKey);
+      if (request.idempotencyScope) {
+        await storeIdempotencyResult(orderResult, 201, request.idempotencyScope, idempotencyKey);
+      }
 
       logger.info(
         {
@@ -76,8 +78,12 @@ export async function registerCheckoutRoutes(app: FastifyInstance) {
 
       return reply.code(201).send(orderResult);
     } finally {
-      if (request.idempotencyLockToken && request.idempotencyKey) {
-        await releaseIdempotencyLock(request.idempotencyKey, request.idempotencyLockToken);
+      if (request.idempotencyLockToken && request.idempotencyKey && request.idempotencyScope) {
+        await releaseIdempotencyLock(
+          request.idempotencyScope,
+          request.idempotencyKey,
+          request.idempotencyLockToken,
+        );
       }
     }
   });

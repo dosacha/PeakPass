@@ -292,6 +292,23 @@ describe('route-level contract: checkout idempotency and settlement webhook', ()
     return result.rows[0].count;
   }
 
+  /** raw Idempotency-Key 값 기준으로 record 종류별 payment_records 수를 센다. */
+  async function countPaymentRecordsByRawKey(
+    rawKey: string,
+    providerLinked: boolean,
+  ): Promise<number> {
+    const result = await pool.query(
+      `
+      SELECT COUNT(*)::int AS count
+      FROM payment_records
+      WHERE idempotency_key = $1
+        AND provider_transaction_id IS ${providerLinked ? 'NOT NULL' : 'NULL'}
+      `,
+      [rawKey],
+    );
+    return result.rows[0].count;
+  }
+
   // ── T01 ────────────────────────────────────────────────────────────────
 
   it(
@@ -560,4 +577,135 @@ describe('route-level contract: checkout idempotency and settlement webhook', ()
     },
     20000,
   );
+
+  // ── R02: cross-command idempotency scope ───────────────────────────────
+  //
+  // checkout과 settlement가 같은 raw Idempotency-Key를 쓰더라도 Redis result
+  // cache / in-flight lock을 공유하면 안 된다. 아래 테스트는 command scope가
+  // 분리된 key 형식(peakpass:idempotency:{scope}:{key})을 계약으로 고정한다.
+  describe('R02 idempotency scope: same raw key must not cross command boundaries', () => {
+    it(
+      'R02-T01 route-level: checkout cached result must not replay into the settlement webhook',
+      async () => {
+        const fixture = await setupEventAndUser(5);
+        const sharedKey = uuid();
+
+        const checkoutResponse = await postCheckout(fixture, sharedKey);
+        expect(checkoutResponse.statusCode).toBe(201);
+        const orderId = (checkoutResponse.json() as CheckoutResponseBody).order.id;
+
+        // checkout과 동일한 raw Idempotency-Key로 유효한 HMAC settlement 전송.
+        // scope가 분리돼 있어야 checkout cache가 아닌 settlement transaction이 실행된다.
+        const webhookResponse = await postSettlementWebhook(
+          { orderId, providerTransactionId: `route-txn-${uuid()}`, status: 'settled' },
+          sharedKey,
+        );
+        expect(webhookResponse.statusCode).toBe(200);
+        const webhookBody = webhookResponse.json() as WebhookResponseBody;
+        // paymentStatus는 checkout 응답에는 없는 필드다 — checkout body가
+        // 재생됐다면 undefined가 되므로 재생 여부를 이 필드로 판별한다.
+        expect(webhookBody.paymentStatus).toBe('settled');
+        expect(webhookBody.tickets).toHaveLength(1);
+
+        expect(await getOrderStatus(orderId)).toBe('paid');
+        expect(await countTickets(orderId)).toBe(1);
+        expect(await countProviderLinkedPaymentRecords(orderId)).toBe(1);
+
+        // 같은 raw key가 두 record 종류로 공존해야 한다 (migration 005의 partial UNIQUE 계약).
+        // 전체 payment_records 수는 2건 이상일 수 있으므로 종류별로만 센다.
+        expect(await countPaymentRecordsByRawKey(sharedKey, false)).toBe(1); // checkout pending
+        expect(await countPaymentRecordsByRawKey(sharedKey, true)).toBe(1); // settlement terminal
+      },
+      20000,
+    );
+
+    it(
+      'R02-T02 route-level: settlement cached result must not replay into checkout',
+      async () => {
+        // order A를 정상 settlement 처리해 그 결과를 raw key로 캐시시킨다.
+        const fixtureA = await setupEventAndUser(5);
+        const orderA = await createPendingOrderViaRoute(fixtureA, 1);
+        const sharedKey = uuid();
+        const settleA = await postSettlementWebhook(
+          { orderId: orderA, providerTransactionId: `route-txn-${uuid()}`, status: 'settled' },
+          sharedKey,
+        );
+        expect(settleA.statusCode).toBe(200);
+
+        // 독립 fixture B에서 같은 raw key로 checkout — 새 order가 실제 생성돼야 한다.
+        const fixtureB = await setupEventAndUser(5);
+        const checkoutB = await postCheckout(fixtureB, sharedKey);
+        expect(checkoutB.statusCode).toBe(201);
+        const bodyB = checkoutB.json() as CheckoutResponseBody & { paymentStatus?: string };
+        expect(bodyB.order.id).not.toBe(orderA);
+        // settlement body가 재생됐다면 paymentStatus가 존재했을 것이다.
+        expect(bodyB.paymentStatus).toBeUndefined();
+        expect(bodyB.tickets).toHaveLength(0);
+
+        expect(await countOrdersByIdempotencyKey(sharedKey)).toBe(1);
+        expect(await getAvailableSeats(fixtureB.eventId)).toBe(4);
+
+        // 같은 raw key가 두 record 종류로 공존해야 한다:
+        // order B의 checkout pending record + order A의 settlement terminal record.
+        expect(await countPaymentRecordsByRawKey(sharedKey, false)).toBe(1);
+        expect(await countPaymentRecordsByRawKey(sharedKey, true)).toBe(1);
+      },
+      20000,
+    );
+
+    it(
+      'R02-T03 route-level: same-command checkout replay stays idempotent under command-scoped Redis keys',
+      async () => {
+        const fixture = await setupEventAndUser(5);
+        const idempotencyKey = uuid();
+
+        const first = await postCheckout(fixture, idempotencyKey);
+        expect(first.statusCode).toBe(201);
+        const second = await postCheckout(fixture, idempotencyKey);
+        expect(second.statusCode).toBe(201);
+        expect((second.json() as CheckoutResponseBody).order.id).toBe(
+          (first.json() as CheckoutResponseBody).order.id,
+        );
+
+        expect(await countOrdersByIdempotencyKey(idempotencyKey)).toBe(1);
+        expect(await getAvailableSeats(fixture.eventId)).toBe(4);
+
+        // result cache는 command scope가 포함된 key 형식으로만 저장돼야 한다.
+        const redis = await ensureRedisOpen();
+        expect(await redis.get(`peakpass:idempotency:checkout:${idempotencyKey}`)).not.toBeNull();
+        // unscoped 신규 key는 더 이상 생성되면 안 된다.
+        expect(await redis.get(`peakpass:idempotency:${idempotencyKey}`)).toBeNull();
+      },
+      20000,
+    );
+
+    it(
+      'R02-T04 route-level: same-command settlement replay stays idempotent under command-scoped Redis keys',
+      async () => {
+        const fixture = await setupEventAndUser(5);
+        const orderId = await createPendingOrderViaRoute(fixture, 1);
+        const providerTransactionId = `route-txn-${uuid()}`;
+        const body = { orderId, providerTransactionId, status: 'settled' as const };
+        const idempotencyKey = uuid();
+
+        const first = await postSettlementWebhook(body, idempotencyKey);
+        expect(first.statusCode).toBe(200);
+        const firstBody = first.json() as WebhookResponseBody;
+        const second = await postSettlementWebhook(body, idempotencyKey);
+        expect(second.statusCode).toBe(200);
+        const secondBody = second.json() as WebhookResponseBody;
+        expect(secondBody.tickets[0].id).toBe(firstBody.tickets[0].id);
+
+        expect(await countTickets(orderId)).toBe(1);
+        expect(await countProviderLinkedPaymentRecords(orderId)).toBe(1);
+
+        const redis = await ensureRedisOpen();
+        expect(
+          await redis.get(`peakpass:idempotency:payment-settlement:${idempotencyKey}`),
+        ).not.toBeNull();
+        expect(await redis.get(`peakpass:idempotency:${idempotencyKey}`)).toBeNull();
+      },
+      20000,
+    );
+  });
 });

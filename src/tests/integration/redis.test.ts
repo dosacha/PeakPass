@@ -138,9 +138,9 @@ describe('Redis 통합 테스트', () => {
         ticketCount: 2,
       };
 
-      await setIdempotencyResult(idempotencyKey, orderResult, 3600);
+      await setIdempotencyResult('checkout', idempotencyKey, orderResult, 3600);
 
-      const cachedResult = await getIdempotencyResult(idempotencyKey);
+      const cachedResult = await getIdempotencyResult('checkout', idempotencyKey);
 
       expect(cachedResult).toBeTruthy();
       expect(cachedResult?.orderId).toBe(orderResult.orderId);
@@ -151,42 +151,94 @@ describe('Redis 통합 테스트', () => {
     it('allows only one in-flight idempotency lock holder', async () => {
       const idempotencyKey = uuid();
 
-      const firstToken = await tryAcquireIdempotencyLock(idempotencyKey, 5);
-      const secondToken = await tryAcquireIdempotencyLock(idempotencyKey, 5);
+      const firstToken = await tryAcquireIdempotencyLock('checkout', idempotencyKey, 5);
+      const secondToken = await tryAcquireIdempotencyLock('checkout', idempotencyKey, 5);
 
       expect(firstToken).toBeTruthy();
       expect(secondToken).toBeNull();
 
-      await releaseIdempotencyLock(idempotencyKey, firstToken!);
+      await releaseIdempotencyLock('checkout', idempotencyKey, firstToken!);
 
-      const tokenAfterRelease = await tryAcquireIdempotencyLock(idempotencyKey, 5);
+      const tokenAfterRelease = await tryAcquireIdempotencyLock('checkout', idempotencyKey, 5);
       expect(tokenAfterRelease).toBeTruthy();
 
-      await releaseIdempotencyLock(idempotencyKey, tokenAfterRelease!);
+      await releaseIdempotencyLock('checkout', idempotencyKey, tokenAfterRelease!);
     });
 
     it('release with stale token does not delete an active lock (owner fencing)', async () => {
       const idempotencyKey = uuid();
 
       // A가 lock 획득
-      const tokenA = await tryAcquireIdempotencyLock(idempotencyKey, 30);
+      const tokenA = await tryAcquireIdempotencyLock('checkout', idempotencyKey, 30);
       expect(tokenA).toBeTruthy();
 
       // 가짜 token으로 release 시도 → no-op이어야 함
-      await releaseIdempotencyLock(idempotencyKey, 'stale-token-from-elsewhere');
+      await releaseIdempotencyLock('checkout', idempotencyKey, 'stale-token-from-elsewhere');
 
       // A의 lock은 여전히 살아있어야 함 → 다른 acquire는 null
-      const tokenB = await tryAcquireIdempotencyLock(idempotencyKey, 30);
+      const tokenB = await tryAcquireIdempotencyLock('checkout', idempotencyKey, 30);
       expect(tokenB).toBeNull();
 
       // 정상 token으로 release
-      await releaseIdempotencyLock(idempotencyKey, tokenA!);
+      await releaseIdempotencyLock('checkout', idempotencyKey, tokenA!);
 
       // 이제 acquire 가능
-      const tokenC = await tryAcquireIdempotencyLock(idempotencyKey, 30);
+      const tokenC = await tryAcquireIdempotencyLock('checkout', idempotencyKey, 30);
       expect(tokenC).toBeTruthy();
 
-      await releaseIdempotencyLock(idempotencyKey, tokenC!);
+      await releaseIdempotencyLock('checkout', idempotencyKey, tokenC!);
+    });
+  });
+
+  describe('멱등성 command scope 격리 (R02)', () => {
+    it('isolates in-flight locks by command scope for the same raw key', async () => {
+      const rawKey = uuid();
+
+      // checkout scope에서 lock 획득
+      const checkoutToken = await tryAcquireIdempotencyLock('checkout', rawKey, 30);
+      expect(checkoutToken).toBeTruthy();
+
+      // 같은 raw key라도 payment-settlement scope는 독립적으로 획득 가능해야 한다
+      const settlementToken = await tryAcquireIdempotencyLock('payment-settlement', rawKey, 30);
+      expect(settlementToken).toBeTruthy();
+
+      // 같은 scope의 두 번째 획득은 실패
+      expect(await tryAcquireIdempotencyLock('checkout', rawKey, 30)).toBeNull();
+      expect(await tryAcquireIdempotencyLock('payment-settlement', rawKey, 30)).toBeNull();
+
+      // 다른 lock의 owner token으로 release해도 대상 lock은 살아있어야 한다
+      await releaseIdempotencyLock('checkout', rawKey, settlementToken!);
+      expect(await tryAcquireIdempotencyLock('checkout', rawKey, 30)).toBeNull();
+
+      // 정상 token으로 release하면 각 scope가 다시 획득 가능
+      await releaseIdempotencyLock('checkout', rawKey, checkoutToken!);
+      await releaseIdempotencyLock('payment-settlement', rawKey, settlementToken!);
+
+      const reacquiredCheckout = await tryAcquireIdempotencyLock('checkout', rawKey, 30);
+      const reacquiredSettlement = await tryAcquireIdempotencyLock('payment-settlement', rawKey, 30);
+      expect(reacquiredCheckout).toBeTruthy();
+      expect(reacquiredSettlement).toBeTruthy();
+
+      await releaseIdempotencyLock('checkout', rawKey, reacquiredCheckout!);
+      await releaseIdempotencyLock('payment-settlement', rawKey, reacquiredSettlement!);
+    });
+
+    it('stores result caches independently per command scope for the same raw key', async () => {
+      const rawKey = uuid();
+
+      await setIdempotencyResult('checkout', rawKey, { kind: 'checkout-result' }, 60);
+      await setIdempotencyResult('payment-settlement', rawKey, { kind: 'settlement-result' }, 60);
+
+      const checkoutCached = await getIdempotencyResult('checkout', rawKey);
+      const settlementCached = await getIdempotencyResult('payment-settlement', rawKey);
+
+      expect(checkoutCached?.kind).toBe('checkout-result');
+      expect(settlementCached?.kind).toBe('settlement-result');
+
+      // key 형식 계약: scope가 포함된 key만 존재해야 한다
+      expect(await redis.get(`peakpass:idempotency:checkout:${rawKey}`)).not.toBeNull();
+      expect(await redis.get(`peakpass:idempotency:payment-settlement:${rawKey}`)).not.toBeNull();
+      expect(await redis.get(`peakpass:idempotency:${rawKey}`)).toBeNull();
     });
   });
 

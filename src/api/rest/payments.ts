@@ -40,7 +40,9 @@ export async function registerPaymentRoutes(app: FastifyInstance) {
       });
 
       await invalidateEventCache(result.order.eventId);
-      await storeIdempotencyResult(result, 200, idempotencyKey);
+      if (request.idempotencyScope) {
+        await storeIdempotencyResult(result, 200, request.idempotencyScope, idempotencyKey);
+      }
 
       logger.info(
         {
@@ -54,8 +56,12 @@ export async function registerPaymentRoutes(app: FastifyInstance) {
 
       return reply.code(200).send(result);
     } finally {
-      if (request.idempotencyLockToken && idempotencyKey) {
-        await releaseIdempotencyLock(idempotencyKey, request.idempotencyLockToken);
+      if (request.idempotencyLockToken && idempotencyKey && request.idempotencyScope) {
+        await releaseIdempotencyLock(
+          request.idempotencyScope,
+          idempotencyKey,
+          request.idempotencyLockToken,
+        );
       }
     }
   });
