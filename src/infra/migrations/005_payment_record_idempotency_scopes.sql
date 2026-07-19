@@ -20,10 +20,10 @@
 ALTER TABLE payment_records
 DROP CONSTRAINT payment_records_idempotency_key_key;
 
-CREATE UNIQUE INDEX IF NOT EXISTS uq_payment_records_checkout_idempotency_key
+CREATE UNIQUE INDEX uq_payment_records_checkout_idempotency_key
 ON payment_records (idempotency_key)
 WHERE provider_transaction_id IS NULL;
 
-CREATE UNIQUE INDEX IF NOT EXISTS uq_payment_records_settlement_idempotency_key
+CREATE UNIQUE INDEX uq_payment_records_settlement_idempotency_key
 ON payment_records (idempotency_key)
 WHERE provider_transaction_id IS NOT NULL;

@@ -55,11 +55,13 @@ export async function closeRedis(): Promise<void> {
 /**
  * 멱등성 상태(result cache, in-flight lock)가 소속된 command.
  *
- * checkout과 payment settlement는 같은 idempotency middleware를 공유하므로,
- * 서로 다른 command가 같은 raw Idempotency-Key를 쓰더라도 Redis 상태가
- * 교차 재생되지 않도록 key namespace를 scope로 분리한다.
- * (orders.idempotency_key와 payment_records.idempotency_key는 서로 다른
- * 테이블이라 DB unique 제약이 이 collision을 막아주지 않는다.)
+ * checkout과 payment settlement는 같은 idempotency middleware를 공유하지만
+ * command 의미와 response shape가 서로 다르다. Redis result cache는 DB 접근
+ * *전에* 캐시된 응답을 재생할 수 있으므로, 같은 raw Idempotency-Key가
+ * command 경계를 넘어 재생되지 않도록 key namespace를 scope로 분리한다.
+ *
+ * DB 영속성 계층의 uniqueness는 별도로 migration 005의 record-kind partial
+ * UNIQUE index(provider_transaction_id NULL 여부 기준)가 담당한다.
  */
 export type IdempotencyScope = 'checkout' | 'payment-settlement';
 
