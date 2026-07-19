@@ -345,4 +345,119 @@ describe('webhook idempotency integration tests', () => {
     },
     15000,
   );
+
+  // ── R02-B: payment_records idempotency uniqueness scopes ────────────────
+  //
+  // migration 005가 전역 UNIQUE(payment_records_idempotency_key_key)를
+  // provider_transaction_id NULL 여부에 따른 두 partial UNIQUE index로 교체했다.
+  // 아래 테스트는 DB 제약 자체를 raw INSERT로 직접 검증한다 (route 우회).
+  describe('payment_records idempotency uniqueness scopes (R02-B, migration 005)', () => {
+    function insertPendingRecord(orderId: string, idempotencyKey: string) {
+      return pool.query(
+        `INSERT INTO payment_records (id, order_id, status, provider_transaction_id, idempotency_key)
+         VALUES ($1, $2, 'pending', NULL, $3)`,
+        [uuid(), orderId, idempotencyKey],
+      );
+    }
+
+    function insertTerminalRecord(
+      orderId: string,
+      idempotencyKey: string,
+      providerTransactionId: string,
+    ) {
+      return pool.query(
+        `INSERT INTO payment_records (id, order_id, status, provider_transaction_id, idempotency_key, webhook_received_at)
+         VALUES ($1, $2, 'settled', $3, $4, NOW())`,
+        [uuid(), orderId, providerTransactionId, idempotencyKey],
+      );
+    }
+
+    it('T-DB01 allows the same raw idempotency_key across checkout and settlement record kinds', async () => {
+      const { eventId, tierId, userIds } = await setupEventAndUsers({ seats: 5, userCount: 2 });
+      const orderA = await checkoutOnce(userIds[0], eventId, tierId, 1);
+      const orderB = await checkoutOnce(userIds[1], eventId, tierId, 1);
+      const sharedKey = uuid();
+
+      await expect(insertPendingRecord(orderA.id, sharedKey)).resolves.toBeDefined();
+      await expect(
+        insertTerminalRecord(orderB.id, sharedKey, `txn-${uuid()}`),
+      ).resolves.toBeDefined();
+    });
+
+    it('T-DB02 rejects duplicate idempotency_key within the checkout (pending) scope with 23505', async () => {
+      const { eventId, tierId, userIds } = await setupEventAndUsers({ seats: 5, userCount: 2 });
+      // orders.idempotency_key 충돌이 먼저 나지 않도록 order는 각자 고유 key로 생성됨
+      const orderA = await checkoutOnce(userIds[0], eventId, tierId, 1);
+      const orderB = await checkoutOnce(userIds[1], eventId, tierId, 1);
+      const sharedKey = uuid();
+
+      await insertPendingRecord(orderA.id, sharedKey);
+      await expect(insertPendingRecord(orderB.id, sharedKey)).rejects.toMatchObject({
+        code: '23505',
+        constraint: 'uq_payment_records_checkout_idempotency_key',
+      });
+    });
+
+    it('T-DB03 rejects duplicate idempotency_key within the settlement (terminal) scope with 23505', async () => {
+      const { eventId, tierId, userIds } = await setupEventAndUsers({ seats: 5, userCount: 2 });
+      const orderA = await checkoutOnce(userIds[0], eventId, tierId, 1);
+      const orderB = await checkoutOnce(userIds[1], eventId, tierId, 1);
+      const sharedKey = uuid();
+
+      await insertTerminalRecord(orderA.id, sharedKey, `txn-${uuid()}`);
+      // provider_transaction_id는 서로 다르게 — idempotency_key uniqueness만 검증
+      await expect(
+        insertTerminalRecord(orderB.id, sharedKey, `txn-${uuid()}`),
+      ).rejects.toMatchObject({
+        code: '23505',
+        constraint: 'uq_payment_records_settlement_idempotency_key',
+      });
+    });
+
+    it('T-DB04 preserves provider_transaction_id uniqueness across different idempotency_keys', async () => {
+      const { eventId, tierId, userIds } = await setupEventAndUsers({ seats: 5, userCount: 2 });
+      const orderA = await checkoutOnce(userIds[0], eventId, tierId, 1);
+      const orderB = await checkoutOnce(userIds[1], eventId, tierId, 1);
+      const sharedProviderTransactionId = `txn-${uuid()}`;
+
+      await insertTerminalRecord(orderA.id, uuid(), sharedProviderTransactionId);
+      await expect(
+        insertTerminalRecord(orderB.id, uuid(), sharedProviderTransactionId),
+      ).rejects.toMatchObject({
+        code: '23505',
+        constraint: 'idx_payment_records_provider_transaction_id_unique',
+      });
+    });
+
+    it('T-DB05 catalog: global unique constraint replaced by two scoped partial unique indexes', async () => {
+      const constraints = await pool.query<{ conname: string }>(
+        `SELECT conname FROM pg_constraint WHERE conrelid = 'payment_records'::regclass`,
+      );
+      const constraintNames = constraints.rows.map((row) => row.conname);
+      expect(constraintNames).not.toContain('payment_records_idempotency_key_key');
+
+      const indexes = await pool.query<{ indexname: string; indexdef: string }>(
+        `SELECT indexname, indexdef FROM pg_indexes WHERE tablename = 'payment_records'`,
+      );
+      const indexByName = new Map(indexes.rows.map((row) => [row.indexname, row.indexdef]));
+
+      const checkoutIndex = indexByName.get('uq_payment_records_checkout_idempotency_key');
+      expect(checkoutIndex).toBeDefined();
+      expect(checkoutIndex).toContain('UNIQUE');
+      expect(checkoutIndex).toContain('provider_transaction_id IS NULL');
+      expect(checkoutIndex).not.toContain('IS NOT NULL');
+
+      const settlementIndex = indexByName.get('uq_payment_records_settlement_idempotency_key');
+      expect(settlementIndex).toBeDefined();
+      expect(settlementIndex).toContain('UNIQUE');
+      expect(settlementIndex).toContain('provider_transaction_id IS NOT NULL');
+
+      const providerTransactionIndex = indexByName.get(
+        'idx_payment_records_provider_transaction_id_unique',
+      );
+      expect(providerTransactionIndex).toBeDefined();
+      expect(providerTransactionIndex).toContain('UNIQUE');
+      expect(providerTransactionIndex).toContain('provider_transaction_id IS NOT NULL');
+    });
+  });
 });

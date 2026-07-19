@@ -1,6 +1,8 @@
 import { randomUUID } from 'crypto';
-import { getRedis, redisKeys } from './client';
+import { getRedis, redisKeys, IdempotencyScope } from './client';
 import { getLogger } from '../logger';
+
+export type { IdempotencyScope } from './client';
 
 const logger = getLogger();
 
@@ -142,36 +144,44 @@ export async function checkRateLimit(
 
 /**
  * 멱등성: 작업 결과 캐시
+ *
+ * scope(command)별로 key namespace를 분리한다. checkout과 settlement가 같은
+ * raw Idempotency-Key를 쓰더라도 서로의 캐시 응답이 재생되면 안 되기 때문이다.
+ *
+ * @param scope 결과가 소속된 command
  * @param idempotencyKey
  * @param result 캐시에 저장할 JSON 결과
  * @param ttlSeconds 캐시 TTL, 기본값 24시간
  */
 export async function setIdempotencyResult(
+  scope: IdempotencyScope,
   idempotencyKey: string,
   result: Record<string, unknown>,
   ttlSeconds: number = 24 * 60 * 60,
 ): Promise<void> {
   const redis = getRedis();
-  const key = redisKeys.idempotencyKey(idempotencyKey);
+  const key = redisKeys.idempotencyKey(scope, idempotencyKey);
 
   try {
     await redis.setEx(key, ttlSeconds, JSON.stringify(result));
-    logger.debug({ idempotencyKey }, 'Idempotency result cached');
+    logger.debug({ scope, idempotencyKey }, 'Idempotency result cached');
   } catch (err) {
     logger.warn({ err }, 'Failed to set idempotency result');
   }
 }
 
 /**
- * 멱등성 결과 조회
+ * 멱등성 결과 조회 (scope가 일치하는 command의 결과만 반환)
+ * @param scope 조회하는 command
  * @param idempotencyKey
  * @returns 캐시된 결과 또는 누락 시 null
  */
 export async function getIdempotencyResult(
+  scope: IdempotencyScope,
   idempotencyKey: string,
 ): Promise<Record<string, unknown> | null> {
   const redis = getRedis();
-  const key = redisKeys.idempotencyKey(idempotencyKey);
+  const key = redisKeys.idempotencyKey(scope, idempotencyKey);
 
   try {
     const data = await redis.get(key);
@@ -198,11 +208,12 @@ export async function getIdempotencyResult(
  *     DEL을 실행하므로, owner가 아닌 release 호출은 무해한 no-op이 된다.
  */
 export async function tryAcquireIdempotencyLock(
+  scope: IdempotencyScope,
   idempotencyKey: string,
   ttlSeconds: number = REDIS_TTL.IDEMPOTENCY_LOCK,
 ): Promise<string | null> {
   const redis = getRedis();
-  const key = redisKeys.idempotencyLock(idempotencyKey);
+  const key = redisKeys.idempotencyLock(scope, idempotencyKey);
   const token = randomUUID();
   const result = await redis.set(key, token, {
     NX: true,
@@ -220,11 +231,12 @@ export async function tryAcquireIdempotencyLock(
  *   - script는 단일 atomic 단계로 실행되므로 그 race 자체가 발생하지 않는다.
  */
 export async function releaseIdempotencyLock(
+  scope: IdempotencyScope,
   idempotencyKey: string,
   token: string,
 ): Promise<void> {
   const redis = getRedis();
-  const key = redisKeys.idempotencyLock(idempotencyKey);
+  const key = redisKeys.idempotencyLock(scope, idempotencyKey);
 
   try {
     await redis.eval(
@@ -235,7 +247,7 @@ export async function releaseIdempotencyLock(
       },
     );
   } catch (err) {
-    logger.warn({ err, idempotencyKey }, 'Failed to release idempotency lock');
+    logger.warn({ err, scope, idempotencyKey }, 'Failed to release idempotency lock');
   }
 }
 
