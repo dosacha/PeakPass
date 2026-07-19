@@ -68,7 +68,7 @@ curl -X POST http://localhost:3000/graphql \
 
 ## 🏗️ 아키텍처 개요
 
-PeakPass는 **상태를 바꾸는 명령**과 **데이터를 읽는 조회**를 의도적으로 다른 프로토콜로 분리했습니다.
+PeakPass는 **상태를 바꾸는 명령**과 **데이터를 읽는 조회**를 의도적으로 다른 프로토콜로 분리했습니다. 이는 단일 PostgreSQL 위의 **protocol-level read/write separation**이며, 별도 read database나 event sourcing을 두는 완전한 CQRS는 아닙니다.
 
 ### REST는 명령(Write) 처리
 
@@ -86,18 +86,20 @@ PeakPass는 **상태를 바꾸는 명령**과 **데이터를 읽는 조회**를 
 
 > 조회 조합이 많은 read-side는 GraphQL로 분리해, 클라이언트가 필요한 필드만 골라서 가져갈 수 있게 했습니다.
 
+일부 단건 REST 조회(`GET /events`, `GET /events/:id`, `GET /reservations/:id`, `GET /checkouts/:orderId`)는 헬스체크·데모·소유자 확인 용도로 병존합니다. "모든 조회가 GraphQL"은 아니고, **상태 변경 command가 REST 전용**이라는 것이 분리의 핵심입니다.
+
 ### PostgreSQL이 정합성 기준
 
 재고 차감, 주문 생성, 정산 완료 처리, 티켓 발급, 예약 상태 전환 — **정합성이 필요한 모든 흐름은 PostgreSQL 트랜잭션 안에서** 처리합니다.
 
 ### Redis는 보조 계층
 
-- 예약 hold TTL
+- 예약 hold 조회 가속과 만료 시각 표시 (TTL)
 - rate limiting
-- idempotency 결과 캐시
-- 이벤트 / 재고 캐시
+- command(checkout / payment-settlement)별로 분리된 idempotency 결과 캐시
+- command별 in-flight idempotency lock
 
-> Redis는 빠른 조회와 보조 역할을 맡지만, **source of truth는 아닙니다.** 부작용은 가능한 한 commit 이후에만 반영합니다.
+> Redis는 빠른 조회와 보조 역할을 맡지만, **source of truth는 아닙니다.** 부작용은 가능한 한 commit 이후에만 반영하며, Redis가 중단돼도 정합성 판단은 PostgreSQL(advisory lock, UNIQUE·CHECK 제약)에서 이뤄집니다. 이벤트/재고에 대한 read-through 캐시는 현재 구현되어 있지 않습니다.
 
 ## 🛠️ 주요 기능
 
@@ -107,7 +109,7 @@ GraphQL로 이벤트 목록과 상세 정보를 조회할 수 있습니다. 필�
 
 ### ✅ 예약 Hold 생성
 
-`POST /reservations`로 잠깐 자리를 잡아둘 수 있습니다. Redis TTL로 일정 시간이 지나면 자동으로 풀리며, **결제까지 가지 않은 자리는 다른 사용자에게 다시 열립니다.**
+`POST /reservations`로 잠깐 자리를 잡아둘 수 있습니다. 만료 시각은 DB에 기록되고 Redis TTL hold는 조회 가속용입니다. **Redis TTL 만료 자체가 좌석을 복구하지는 않으며**, 만료된 예약의 좌석 복구는 background sweeper와 checkout 경로의 lazy expiration이 DB 트랜잭션 안에서 수행합니다. 결제까지 가지 않은 자리는 이 경로로 다른 사용자에게 다시 열립니다.
 
 ### ✅ 체크아웃 (주문 생성)
 
@@ -119,15 +121,15 @@ GraphQL로 이벤트 목록과 상세 정보를 조회할 수 있습니다. 필�
 
 ### ✅ 중복 Webhook 방어 (멱등성)
 
-같은 `Idempotency-Key`로 webhook이 다시 들어와도 티켓이 두 번 발급되지 않습니다. duplicate 응답을 돌려주되, **티켓 개수는 절대 늘어나지 않습니다.** 결제사가 retry 정책을 가지고 있을 때 반드시 필요한 동작입니다.
+같은 `Idempotency-Key`로 webhook이 다시 들어오면 캐시된 기존 응답을 그대로 재생하고, 다른 `Idempotency-Key`로 같은 `providerTransactionId`가 재시도되면 `duplicate: true`로 수렴합니다. 어느 경로든 **티켓 개수는 절대 늘어나지 않습니다.** 결제사가 retry 정책을 가지고 있을 때 반드시 필요한 동작입니다.
 
 ### ✅ 동시성 제어 (Oversell 방지)
 
-`SERIALIZABLE` 트랜잭션과 `SELECT ... FOR UPDATE`로 이벤트 재고 행을 잠그고, `available_seats`가 0 아래로 내려가지 않도록 제어합니다. **부하 테스트에서 동시 예약 요청이 몰려도 한 자리가 두 명에게 팔리지 않는 것을 확인**했습니다.
+`SERIALIZABLE` 트랜잭션과 `SELECT ... FOR UPDATE`로 이벤트 재고 행을 잠그고, `available_seats`는 DB CHECK로 하한(`>= 0`)과 상한(`<= total_seats`)이 함께 강제됩니다. **동시 예약·checkout 요청이 몰려도 한 자리가 두 명에게 팔리지 않는 것은 통합 테스트로 검증**했으며, k6 시나리오는 같은 행에 대한 lock 경합과 rate limit 동작을 관찰하는 용도입니다.
 
-### ✅ Rate Limiting & 캐시
+### ✅ Rate Limiting
 
-Redis 기반 rate limit으로 API를 보호하고, 이벤트 정보와 재고 정보를 캐시 계층에 두어 **burst 트래픽에도 DB가 무너지지 않도록** 구성했습니다.
+Redis sliding window 기반 rate limit으로 write 경로(reservation/checkout/webhook)와 GraphQL read 경로를 서로 다른 한도로 보호합니다. Redis 장애 시에는 fail-closed(503)가 기본값입니다.
 
 ### ✅ 내 주문 / 내 티켓 조회
 
@@ -150,10 +152,13 @@ GraphQL `myOrders`, `myTickets`, `ticketByCode`로 사용자가 본인의 주문
 
 PeakPass에서 절대 양보하지 않은 규칙들입니다.
 
-- `Idempotency-Key` 기반 **중복 재시도 방어**
+- `Idempotency-Key` 기반 **중복 재시도 방어** — Redis 캐시·lock은 command(checkout / payment-settlement)별 namespace로 분리
+- Redis가 중단돼도 `pg_advisory_xact_lock` + `orders.idempotency_key UNIQUE`로 **PostgreSQL이 최종 멱등성을 보장**
 - `SERIALIZABLE` 트랜잭션 격리 수준 사용
 - `SELECT ... FOR UPDATE` 기반 이벤트 재고 **행 잠금**
-- `available_seats`가 **0 아래로 내려가지 않도록** 제어
+- `available_seats`는 DB CHECK로 **0 미만·`total_seats` 초과가 모두 차단**됨 (상한은 defense-in-depth)
+- `payment_records.idempotency_key`는 **record 종류(checkout pending / settlement terminal)별 partial UNIQUE**
+- 모든 status 컬럼은 애플리케이션 모델과 동일한 **DB CHECK 허용 집합**을 가짐 (전이 순서 자체는 애플리케이션 트랜잭션 책임)
 - checkout 시점에는 주문만 생성 → 티켓은 **settlement 이후에만** 발급
 - duplicate settlement webhook에도 **티켓이 중복 발급되지 않음**
 - Redis 부작용은 가능한 한 **commit 이후에만** 반영
@@ -249,7 +254,7 @@ curl -X POST http://localhost:3000/webhooks/payments/settlement \
 
 ### 5) 같은 Settlement Webhook 재시도 (중복 방어 확인)
 
-같은 `Idempotency-Key`로 한 번 더 호출하면 `duplicate: true`로 응답하고, **티켓 수는 늘어나지 않습니다.**
+같은 `Idempotency-Key`로 한 번 더 호출하면 캐시된 기존 응답이 그대로 재생됩니다(따라서 `duplicate` 값도 첫 응답과 동일합니다). 새 `Idempotency-Key`에 같은 `providerTransactionId`로 재시도하면 `duplicate: true`로 응답합니다. 어느 쪽이든 **티켓 수는 늘어나지 않습니다.**
 
 ### 6) GraphQL로 본인 주문 / 티켓 조회
 
@@ -257,7 +262,7 @@ curl -X POST http://localhost:3000/webhooks/payments/settlement \
 curl -X POST http://localhost:3000/graphql \
   -H "Content-Type: application/json" \
   -H "Authorization: Bearer JWT_TOKEN" \
-  -d '{"query":"query { myOrders(limit: 10) { id status paymentStatus ticketCount totalPrice } myTickets(limit: 10) { id code status } }"}'
+  -d '{"query":"query { myOrders(limit: 10) { id status paymentStatus totalAmount } myTickets(limit: 10) { id ticketNumber status } }"}'
 ```
 
 ## 🧪 테스트

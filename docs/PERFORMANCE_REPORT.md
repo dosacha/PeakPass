@@ -48,7 +48,7 @@
 - 조회 성능: GraphQL `events`, `event`
 - 예약 성능: `POST /reservations`
 - 결제 재시도 안정성: `POST /webhooks/payments/settlement`
-- 방어 장치: Redis rate limit, idempotency result cache, event cache
+- 방어 장치: Redis rate limit, command별 idempotency result cache (event/inventory read-through cache는 미구현)
 
 ## 관찰할 메트릭
 

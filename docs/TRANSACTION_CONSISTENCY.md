@@ -55,16 +55,16 @@ FOR UPDATE
 
 ### 5. 커밋 이후 외부 부작용
 
-- 이벤트 캐시 무효화
 - reservation hold 삭제
-- 멱등성 성공 결과 캐시 저장
+- 멱등성 성공 결과 캐시 저장 (checkout scope)
+- 이벤트 관련 캐시 키 방어적 삭제 (read-through cache는 현재 미구현 — [REDIS_STRATEGY.md](./REDIS_STRATEGY.md) 참조)
 
 checkout 시점에는 티켓을 발급하지 않습니다.
 이 순서가 중요한 이유는, 결제 확정 전 티켓이 먼저 생기는 문제를 막기 위해서입니다.
 
 ## settlement webhook 흐름
 
-핵심 코드는 [payments.ts](../src/api/rest/payments.ts)와 [checkout.service.ts](../src/core/services/checkout.service.ts)에 있습니다.
+핵심 코드는 [payments.ts](../src/api/rest/payments.ts)와 [payment-webhook.service.ts](../src/core/services/payment-webhook.service.ts)에 있습니다.
 
 ### settled webhook
 
@@ -82,7 +82,10 @@ checkout 시점에는 티켓을 발급하지 않습니다.
 
 ## duplicate webhook 방어
 
-- webhook 자체도 `Idempotency-Key`를 사용
+- webhook 자체도 `Idempotency-Key`를 사용하며, Redis 결과 캐시·lock은
+  checkout과 분리된 `payment-settlement` scope namespace를 사용
+- 같은 `Idempotency-Key` 재전송은 캐시된 기존 응답을 그대로 재생 (duplicate flag도 원본 값 유지)
+- 다른 `Idempotency-Key` + 같은 `providerTransactionId` 재시도는 `duplicate: true`로 수렴
 - `payment_records.provider_transaction_id` 고유 인덱스 사용
 - order를 `FOR UPDATE`로 잠금
 - 이미 `paid` 상태이거나 기존 티켓이 있으면 중복 발급 없이 기존 결과 반환
@@ -95,20 +98,38 @@ checkout 시점에는 티켓을 발급하지 않습니다.
 - 생성 트랜잭션에서 `events.available_seats`를 즉시 차감해 soft hold를 잡음
 - 커밋 이후 `setReservationHold()`로 Redis TTL hold 저장
 - Redis hold는 `GET /reservations/:id` 응답 가속과 만료 시각 표시를 위한 보조 캐시
+- **Redis TTL 만료 자체는 DB 좌석을 복구하지 않음** — 만료 예약의 좌석 복구는
+  background sweeper(5분 주기)와 checkout 경로의 lazy expiration이 수행하며,
+  두 경로 모두 `status = 'active'`인 예약만 원복 처리해 이중 복구를 막음
 - checkout은 Redis hold를 읽지 않고 DB atomic UPDATE로만 reservation을 검증·전환
-- 예약 release / expire / checkout convert는 DB 상태를 먼저 바꾸고 커밋 이후 Redis hold 삭제
+- 사용자용 명시적 취소(release) HTTP route는 현재 없음 — release는 서비스 계층
+  메서드로만 존재
+- 예약 expire / checkout convert는 DB 상태를 먼저 바꾸고 커밋 이후 Redis hold 삭제
 
 ## DB 제약과 모델링
 
-실제 제약은 [001_init_schema.sql](../src/infra/migrations/001_init_schema.sql), [002_ticket_number_sequence.sql](../src/infra/migrations/002_ticket_number_sequence.sql), [003_payment_provider_transaction_unique.sql](../src/infra/migrations/003_payment_provider_transaction_unique.sql)에 있습니다.
+실제 제약은 [001_init_schema.sql](../src/infra/migrations/001_init_schema.sql), [002_ticket_number_sequence.sql](../src/infra/migrations/002_ticket_number_sequence.sql), [003_payment_provider_transaction_unique.sql](../src/infra/migrations/003_payment_provider_transaction_unique.sql), [005_payment_record_idempotency_scopes.sql](../src/infra/migrations/005_payment_record_idempotency_scopes.sql), [006_status_constraints.sql](../src/infra/migrations/006_status_constraints.sql), [007_available_seats_ceiling.sql](../src/infra/migrations/007_available_seats_ceiling.sql)에 있습니다.
 
 대표 예시는 다음과 같습니다.
 
-- `events.available_seats >= 0`
+- `events.available_seats >= 0` (하한) / `available_seats <= total_seats` (상한, `events_available_seats_not_above_total_check`)
 - `orders.idempotency_key` 고유성
+- `payment_records.idempotency_key`는 record 종류별 partial UNIQUE —
+  checkout pending(`provider_transaction_id IS NULL`)과
+  settlement terminal(`IS NOT NULL`) scope가 분리되어, 서로 다른 command가
+  같은 raw key를 써도 충돌하지 않음
 - `tickets.ticket_number` 고유성
 - `payment_records.provider_transaction_id` 고유 인덱스
+- 모든 status 컬럼의 허용 값 집합 CHECK (`*_status_allowed_check`) —
+  애플리케이션 zod 모델과 집합 동등성이 테스트로 고정됨
 - `ticket_number_seq` 기반 전역 티켓 번호 생성
+
+주의: CHECK 제약은 **허용 값 집합**만 강제합니다. 상태 **전이 순서**(예:
+pending→paid)는 DB state machine이 아니라 애플리케이션 트랜잭션과 행 잠금이
+책임집니다. seat 상한 역시 재현된 이중 복구 버그의 수정이 아니라, 향후 새 복구
+경로를 대비한 defense-in-depth입니다. clean install(001→007)과 순차 upgrade가
+격리 DB 테스트로 검증되어 있으며, schema drift가 있으면 migration이 조용히
+넘어가지 않고 실패합니다.
 
 ## 핵심 정리
 

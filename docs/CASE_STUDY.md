@@ -50,24 +50,28 @@ PeakPass는 고트래픽 워크숍과 세미나 예약을 다루는 백엔드 �
 
 현재 저장소 기준으로 확인된 사항은 다음과 같습니다.
 
-- `npm run build` 통과
-- `npm test -- --runInBand` 통과
-- `npm run lint` 통과
+- `npm run build`, `npm test -- --runInBand`, `npm run lint` 통과
 - 로컬 환경에서 reservation → checkout → settlement → 티켓 발급 end-to-end 흐름 확인
 - `/health`, `/ready` 확인
 - GraphQL `events`, `myOrders`, `myTickets`, `ticketByCode` 실제 응답 확인
 - checkout 직후 티켓이 비어 있고, settlement 이후 티켓이 생기는 흐름 확인
-- duplicate settlement webhook에도 티켓 수가 늘지 않음을 확인
-
-대표 검증 데이터는 다음과 같습니다.
-
-- settlement 대상 주문 ID: `a63a537d-64f4-447a-8c02-91d01cc9ad40`
-- settlement 이후 발급 티켓: `PASS-2026-000002`
+- **route-level 통합 테스트**로 middleware(HMAC, rate limit, idempotency)를 포함한
+  checkout 멱등성·settlement 동시성 계약 고정 (`test:routes`)
+- Redis를 의도적으로 중단시킨 상태에서도 동일 멱등키의 동시 checkout이
+  PostgreSQL advisory lock + UNIQUE로 order 1건에 수렴함을 확인
+- failed webhook의 좌석 원복, paid 이후 late failure의 좌석 미복구,
+  duplicate settlement 방어를 통합 테스트로 고정 (`test:webhook`)
+- DB 제약 계층 검증: command별 idempotency scope(005), status 허용 집합 CHECK(006),
+  좌석 하한·상한 CHECK(007)를 clean install / 순차 upgrade / drift 실패까지
+  격리 DB 테스트로 고정 (`test:constraints`, `test:inventory-constraints`)
+- k6 부하 시나리오 재실행과 수치 보고서 갱신 (2026-06-03,
+  [PERFORMANCE_REPORT.md](./PERFORMANCE_REPORT.md) — 로컬 단일 노드 micro-benchmark 한정)
 
 현재 남아 있는 과제는 다음과 같습니다.
 
-- failed webhook과 재고 원복 시나리오를 별도 테스트로 고정
-- load test 재실행과 수치 보고서 갱신
+- 사용자용 명시적 예약 취소(release) HTTP route는 미구현 (서비스 메서드만 존재)
+- 이벤트/재고 read-through cache는 미구현 — 도입 시 무효화 hook과 짝 맞추기
+- 공개 데모 데이터 누적에 대한 정리 전략
 
 ## 다루는 핵심 기술 영역
 
