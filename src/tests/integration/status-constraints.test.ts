@@ -16,6 +16,11 @@
 import { initPostgresPool, closePostgresPool } from '@/infra/postgres/client';
 import { loadConfig } from '@/infra/config';
 import { initLogger } from '@/infra/logger';
+import { EventStatus } from '@/core/models/event';
+import { ReservationStatus } from '@/core/models/reservation';
+import { OrderStatus } from '@/core/models/order';
+import { TicketStatus } from '@/core/models/ticket';
+import { PaymentWebhookStatus } from '@/core/models/payment';
 import { v4 as uuid } from 'uuid';
 
 const STATUS_DOMAINS = {
@@ -138,6 +143,31 @@ describe('status domain CHECK constraints (R03-A, migration 006)', () => {
       [uuid(), orderId, status, providerLinked ? `txn-${uuid()}` : null, uuid()],
     );
   }
+
+  // ── T-DB00 model ↔ DB domain parity ────────────────────────────────────
+
+  /** 순서·중복에 의존하지 않는 집합 동등 비교. */
+  function expectSameMembers(actual: readonly string[], expected: readonly string[]) {
+    expect([...new Set(actual)].sort()).toEqual([...new Set(expected)].sort());
+  }
+
+  it('T-DB00 application status models match declared DB domains', () => {
+    // 이 테스트가 없으면 STATUS_DOMAINS는 테스트 파일에 복사된 문자열일 뿐이다.
+    // 실제 Zod 모델에서 읽은 집합과 비교해, 모델이 바뀌었는데 migration/테스트가
+    // 안 따라온 drift를 CI에서 잡는다. (runtime 전이가 없는 delivered/used/closed도
+    // 모델에 선언돼 있으므로 비교에 포함된다)
+    expectSameMembers(EventStatus.options, STATUS_DOMAINS.events.allowed);
+    expectSameMembers(ReservationStatus.options, STATUS_DOMAINS.reservations.allowed);
+    expectSameMembers(OrderStatus.options, STATUS_DOMAINS.orders.allowed);
+    expectSameMembers(TicketStatus.options, STATUS_DOMAINS.tickets.allowed);
+
+    // payment_records의 'pending'은 webhook 모델이 아니라 checkout이 만드는
+    // pending record의 상태다 — webhook terminal 상태(settled/failed)에 더해 비교한다.
+    expectSameMembers(
+      ['pending', ...PaymentWebhookStatus.options],
+      STATUS_DOMAINS.payment_records.allowed,
+    );
+  });
 
   // ── T-DB01 catalog shape ────────────────────────────────────────────────
 
