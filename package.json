@@ -16,6 +16,7 @@
     "test:redis": "jest --runInBand --config jest.integration.cjs src/tests/integration/redis.test.ts",
     "test:routes": "jest --runInBand --config jest.integration.cjs src/tests/integration/route-contract.test.ts",
     "test:constraints": "jest --runInBand --config jest.integration.cjs src/tests/integration/status-constraints.test.ts",
+    "test:inventory-constraints": "jest --runInBand --config jest.integration.cjs src/tests/integration/inventory-constraints.test.ts",
     "lint": "eslint src --ext .ts",
     "lint:fix": "eslint src --ext .ts --fix",
     "format": "prettier --write \"src/**/*.ts\"",
