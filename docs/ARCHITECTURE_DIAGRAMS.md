@@ -69,8 +69,10 @@ sequenceDiagram
     C->>API: POST /reservations
     API->>S: createReservation(input)
     S->>PG: BEGIN
-    S->>PG: 이벤트 조회
-    S->>PG: reservations INSERT
+    S->>PG: tier 검증 조회
+    S->>PG: events 행 잠금 FOR UPDATE
+    S->>PG: available_seats 차감 (soft hold)
+    S->>PG: reservations INSERT (active)
     S->>PG: COMMIT
     S->>R: setReservationHold(reservationId, ttl)
     API-->>C: 201 Created
@@ -93,16 +95,17 @@ sequenceDiagram
     else 캐시 미적중
         API->>PG: SERIALIZABLE 트랜잭션 시작
         API->>S: checkout(input, client)
+        S->>PG: pg_advisory_xact_lock(idempotency_key)
         S->>PG: orders 조회 by idempotency_key
+        S->>PG: reservation atomic convert (있는 경우)
         S->>PG: events 행 잠금 FOR UPDATE
         S->>PG: orders INSERT
-        S->>PG: events.available_seats 차감
+        S->>PG: events.available_seats 차감 (reservation 없을 때)
         S->>PG: payment_records INSERT pending
-        S->>PG: reservation converted
         API->>PG: COMMIT
         API->>R: reservation hold 삭제
-        API->>R: 이벤트 캐시 무효화
-        API->>R: 멱등성 성공 결과 저장
+        API->>R: 이벤트 캐시 키 방어적 삭제
+        API->>R: 멱등성 성공 결과 저장 (checkout scope)
         API-->>C: 201 Created with empty tickets
     end
 ```
@@ -113,7 +116,7 @@ sequenceDiagram
 sequenceDiagram
     participant P as Payment Provider
     participant API as REST /webhooks/payments/settlement
-    participant S as CheckoutService
+    participant S as PaymentWebhookService
     participant PG as PostgreSQL
     participant R as Redis
     participant Seq as ticket_number_seq
@@ -133,8 +136,8 @@ sequenceDiagram
           S->>PG: tickets INSERT
         end
         API->>PG: COMMIT
-        API->>R: 이벤트 캐시 무효화
-        API->>R: 멱등성 결과 저장
+        API->>R: 이벤트 캐시 키 방어적 삭제
+        API->>R: 멱등성 결과 저장 (payment-settlement scope)
         API-->>P: 200 OK
     end
 ```
@@ -142,6 +145,10 @@ sequenceDiagram
 ## 현재 상태 메모
 
 - 예약 hold와 멱등성 결과는 Redis를 사용하지만, 정합성 기준은 PostgreSQL임
-- checkout 핵심 경로는 트랜잭션과 행 잠금으로 보호함
+- Redis 멱등성 캐시·lock은 command(checkout / payment-settlement)별 namespace로 분리됨
+- 이벤트/재고 read-through cache는 미구현 — 조회는 PostgreSQL 직행 (다이어그램의 "캐시 키 방어적 삭제"는 향후 도입 대비 hook)
+- Redis TTL 만료 자체는 좌석을 복구하지 않으며, background sweeper와 checkout lazy expiration이 DB에서 복구함
+- checkout 핵심 경로는 트랜잭션·행 잠금·advisory lock으로 보호함
 - 티켓은 checkout 직후가 아니라 settlement webhook 이후에 발급됨
 - duplicate settlement webhook에도 티켓이 중복 발급되지 않도록 구현되어 있음
+- status 허용 집합과 좌석 하한·상한은 DB CHECK로도 강제됨 (migration 006~007)
