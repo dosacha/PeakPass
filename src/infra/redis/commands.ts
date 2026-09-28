@@ -117,19 +117,20 @@ export async function checkRateLimit(
   try {
     return await withRedis(async (redis) => {
       const now = Date.now();
-      const windowStart = now - windowMs;
+      const [allowed, count] = await redis.eval(
+        `redis.call('ZREMRANGEBYSCORE', KEYS[1], 0, ARGV[1])
+         local count = redis.call('ZCARD', KEYS[1])
+         if count >= tonumber(ARGV[2]) then return {0, count} end
+         redis.call('ZADD', KEYS[1], ARGV[3], ARGV[4])
+         redis.call('EXPIRE', KEYS[1], ARGV[5])
+         return {1, count + 1}`,
+        {
+          keys: [key],
+          arguments: [String(now - windowMs), String(limit), String(now), randomUUID(), String(Math.ceil(windowMs / 1000))],
+        },
+      ) as [number, number];
 
-      await redis.zRemRangeByScore(key, 0, windowStart);
-      const count = await redis.zCard(key);
-
-      if (count >= limit) {
-        return { allowed: false, count, resetAt: now + windowMs, redisAvailable: true };
-      }
-
-      await redis.zAdd(key, { score: now, value: `${now}-${Math.random()}` });
-      await redis.expire(key, Math.ceil(windowMs / 1000));
-
-      return { allowed: true, count: count + 1, resetAt: now + windowMs, redisAvailable: true };
+      return { allowed: allowed === 1, count, resetAt: now + windowMs, redisAvailable: true };
     });
   } catch (err) {
     logger.error({ err, userId, action, failMode }, '레이트 리미트 확인 실패 (Redis 장애)');
