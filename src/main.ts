@@ -65,8 +65,8 @@ async function main() {
 
     app = await createApp();
 
-    process.once('SIGTERM', () => void gracefulShutdown('SIGTERM'));
-    process.once('SIGINT', () => void gracefulShutdown('SIGINT'));
+    process.on('SIGTERM', () => void gracefulShutdown('SIGTERM'));
+    process.on('SIGINT', () => void gracefulShutdown('SIGINT'));
 
     // sweeper는 HTTP listen 직전에 시작한다.
     // - DB pool은 위에서 이미 초기화됨
