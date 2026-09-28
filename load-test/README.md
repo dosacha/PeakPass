@@ -148,6 +148,22 @@ k6 run --out json=results.json load-test/sustained.js
 
 ---
 
+### Payment callback 재실행 확인
+
+`payment-callback.js`는 setup마다 새 주문과 반복 callback 키를 만듭니다.
+짝수 iteration은 그 실행의 키를 공유하고 홀수 iteration은 새 키를 사용합니다.
+DB/Redis를 유지한 채 재실행해도 각 주문을 별도로 정산할 수 있습니다.
+이 스크립트는 JWT/HMAC을 보내지 않으므로 인증을 명시적으로 완화한 전용
+데모 환경에서 실행하세요. 순수 정합성 확인 시 rate limit도 충분히 높입니다.
+
+```bash
+node --experimental-vm-modules load-test/payment-callback-check.mjs
+k6 run --vus 1 --iterations 6 load-test/payment-callback.js
+```
+
+API 연결과 `LOAD_TEST_USER_ID`, `LOAD_TEST_EVENT_ID`, `LOAD_TEST_TIER_ID` 설정은
+필요합니다. provider transaction ID를 직접 지정하면 재실행마다 새 값으로 바꾸세요.
+
 ## 실행 결과 해석
 
 ### 성공 기준

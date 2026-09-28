@@ -102,6 +102,7 @@ export function setup() {
   return {
     baseUrl,
     orderId,
+    repeatedIdempotencyKey: createUuid(),
     providerTransactionId: __ENV.LOAD_TEST_PROVIDER_TXN_ID || `txn-load-${Date.now()}`,
   };
 }
@@ -109,7 +110,7 @@ export function setup() {
 export default function (data) {
   const useRepeatedIdempotencyKey = __ITER % 2 === 0;
   const idempotencyKey = useRepeatedIdempotencyKey
-    ? '00000000-0000-4000-8000-000000000001'
+    ? data.repeatedIdempotencyKey
     : createUuid();
 
   const response = http.post(

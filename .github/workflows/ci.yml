@@ -53,6 +53,9 @@ jobs:
       - name: TypeScript check
         run: npm run build
 
+      - name: Check callback load-test run isolation
+        run: node --experimental-vm-modules load-test/payment-callback-check.mjs
+
       - name: Build production image
         run: docker build -t peakpass:ci .
 
