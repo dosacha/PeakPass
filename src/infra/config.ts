@@ -48,6 +48,8 @@ const envSchema = z.object({
   JWT_SECRET: z.string().min(32).default(DEVELOPMENT_JWT_SECRET),
   API_KEY: z.string().default('dev-api-key-change-in-production'),
   ORDER_PAYMENT_WINDOW_MINUTES: z.coerce.number().finite().positive().default(10),
+  ORDER_SWEEP_INTERVAL_MS: z.coerce.number().int().positive().max(2147483647).default(500),
+  ORDER_SWEEP_BATCH_SIZE: z.coerce.number().int().positive().max(Number.MAX_SAFE_INTEGER).default(20),
 
   // 외부 서비스 설정
   PAYMENT_SERVICE_URL: z.string().url().default('https://api.payment-provider.example.com'),
