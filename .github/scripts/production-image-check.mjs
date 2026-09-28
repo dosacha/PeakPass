@@ -52,7 +52,7 @@ try {
   }
   console.log(docker(['run', '--rm', ...network, ...containerEnv, image, 'node', 'dist/infra/migrations/runner.js', 'up']));
   const applied = await history();
-  assert.deepEqual(applied.map((row) => row.version), [1, 2, 3, 4, 5, 6, 7], 'Production image must apply migrations 001–007');
+  assert.deepEqual(applied.map((row) => row.version), [1, 2, 3, 4, 5, 6, 7, 8], 'Production image must apply migrations 001–008');
   for (const name of ['users', 'events', 'reservations', 'orders', 'tickets', 'payment_records']) {
     assert.equal((await pool.query('SELECT to_regclass($1) AS name', [`public.${name}`])).rows[0].name, name);
   }
@@ -87,7 +87,7 @@ try {
   });
   assert.equal(response.status, 200);
   assert.deepEqual(await response.json(), { data: { myOrders: [] } });
-  console.log('PASS: migrations 001–007, unchanged rerun, ready, signed GraphQL auth smoke');
+  console.log('PASS: migrations 001–008, unchanged rerun, ready, signed GraphQL auth smoke');
 } finally {
   if (container) docker(['stop', container]);
   await pool.end();

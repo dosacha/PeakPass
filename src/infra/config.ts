@@ -47,6 +47,7 @@ const envSchema = z.object({
   // 애플리케이션 설정
   JWT_SECRET: z.string().min(32).default(DEVELOPMENT_JWT_SECRET),
   API_KEY: z.string().default('dev-api-key-change-in-production'),
+  ORDER_PAYMENT_WINDOW_MINUTES: z.coerce.number().finite().positive().default(10),
 
   // 외부 서비스 설정
   PAYMENT_SERVICE_URL: z.string().url().default('https://api.payment-provider.example.com'),

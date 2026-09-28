@@ -210,6 +210,7 @@ export class PaymentWebhookService {
         id, user_id as "userId", event_id as "eventId", quantity,
         tier_id as "tierId", unit_price as "unitPrice", total_amount as "totalAmount",
         status, idempotency_key as "idempotencyKey",
+        payment_deadline_at as "paymentDeadlineAt",
         created_at as "createdAt", updated_at as "updatedAt", paid_at as "paidAt"
       `,
       [orderId],
@@ -238,6 +239,7 @@ export class PaymentWebhookService {
         tier_id as "tierId", unit_price as "unitPrice", total_amount as "totalAmount",
         status, idempotency_key as "idempotencyKey",
         reservation_id as "reservationId",
+        payment_deadline_at as "paymentDeadlineAt",
         created_at as "createdAt", updated_at as "updatedAt", paid_at as "paidAt"
       `,
       [orderId],

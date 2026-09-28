@@ -14,6 +14,7 @@ import { InventoryService } from './inventory.service';
 import { OrderService } from './order.service';
 import { TicketService } from './ticket.service';
 import { getLogger } from '@/infra/logger';
+import { getConfig } from '@/infra/config';
 
 export interface CheckoutResult {
   order: Order;
@@ -233,13 +234,14 @@ export class CheckoutService {
     const orderResult = await client.query<Order>(
       `INSERT INTO orders (
          id, user_id, event_id, quantity, tier_id, unit_price, total_amount,
-         idempotency_key, reservation_id, status
-       ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, 'pending')
+         idempotency_key, reservation_id, status, payment_deadline_at
+       ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, 'pending', NOW() + $10 * INTERVAL '1 minute')
        RETURNING
          id, user_id as "userId", event_id as "eventId", quantity,
          tier_id as "tierId", unit_price as "unitPrice", total_amount as "totalAmount",
          status, idempotency_key as "idempotencyKey",
          reservation_id as "reservationId",
+         payment_deadline_at as "paymentDeadlineAt",
          created_at as "createdAt", updated_at as "updatedAt"`,
       [
         orderId,
@@ -251,6 +253,7 @@ export class CheckoutService {
         totalAmount.toString(),
         input.idempotencyKey,
         input.reservationId || null,
+        getConfig().ORDER_PAYMENT_WINDOW_MINUTES,
       ],
     );
 

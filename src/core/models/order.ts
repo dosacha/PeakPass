@@ -1,6 +1,6 @@
 import { z } from 'zod';
 
-export const OrderStatus = z.enum(['pending', 'paid', 'delivered', 'cancelled']);
+export const OrderStatus = z.enum(['pending', 'paid', 'delivered', 'cancelled', 'expired']);
 export type OrderStatus = z.infer<typeof OrderStatus>;
 
 export interface Order {
@@ -22,6 +22,7 @@ export interface Order {
   status: OrderStatus;
   idempotencyKey: string;
   reservationId?: string;
+  paymentDeadlineAt: Date | null;
   createdAt: Date;
   updatedAt: Date;
   paidAt?: Date;

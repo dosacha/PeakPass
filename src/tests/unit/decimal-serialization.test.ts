@@ -30,6 +30,7 @@ describe('money serialization consistency (string-first)', () => {
       totalAmount: '50.00',
       status: 'pending',
       idempotencyKey: '00000000-0000-0000-0000-000000000003',
+      paymentDeadlineAt: null,
       createdAt: new Date(),
       updatedAt: new Date(),
     };
