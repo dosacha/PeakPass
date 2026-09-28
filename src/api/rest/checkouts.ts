@@ -11,7 +11,6 @@ import {
   invalidateEventCache,
   releaseIdempotencyLock,
 } from '@/infra/redis/commands';
-import { storeIdempotencyResult } from '@/api/middleware/idempotency';
 import { assertBodyUserMatchesAuth } from '@/api/middleware/auth';
 
 /**
@@ -63,9 +62,6 @@ export async function registerCheckoutRoutes(app: FastifyInstance) {
       }
 
       await invalidateEventCache(input.eventId);
-      if (request.idempotencyScope) {
-        await storeIdempotencyResult(orderResult, 201, request.idempotencyScope, idempotencyKey);
-      }
 
       logger.info(
         {

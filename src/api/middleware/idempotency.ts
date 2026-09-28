@@ -86,9 +86,11 @@ export async function idempotencyMiddleware(
     return;
   }
 
-  const cachedResult = await getIdempotencyResult(scope, idempotencyKey);
-  if (cachedResult) {
-    return sendCachedResult(reply, scope, idempotencyKey, cachedResult);
+  if (scope === 'payment-settlement') {
+    const cachedResult = await getIdempotencyResult(scope, idempotencyKey);
+    if (cachedResult) {
+      return sendCachedResult(reply, scope, idempotencyKey, cachedResult);
+    }
   }
 
   let lockToken: string | null;
@@ -104,6 +106,12 @@ export async function idempotencyMiddleware(
   }
 
   if (!lockToken) {
+    if (scope === 'checkout') {
+      // Checkout must reach auth/schema/fingerprint guards and replay current DB state.
+      // PostgreSQL advisory locking and transaction retries serialize contending requests.
+      request.idempotencyKey = idempotencyKey;
+      return;
+    }
     await sleep(IN_PROGRESS_RECHECK_DELAY_MS);
 
     const completedResult = await getIdempotencyResult(scope, idempotencyKey);
