@@ -66,6 +66,8 @@ const DemoFlow = ({ state, actions }) => {
   const selectedTier = selectedEvent?.pricing?.find(p => p.tierId === selectedTierId);
   const orderStatus = order?.order?.status;
   const paymentStatus = settlement?.paymentStatus || settlement?.order?.paymentStatus;
+  const settlementOrderStatus = String(settlement?.order?.status || "—").toUpperCase();
+  const needsReconciliation = settlementOrderStatus === "EXPIRED" && String(paymentStatus).toUpperCase() === "SETTLED";
   const tickets = settlement?.tickets || order?.tickets || [];
   const isLiveDemo = mode === "live";
   const liveSessionReady = !isLiveDemo || !!liveSessionUserId;
@@ -390,11 +392,11 @@ const DemoFlow = ({ state, actions }) => {
             </div>
             {settlement && (
               <>
-                <div className="result-banner paid">
+                <div className={`result-banner ${settlementOrderStatus === "PAID" ? "paid" : "pending"}`}>
                   <div className="rb-icon"><Icon name="check" size={16}/></div>
                   <div>
-                    <div className="rb-title">order: <span style={{color:"#206a41"}}>PAID</span> · payment: <span style={{color:"#206a41"}}>SETTLED</span> · ticket: <span style={{color:"#206a41"}}>ISSUED</span></div>
-                    <div className="rb-sub">settlement 이후에만 티켓이 발급됩니다. 각 티켓은 UNIQUE(order_id, seat)로 보호.</div>
+                    <div className="rb-title">order: <span>{settlementOrderStatus}</span> · payment: <span>{String(paymentStatus || "—").toUpperCase()}</span> · ticket: <span>{tickets.length > 0 ? "ISSUED" : "NONE"}</span></div>
+                    <div className="rb-sub">{needsReconciliation ? "만료된 주문의 결제가 확인되었습니다. 확인·환불 조치 필요." : tickets.length > 0 ? "결제 확인 후 발급된 티켓입니다." : "발급된 티켓이 없습니다."}</div>
                   </div>
                   <div className="rb-stat">
                     <div className="stat"><div className="n" style={{color:"var(--green)"}}>{tickets.length}</div><div className="l">tickets</div></div>

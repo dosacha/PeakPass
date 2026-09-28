@@ -62,6 +62,27 @@ const timer = setInterval(async () => {
     const ready = await mock.ready();
     assert(ready.data.checks?.postgres === true && ready.data.checks?.redis === true, "mock checks booleans absent");
   });
+  for (const [status, paymentStatus, tickets, expected] of [
+    ["expired", "settled", [], ["EXPIRED", "SETTLED", "NONE", "확인·환불 조치 필요"]],
+    ["expired", "failed", [], ["EXPIRED", "FAILED", "NONE"]],
+    ["paid", "settled", [{ id: "paid-ticket", ticketNumber: "PP-PAID", createdAt: "2026-09-28T12:00:00Z" }], ["PAID", "SETTLED", "ISSUED"]],
+    ["PAID", "SETTLED", [{ id: "mock-ticket", ticketNumber: "PP-MOCK", createdAt: "2026-09-28T12:00:00Z" }], ["PAID", "SETTLED", "ISSUED"]]
+  ]) await check(`settlement ${status}/${paymentStatus} displays business state rather than HTTP acknowledgment`, () => {
+    const flow = render(win.DemoFlow, { state: {
+      mode: "live", events: [], quantity: 2, userId: "fixture", liveSessionUserId: "fixture",
+      settlement: { order: { id: "order-fixture", status }, paymentStatus, tickets },
+      stepStatus: {}, stepTiming: {}, requests: [], expandedSteps: { s5: true }, dupBusy: {}
+    }, actions: {} });
+    const banner = flow.querySelector(".result-banner");
+    assert(banner, "settlement result banner absent");
+    const text = banner.textContent;
+    for (const value of expected) assert(text.includes(value), `missing ${value}: ${text}`);
+    if (status === "expired") {
+      assert(!text.includes("PAID") && !text.includes("ISSUED"), `expired ACK claims payment/ticket fulfillment: ${text}`);
+      assert(flow.querySelectorAll(".ticket-card").length === 0, "expired response generated ticket cards");
+    }
+    if (status === "paid" || status === "PAID") assert(!text.includes("확인·환불"), "normal payment incorrectly needs reconciliation");
+  });
   lines.push(`${failed ? "FAIL" : "PASS"}: ${lines.length - failed}/${lines.length} checks`);
   output.textContent = lines.join("\n");
   document.title = `${failed ? "FAIL" : "PASS"} Task21 frontend contract check`;
