@@ -1,5 +1,7 @@
 import { FastifyRequest, FastifyReply } from 'fastify';
 import { getLogger } from '@/infra/logger';
+import { ConflictError } from '@/core/errors';
+import { PaymentWebhookInput, PaymentWebhookSchema } from '@/core/models/payment';
 import {
   getIdempotencyResult,
   setIdempotencyResult,
@@ -38,6 +40,20 @@ function getCachedStatusCode(cachedResult: Record<string, unknown>): number {
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function callbackFingerprint(input: PaymentWebhookInput): string {
+  return JSON.stringify([input.orderId.toLowerCase(), input.providerTransactionId, input.status]);
+}
+
+function matchesCallbackCache(cached: Record<string, unknown>, request: FastifyRequest): boolean {
+  // Old snapshots carry only the response, whose paymentStatus need not equal input.status.
+  // They must reach the durable callback-key check rather than infer the original request.
+  if (typeof cached.requestFingerprint !== 'string') return false;
+  if (cached.requestFingerprint !== callbackFingerprint(PaymentWebhookSchema.parse(request.body))) {
+    throw new ConflictError('Idempotency key already used for a different payment callback');
+  }
+  return true;
 }
 
 async function sendCachedResult(
@@ -88,7 +104,7 @@ export async function idempotencyMiddleware(
 
   if (scope === 'payment-settlement') {
     const cachedResult = await getIdempotencyResult(scope, idempotencyKey);
-    if (cachedResult) {
+    if (cachedResult && matchesCallbackCache(cachedResult, request)) {
       return sendCachedResult(reply, scope, idempotencyKey, cachedResult);
     }
   }
@@ -115,7 +131,7 @@ export async function idempotencyMiddleware(
     await sleep(IN_PROGRESS_RECHECK_DELAY_MS);
 
     const completedResult = await getIdempotencyResult(scope, idempotencyKey);
-    if (completedResult) {
+    if (completedResult && matchesCallbackCache(completedResult, request)) {
       return sendCachedResult(reply, scope, idempotencyKey, completedResult);
     }
 
@@ -137,6 +153,7 @@ export async function storeIdempotencyResult(
   statusCode: number,
   scope: IdempotencyScope,
   idempotencyKey?: string,
+  callbackInput?: PaymentWebhookInput,
 ): Promise<void> {
   if (!idempotencyKey) return;
 
@@ -147,6 +164,7 @@ export async function storeIdempotencyResult(
       statusCode,
       body: result,
       storedAt: new Date().toISOString(),
+      requestFingerprint: callbackInput ? callbackFingerprint(callbackInput) : undefined,
     },
     24 * 60 * 60,
   );

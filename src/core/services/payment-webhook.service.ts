@@ -58,7 +58,7 @@ export class PaymentWebhookService {
       throw new NotFoundError('Order', input.orderId);
     }
 
-    await this.reserveCallbackKey(order.id, input.providerTransactionId, idempotencyKey, client);
+    await this.reserveCallbackKey(order.id, input.providerTransactionId, input.status, idempotencyKey, client);
 
     const transition: PaymentTransition =
       input.status === 'settled' ? { kind: 'settle' } : { kind: 'fail' };
@@ -67,19 +67,20 @@ export class PaymentWebhookService {
     return this.mapOutcomeToResponse(outcome);
   }
 
-  private async reserveCallbackKey(orderId: string, providerTransactionId: string, idempotencyKey: string, client: PoolClient): Promise<void> {
+  private async reserveCallbackKey(orderId: string, providerTransactionId: string, status: PaymentWebhookInput['status'], idempotencyKey: string, client: PoolClient): Promise<void> {
     // Reserve every accepted callback, including early terminal replays and
     // failure-to-success corrections. Rejected transitions roll this back too.
-    const inserted = await client.query(`INSERT INTO payment_callback_keys (idempotency_key, order_id, provider_transaction_id)
-      VALUES ($1, $2, $3) ON CONFLICT (idempotency_key) DO NOTHING RETURNING idempotency_key`,
-    [idempotencyKey, orderId, providerTransactionId]);
+    const inserted = await client.query(`INSERT INTO payment_callback_keys (idempotency_key, order_id, provider_transaction_id, callback_status)
+      VALUES ($1, $2, $3, $4) ON CONFLICT (idempotency_key) DO NOTHING RETURNING idempotency_key`,
+    [idempotencyKey, orderId, providerTransactionId, status]);
     if (inserted.rowCount) return;
-    const result = await client.query<{ order_id: string; provider_transaction_id: string }>(
-      `SELECT order_id, provider_transaction_id FROM payment_callback_keys WHERE idempotency_key=$1`,
+    const result = await client.query<{ order_id: string; provider_transaction_id: string; callback_status: string | null }>(
+      `SELECT order_id, provider_transaction_id, callback_status FROM payment_callback_keys WHERE idempotency_key=$1`,
       [idempotencyKey],
     );
     const existing = result.rows[0];
-    if (!existing || existing.order_id !== orderId || existing.provider_transaction_id !== providerTransactionId) {
+    // NULL is an unverifiable legacy request, not permission to bind a new status on replay.
+    if (!existing || existing.order_id !== orderId || existing.provider_transaction_id !== providerTransactionId || existing.callback_status !== status) {
       throw new ConflictError('Idempotency key already used for a different payment callback');
     }
   }

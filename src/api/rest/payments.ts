@@ -41,7 +41,7 @@ export async function registerPaymentRoutes(app: FastifyInstance) {
 
       await invalidateEventCache(result.order.eventId);
       if (request.idempotencyScope) {
-        await storeIdempotencyResult(result, 200, request.idempotencyScope, idempotencyKey);
+        await storeIdempotencyResult(result, 200, request.idempotencyScope, idempotencyKey, input);
       }
 
       logger.info(

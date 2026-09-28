@@ -111,6 +111,8 @@ describe('order payment deadline contract (real PostgreSQL)', () => {
       AND payment_deadline_at<=NOW() ORDER BY payment_deadline_at,id LIMIT 10`;
     expect((await client.query(sql)).rows.map(r => r.id)).toEqual(due.map(o => o.id).sort());
     await client.query('SET LOCAL enable_seqscan=off');
+    // Verify ordered-index eligibility rather than the optimizer's cost-based choice.
+    await client.query('SET LOCAL enable_sort=off');
     expect((await client.query(`EXPLAIN (FORMAT JSON) ${sql}`)).rows[0]['QUERY PLAN'][0].Plan.Plans[0]['Index Name']).toBe('idx_orders_pending_payment_deadline');
   });
 

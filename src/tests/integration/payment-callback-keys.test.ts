@@ -59,6 +59,109 @@ describe('durable terminal callback idempotency keys', () => {
       .toMatchObject({ kind: 'expired_now' });
   }
 
+  it.each([
+    ['failed', 'settled', 'warm'], ['failed', 'settled', 'evicted'],
+    ['settled', 'failed', 'warm'], ['settled', 'failed', 'evicted'],
+  ] as const)('rejects %s to %s reuse of one key with %s cache', async (original, changed, cache) => {
+    const order = await data.order(); await expire(order);
+    const provider = uuid(), key = uuid();
+    expect((await callback(order, original, provider, key)).status).toBe(200);
+    if (cache === 'evicted') await clearResults();
+    const result = await callback(order, changed, provider, key);
+    const facts = (await pool.query(`SELECT status,reconciliation_required FROM payment_records
+      WHERE order_id=$1 AND provider_transaction_id=$2`, [order, provider])).rows;
+    process.stdout.write(JSON.stringify({ callbackStatusReplay: { original, changed, cache, response: result.status, facts } }) + '\n');
+    expect(result.status).toBe(409);
+    expect(facts).toEqual([{ status: original, reconciliation_required: original === 'settled' }]);
+    expect((await data.state())[0]).toMatchObject({ status: 'expired', available_seats: 10000, tickets: 0 });
+    expect((await callback(order, original, provider, key)).status).toBe(200);
+    await clearResults();
+    expect((await callback(order, original, provider, key)).status).toBe(200);
+  });
+
+  it('does not trust a legacy cache snapshot without a request fingerprint', async () => {
+    const order = await data.order(); await expire(order);
+    const provider = uuid(), key = uuid();
+    expect((await callback(order, 'failed', provider, key)).status).toBe(200);
+    const redis = await getReadyRedis(), cacheKey = `peakpass:idempotency:payment-settlement:${key}`;
+    const cached = JSON.parse((await redis.get(cacheKey))!);
+    delete cached.requestFingerprint;
+    await redis.set(cacheKey, JSON.stringify(cached));
+    expect((await callback(order, 'settled', provider, key)).status).toBe(409);
+    expect((await pool.query('SELECT status FROM payment_records WHERE provider_transaction_id=$1', [provider])).rows[0].status).toBe('failed');
+  });
+
+  it('binds a paid-order late-failure key to input failed, not the settled response status', async () => {
+    const order = await data.order(), provider = uuid(), key = uuid();
+    expect((await callback(order, 'settled', provider, uuid())).status).toBe(200);
+    expect(await callback(order, 'failed', provider, key)).toMatchObject({ status: 200, body: { paymentStatus: 'settled' } });
+    for (const cache of ['warm', 'evicted']) {
+      if (cache === 'evicted') await clearResults();
+      expect((await callback(order, 'settled', provider, key)).status).toBe(409);
+      expect((await callback(order, 'failed', provider, key)).status).toBe(200);
+    }
+    expect((await data.state())[0]).toMatchObject({ status: 'paid', available_seats: 9998, tickets: 2 });
+  });
+
+  it('allows only one committed status when contradictory callbacks race on the same key', async () => {
+    const orderId = await data.order(); await expire(orderId);
+    const providerTransactionId = uuid(), key = uuid();
+    const statuses = ['failed', 'settled'] as const;
+    const results = await Promise.allSettled(statuses.map(status => serializableTransactionWithRetry(client =>
+      new PaymentWebhookService().processPaymentWebhook({ orderId, providerTransactionId, status }, key, client))));
+    expect(results.filter(result => result.status === 'fulfilled')).toHaveLength(1);
+    expect((results.find(result => result.status === 'rejected') as PromiseRejectedResult).reason).toBeInstanceOf(ConflictError);
+    const winner = statuses[results.findIndex(result => result.status === 'fulfilled')];
+    expect((await pool.query('SELECT callback_status FROM payment_callback_keys WHERE idempotency_key=$1', [key])).rows[0].callback_status).toBe(winner);
+    expect((await pool.query('SELECT status FROM payment_records WHERE provider_transaction_id=$1', [providerTransactionId])).rows[0].status).toBe(winner);
+    expect((await data.state())[0]).toMatchObject({ status: 'expired', available_seats: 10000, tickets: 0 });
+  });
+
+  it.each(['order', 'provider'] as const)('rejects changed %s even with a warmed callback cache', async changed => {
+    const order = await data.order(), other = await data.order(), provider = uuid(), key = uuid();
+    expect((await callback(order, 'settled', provider, key)).status).toBe(200);
+    expect((await callback(changed === 'order' ? other : order, 'settled', changed === 'provider' ? uuid() : provider, key)).status).toBe(409);
+    expect((await data.state()).find(row => row.id === other)).toMatchObject({ status: 'pending', tickets: 0 });
+  });
+
+  it('migration binds only provable legacy statuses and never guesses from a corrected financial fact', async () => {
+    const failedOrder = await data.order(), paidOrder = await data.order(), expiredOrder = await data.order();
+    await expire(expiredOrder);
+    const failedProvider = uuid(), paidProvider = uuid(), expiredProvider = uuid();
+    const failedKey = uuid(), paidKey = uuid(), lateFailureKey = uuid(), a = uuid(), b = uuid();
+    expect((await callback(failedOrder, 'failed', failedProvider, failedKey)).status).toBe(200);
+    expect((await callback(paidOrder, 'settled', paidProvider, paidKey)).status).toBe(200);
+    expect((await callback(paidOrder, 'failed', paidProvider, lateFailureKey)).status).toBe(200);
+    expect((await callback(expiredOrder, 'failed', expiredProvider, a)).status).toBe(200);
+    expect((await callback(expiredOrder, 'settled', expiredProvider, b)).status).toBe(200);
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+      const before = (await client.query('SELECT * FROM payment_records WHERE order_id=ANY($1::uuid[]) ORDER BY id', [[failedOrder, paidOrder, expiredOrder]])).rows;
+      await client.query('ALTER TABLE payment_callback_keys DROP COLUMN callback_status');
+      await client.query(readFileSync(join(__dirname, '../../infra/migrations/011_payment_callback_status.sql'), 'utf8'));
+      const rows = (await client.query('SELECT idempotency_key,callback_status FROM payment_callback_keys WHERE order_id=ANY($1::uuid[])', [[failedOrder, paidOrder, expiredOrder]])).rows;
+      expect(Object.fromEntries(rows.map(row => [row.idempotency_key, row.callback_status]))).toEqual({
+        [failedKey]: 'failed', [paidKey]: 'settled', [lateFailureKey]: null, [a]: null, [b]: null,
+      });
+      const service = new PaymentWebhookService();
+      for (const key of [a, b]) for (const status of ['failed', 'settled'] as const) {
+        await expect(service.processPaymentWebhook({ orderId: expiredOrder, providerTransactionId: expiredProvider, status }, key, client))
+          .rejects.toMatchObject({ code: 'CONFLICT', statusCode: 409 });
+      }
+      expect((await client.query('SELECT * FROM payment_records WHERE order_id=ANY($1::uuid[]) ORDER BY id', [[failedOrder, paidOrder, expiredOrder]])).rows).toEqual(before);
+      await expect(service.processPaymentWebhook({ orderId: paidOrder, providerTransactionId: paidProvider, status: 'settled' }, paidKey, client)).resolves.toMatchObject({ duplicate: true });
+      await expect(service.processPaymentWebhook({ orderId: failedOrder, providerTransactionId: failedProvider, status: 'failed' }, failedKey, client)).resolves.toMatchObject({ duplicate: true });
+      await expect(service.processPaymentWebhook({ orderId: expiredOrder, providerTransactionId: expiredProvider, status: 'settled' }, uuid(), client)).resolves.toMatchObject({
+        order: { status: 'expired' }, paymentStatus: 'settled', duplicate: true, tickets: [],
+      });
+      await client.query('SAVEPOINT invalid_status');
+      await expect(client.query('UPDATE payment_callback_keys SET callback_status=$2 WHERE idempotency_key=$1', [paidKey, 'pending']))
+        .rejects.toMatchObject({ code: '23514' });
+      await client.query('ROLLBACK TO SAVEPOINT invalid_status');
+    } finally { await client.query('ROLLBACK'); client.release(); }
+  });
+
   it('retains correction key B after failed(P,A), settled(P,B) and Redis result loss', async () => {
     const order = await data.order();
     await expire(order);
