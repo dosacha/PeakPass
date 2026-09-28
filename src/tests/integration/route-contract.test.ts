@@ -7,7 +7,7 @@
  *
  * 검증 계층 표기:
  *   - "route-level"           : HTTP inject 경유, middleware 포함
- *   - "Redis unavailable"     : Redis client를 의도적으로 끊은 뒤의 DB fallback
+ *   - "Redis unavailable"     : Redis acquisition에 명시적 장애를 주입한 DB fallback
  *   - "provider transaction"  : Redis 캐시가 아닌 order FOR UPDATE +
  *                               provider_transaction_id partial UNIQUE 검증
  *
@@ -311,6 +311,165 @@ describe('route-level contract: checkout idempotency and settlement webhook', ()
 
   // ── T01 ────────────────────────────────────────────────────────────────
 
+  describe('H1 checkout always validates and replays current PostgreSQL state', () => {
+    async function staleCache(key: string, body: CheckoutResponseBody) {
+      const redis = await ensureRedisOpen();
+      // Actual prior-version Redis response shape, including the old unscoped namespace.
+      for (const cacheKey of [`peakpass:idempotency:checkout:${key}`, `peakpass:idempotency:${key}`]) {
+        await redis.setEx(cacheKey, 60, JSON.stringify({ statusCode: 201, body, storedAt: new Date().toISOString() }));
+      }
+    }
+
+    function retry(fixture: Fixture, key: string, changes: Record<string, unknown> = {}, token: string | null = fixture.token) {
+      return app.inject({
+        method: 'POST', url: '/checkouts',
+        headers: { 'content-type': 'application/json', 'idempotency-key': key,
+          ...(token === null ? {} : { authorization: `Bearer ${token}` }) },
+        payload: { eventId: fixture.eventId, userId: fixture.userId, tierId: fixture.tierId, quantity: 1, ...changes },
+      });
+    }
+
+    it.each([
+      ['no JWT', 'no-jwt', 401],
+      ['another owner', 'owner', 409],
+      ['changed quantity', 'quantity', 409],
+      ['changed event', 'eventId', 409],
+      ['changed reservation', 'reservationId', 409],
+      ['changed tier', 'tierId', 409],
+      ['body user/JWT mismatch', 'mismatch', 403],
+      ['invalid body', 'invalid', 400],
+    ])('rejects %s despite a stale cached success', async (_name, change, status) => {
+      const fixture = await setupEventAndUser(5);
+      const other = await setupEventAndUser(5);
+      const key = uuid();
+      const initial = await postCheckout(fixture, key);
+      expect(initial.statusCode).toBe(201);
+      const body = initial.json() as CheckoutResponseBody;
+      await staleCache(key, body);
+      const changes: Record<string, unknown> = change === 'quantity' ? { quantity: 2 }
+        : change === 'invalid' ? { quantity: 0 }
+        : change === 'owner' || change === 'mismatch' ? { userId: other.userId }
+        : change === 'eventId' ? { eventId: other.eventId }
+        : change === 'tierId' ? { tierId: other.tierId }
+        : change === 'reservationId' ? { reservationId: uuid() } : {};
+      const response = await retry(fixture, key, changes,
+        change === 'no-jwt' ? null : change === 'owner' ? other.token : fixture.token);
+      expect(response.statusCode).toBe(status);
+      expect(response.json()).not.toHaveProperty('order');
+      expect(await countOrdersByIdempotencyKey(key)).toBe(1);
+      expect(await countPendingPaymentRecords(body.order.id)).toBe(1);
+      expect(await getAvailableSeats(fixture.eventId)).toBe(4);
+    });
+
+    it('validates invalid body before entering the DB checkout service', async () => {
+      const fixture = await setupEventAndUser(5);
+      const { CheckoutService } = await import('@/core/services/checkout.service');
+      const checkout = jest.spyOn(CheckoutService.prototype, 'checkout');
+      try {
+        const response = await retry(fixture, uuid(), { quantity: 0 });
+        expect(response.statusCode).toBe(400);
+        expect(checkout).not.toHaveBeenCalled();
+        expect(await getAvailableSeats(fixture.eventId)).toBe(5);
+      } finally { checkout.mockRestore(); }
+    });
+
+    it('a lost response retry preserves order identity and exactly-once effects without writing a checkout response cache', async () => {
+      const fixture = await setupEventAndUser(5);
+      const key = uuid();
+      // Discard the first HTTP result, representing application-level response loss.
+      await postCheckout(fixture, key);
+      const original = await pool.query('SELECT id FROM orders WHERE idempotency_key = $1', [key]);
+      const replay = await retry(fixture, key, { extraClientField: 'ignored by normalized schema' });
+      expect(replay.statusCode).toBe(201);
+      expect(replay.json().order.id).toBe(original.rows[0].id);
+      expect(await countOrdersByIdempotencyKey(key)).toBe(1);
+      expect(await countPendingPaymentRecords(original.rows[0].id)).toBe(1);
+      expect(await getAvailableSeats(fixture.eventId)).toBe(4);
+      const redis = await ensureRedisOpen();
+      expect(await redis.get(`peakpass:idempotency:checkout:${key}`)).toBeNull();
+    });
+
+    it('returns settled PostgreSQL order and tickets despite stale pending cache', async () => {
+      const fixture = await setupEventAndUser(5);
+      const key = uuid();
+      const initial = await postCheckout(fixture, key);
+      expect(initial.statusCode).toBe(201);
+      const pending = initial.json() as CheckoutResponseBody;
+      await staleCache(key, pending);
+      const settlement = await postSettlementWebhook({ orderId: pending.order.id, providerTransactionId: uuid(), status: 'settled' }, uuid());
+      expect(settlement.statusCode).toBe(200);
+      const replay = await postCheckout(fixture, key);
+      expect(replay.statusCode).toBe(201);
+      expect(replay.json().order.id).toBe(pending.order.id);
+      expect(replay.json().order.status).toBe('paid');
+      expect(replay.json().tickets).toHaveLength(1);
+      expect(replay.json().tickets[0].id).toBe(settlement.json().tickets[0].id);
+      expect(await countOrdersByIdempotencyKey(key)).toBe(1);
+      expect(await getAvailableSeats(fixture.eventId)).toBe(4);
+    });
+
+    it('in-flight lock recheck cannot replay a newly arriving stale checkout cache', async () => {
+      const fixture = await setupEventAndUser(5);
+      const key = uuid();
+      const { tryAcquireIdempotencyLock, releaseIdempotencyLock } = await import('@/infra/redis/commands');
+      const token = await tryAcquireIdempotencyLock('checkout', key, 10);
+      expect(token).toBeTruthy();
+      const responsePromise = postCheckout(fixture, key);
+      // Inject stale cache during the real 100ms lock recheck window.
+      await new Promise(resolve => setTimeout(resolve, 25));
+      await staleCache(key, { order: { id: uuid(), status: 'pending', quantity: 1 }, tickets: [] });
+      try {
+        const response = await responsePromise;
+        expect(response.statusCode).toBe(201);
+        expect(await countOrdersByIdempotencyKey(key)).toBe(1);
+        expect(await getAvailableSeats(fixture.eventId)).toBe(4);
+        expect(await countPendingPaymentRecords(response.json().order.id)).toBe(1);
+      } finally { await releaseIdempotencyLock('checkout', key, token!); }
+    });
+
+    it.each([['no JWT', 401], ['body mismatch', 403], ['invalid body', 400]])(
+      'lock contention still rejects %s through route guards', async (scenario, status) => {
+        const fixture = await setupEventAndUser(5);
+        const key = uuid();
+        const { tryAcquireIdempotencyLock, releaseIdempotencyLock } = await import('@/infra/redis/commands');
+        const token = await tryAcquireIdempotencyLock('checkout', key, 10);
+        expect(token).toBeTruthy();
+        await staleCache(key, { order: { id: uuid(), status: 'pending', quantity: 1 }, tickets: [] });
+        try {
+          const response = await retry(fixture, key,
+            scenario === 'body mismatch' ? { userId: uuid() } : scenario === 'invalid body' ? { quantity: 0 } : {},
+            scenario === 'no JWT' ? null : fixture.token);
+          expect(response.statusCode).toBe(status);
+          expect(response.json()).not.toHaveProperty('order');
+          expect(await countOrdersByIdempotencyKey(key)).toBe(0);
+          expect(await getAvailableSeats(fixture.eventId)).toBe(5);
+        } finally { await releaseIdempotencyLock('checkout', key, token!); }
+      });
+
+    it('held Redis lock preserves PostgreSQL fingerprint checks and the winning lock token', async () => {
+      const fixture = await setupEventAndUser(5);
+      const key = uuid();
+      const initial = await postCheckout(fixture, key);
+      expect(initial.statusCode).toBe(201);
+      const body = initial.json() as CheckoutResponseBody;
+      const { tryAcquireIdempotencyLock, releaseIdempotencyLock } = await import('@/infra/redis/commands');
+      const token = await tryAcquireIdempotencyLock('checkout', key, 10);
+      expect(token).toBeTruthy();
+      await staleCache(key, body);
+      try {
+        const responses = await Promise.all([retry(fixture, key), retry(fixture, key, { quantity: 2 })]);
+        expect(responses.map(response => response.statusCode)).toEqual([201, 409]);
+        expect(responses[0].json().order.id).toBe(body.order.id);
+        expect(responses[1].json()).not.toHaveProperty('order');
+        expect(await countOrdersByIdempotencyKey(key)).toBe(1);
+        expect(await countPendingPaymentRecords(body.order.id)).toBe(1);
+        expect(await getAvailableSeats(fixture.eventId)).toBe(4);
+        const redis = await ensureRedisOpen();
+        expect(await redis.get(`peakpass:idempotency:lock:checkout:${key}`)).toBe(token);
+      } finally { await releaseIdempotencyLock('checkout', key, token!); }
+    });
+  });
+
   it(
     'T01 route-level: sequential checkout replay with the same Idempotency-Key converges to one order',
     async () => {
@@ -323,7 +482,7 @@ describe('route-level contract: checkout idempotency and settlement webhook', ()
       expect(firstBody.order.status).toBe('pending');
       expect(firstBody.tickets).toHaveLength(0);
 
-      // 순차 재시도: 현재 구현은 Redis result cache 경로로 동일 201 body를 재생한다.
+      // 순차 재시도는 PostgreSQL의 현재 order/tickets를 반환한다.
       const second = await postCheckout(fixture, idempotencyKey);
       expect(second.statusCode).toBe(201);
       const secondBody = second.json() as CheckoutResponseBody;
@@ -339,7 +498,7 @@ describe('route-level contract: checkout idempotency and settlement webhook', ()
   // ── T02 ────────────────────────────────────────────────────────────────
 
   it(
-    'T02 route-level: concurrent same-key checkouts return only 201 or 409 IDEMPOTENCY_IN_PROGRESS and converge',
+    'T02 route-level: concurrent same-key checkouts replay PostgreSQL and converge with 201',
     async () => {
       const fixture = await setupEventAndUser(5);
       const idempotencyKey = uuid();
@@ -352,13 +511,7 @@ describe('route-level contract: checkout idempotency and settlement webhook', ()
 
       const statuses = responses.map((response) => response.statusCode);
 
-      // 응답 분포(201/201/201, 201/201/409, 201/409/409)는 스케줄링에 따라
-      // 달라질 수 있으므로 특정 분포를 고정하지 않는다.
-      for (const status of statuses) {
-        expect([201, 409]).toContain(status);
-      }
-      expect(statuses.some((status) => status >= 500)).toBe(false);
-      expect(statuses.filter((status) => status === 201).length).toBeGreaterThanOrEqual(1);
+      expect(statuses).toEqual([201, 201, 201]);
 
       const successOrderIds = new Set(
         responses
@@ -367,13 +520,6 @@ describe('route-level contract: checkout idempotency and settlement webhook', ()
       );
       expect(successOrderIds.size).toBe(1);
       const [orderId] = [...successOrderIds];
-
-      for (const response of responses) {
-        if (response.statusCode === 409) {
-          const body = response.json() as { error: { code: string } };
-          expect(body.error.code).toBe('IDEMPOTENCY_IN_PROGRESS');
-        }
-      }
 
       // 모든 요청 완료 후 같은 key 재요청은 201로 최초 order에 수렴해야 한다.
       const followUp = await postCheckout(fixture, idempotencyKey);
@@ -395,11 +541,10 @@ describe('route-level contract: checkout idempotency and settlement webhook', ()
       const fixture = await setupEventAndUser(5);
       const idempotencyKey = uuid();
 
-      const redis = await ensureRedisOpen();
-      // Redis 장애 시뮬레이션: client를 끊으면 이후 모든 명령이 즉시 reject되고,
-      // idempotency lock/result cache/rate limit이 전부 degrade 경로로 빠진다.
-      // (RATE_LIMIT_FAIL_MODE=open이므로 rate limiter가 503으로 가리지 않는다)
-      await redis.disconnect();
+      // Inject acquisition failure: a disconnected client now automatically recovers.
+      // Real container outage/recovery is covered by redis-recovery.test.ts.
+      const unavailable = jest.spyOn(redisModule, 'withRedis')
+        .mockRejectedValue(new Error('Injected Redis outage'));
 
       let responses;
       try {
@@ -409,7 +554,7 @@ describe('route-level contract: checkout idempotency and settlement webhook', ()
           postCheckout(fixture, idempotencyKey),
         ]);
       } finally {
-        await redis.connect();
+        unavailable.mockRestore();
       }
 
       const statuses = responses.map((response) => response.statusCode);
@@ -654,7 +799,7 @@ describe('route-level contract: checkout idempotency and settlement webhook', ()
     );
 
     it(
-      'R02-T03 route-level: same-command checkout replay stays idempotent under command-scoped Redis keys',
+      'R02-T03 route-level: checkout replay stays idempotent without a Redis response cache',
       async () => {
         const fixture = await setupEventAndUser(5);
         const idempotencyKey = uuid();
@@ -670,9 +815,9 @@ describe('route-level contract: checkout idempotency and settlement webhook', ()
         expect(await countOrdersByIdempotencyKey(idempotencyKey)).toBe(1);
         expect(await getAvailableSeats(fixture.eventId)).toBe(4);
 
-        // result cache는 command scope가 포함된 key 형식으로만 저장돼야 한다.
+        // Checkout response replay is owned by PostgreSQL, not Redis.
         const redis = await ensureRedisOpen();
-        expect(await redis.get(`peakpass:idempotency:checkout:${idempotencyKey}`)).not.toBeNull();
+        expect(await redis.get(`peakpass:idempotency:checkout:${idempotencyKey}`)).toBeNull();
         // unscoped 신규 key는 더 이상 생성되면 안 된다.
         expect(await redis.get(`peakpass:idempotency:${idempotencyKey}`)).toBeNull();
       },

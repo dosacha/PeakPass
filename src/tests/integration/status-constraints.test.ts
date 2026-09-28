@@ -34,7 +34,7 @@ const STATUS_DOMAINS = {
   },
   orders: {
     constraint: 'orders_status_allowed_check',
-    allowed: ['pending', 'paid', 'delivered', 'cancelled'],
+    allowed: ['pending', 'paid', 'delivered', 'cancelled', 'expired'],
   },
   tickets: {
     constraint: 'tickets_status_allowed_check',

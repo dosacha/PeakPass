@@ -1,7 +1,7 @@
 import { PoolClient } from 'pg';
 import { v4 as uuid } from 'uuid';
 import { Reservation, CreateReservationInput } from '../models/reservation';
-import { NotFoundError, ValidationError } from '../errors';
+import { ConflictError, NotFoundError, ValidationError } from '../errors';
 import { InventoryService } from './inventory.service';
 import {
   deleteReservationHold,
@@ -76,14 +76,17 @@ export class ReservationService {
     // 점유된 상태로 남고 sweeper가 풀어줄 때까지 다른 사용자의 reservation을 막는다.
     // 단순한 입력 검증이지만 작은 DoS 벡터를 차단하는 의미가 있다.
     //
-    // events.pricing은 event 생성 시 박히고 사실상 immutable이므로 plain SELECT로
-    // 충분하다. FOR UPDATE는 뒤이은 inventory.adjustAvailableSeats가 잡는다.
-    const tierCheckResult = await client.query<{ pricing: Array<{ id: string }> }>(
-      `SELECT pricing::jsonb as "pricing" FROM events WHERE id = $1`,
+    // Lock eligibility and pricing before deducting inventory; NOW() is transaction time.
+    const tierCheckResult = await client.query<{ pricing: Array<{ id: string }>; saleEligible: boolean }>(
+      `SELECT pricing::jsonb as "pricing", status = 'published' AND ends_at > NOW() AS "saleEligible"
+       FROM events WHERE id = $1 FOR UPDATE`,
       [input.eventId],
     );
     if (tierCheckResult.rows.length === 0) {
       throw new NotFoundError('Event', input.eventId);
+    }
+    if (!tierCheckResult.rows[0].saleEligible) {
+      throw new ConflictError('Event is not available for sale');
     }
     const tierExists = tierCheckResult.rows[0].pricing.some(
       (tier) => tier.id === input.tierId,

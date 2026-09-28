@@ -46,19 +46,25 @@ export async function registerEventRoutes(app: FastifyInstance) {
     try {
       const input = CreateEventSchema.parse(request.body);
       const client = await pool.connect();
+      let releaseError: Error | undefined;
 
       try {
         await client.query('BEGIN');
         const event = await eventService.createEvent(input, client);
         await client.query('COMMIT');
-        client.release();
 
         logger.info({ eventId: event.id }, 'Event created');
         return reply.code(201).send(event);
       } catch (err) {
-        await client.query('ROLLBACK');
-        client.release();
+        try {
+          await client.query('ROLLBACK');
+        } catch (rollbackError) {
+          releaseError = rollbackError instanceof Error ? rollbackError : new Error(String(rollbackError));
+          logger.error({ err: rollbackError, requestId: request.id }, 'Failed to roll back event creation');
+        }
         throw err;
+      } finally {
+        client.release(releaseError);
       }
     } catch (err) {
       if (err instanceof ValidationError) {

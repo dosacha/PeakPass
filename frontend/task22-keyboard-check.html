@@ -1,0 +1,81 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<title>Task22 native keyboard check</title>
+<link id="styles" rel="stylesheet">
+<style>
+  body { padding: 20px; }
+  #results { white-space: pre-wrap; margin: 16px 0; }
+  .keyboard-selection button:not(.event-card):not(.tier-card),
+  .keyboard-selection input, .keyboard-selection .step-head,
+  .keyboard-selection .step:nth-child(n+4), .keyboard-selection .flow-side { display: none; }
+</style>
+<h1>Task22 native keyboard check</h1>
+<p>Cases: ?case=toggle, step, selection, log. Click Keyboard start once, then use native Tab/Enter/Space. No key events are simulated.</p>
+<button id="start" type="button">Keyboard start</button>
+<pre id="results">Loading production components…</pre>
+<div id="fixture"></div>
+<button id="verify" type="button">Verify keyboard result</button>
+<iframe id="production" hidden></iframe>
+<script>
+const scenario = new URLSearchParams(location.search).get("case") || "toggle";
+document.getElementById("styles").href = `styles.css?task22=${Date.now()}`;
+const output = document.getElementById("results");
+const fixture = document.getElementById("fixture");
+const counts = { toggle: 0, step: 0, event: 0, tier: 0, requests: 0, disabled: 0, log: 0 };
+let mode = "mock", expanded = true, eventId, tierId;
+document.getElementById("verify").onclick = () => {
+  const expected = { toggle: { toggle: 2 }, step: { step: 2, requests: 2, disabled: 0 }, selection: { event: 2, tier: 2 }, log: { log: 2 } }[scenario];
+  const failures = Object.entries(expected).filter(([key, value]) => counts[key] !== value).map(([key, value]) => `${key}: expected ${value}, got ${counts[key]}`);
+  if (scenario === "toggle" && mode !== "mock") failures.push("toggle did not return to mock");
+  if (scenario === "step" && !expanded) failures.push("step did not reopen");
+  if (scenario === "selection" && (fixture.querySelectorAll(".event-card[aria-pressed=true]").length !== 1 || fixture.querySelectorAll(".tier-card[aria-pressed=true]").length !== 1)) failures.push("selection states not exposed");
+  if (scenario === "log" && fixture.querySelector(".le-body")) failures.push("log did not collapse");
+  output.textContent += `\n${failures.length ? "FAIL: " + failures.join("; ") : "PASS native keyboard " + scenario}`;
+};
+function update() {
+  output.textContent = JSON.stringify({ scenario, counts, mode, expanded, eventId, tierId,
+    focused: document.activeElement?.getAttribute("aria-label") || document.activeElement?.textContent?.trim().slice(0, 80),
+    stepBodyVisible: !!fixture.querySelector(".step-body"), logBodyVisible: !!fixture.querySelector(".le-body"),
+    selectedEvents: fixture.querySelectorAll(".event-card.selected").length,
+    selectedTiers: fixture.querySelectorAll(".tier-card.selected").length
+  }, null, 2);
+}
+document.addEventListener("focusin", update);
+document.addEventListener("click", event => { if (event.target.closest(".le-head")) { counts.log++; update(); } });
+new MutationObserver(update).observe(fixture, { childList: true, subtree: true, attributes: true });
+fetch("index.html", { cache: "no-store" }).then(response => response.text()).then(html => {
+  document.getElementById("production").srcdoc = html.replace(/src="(?!https?:)([^"]+)"/g,
+    (_, path) => `src="${path}?task22=${Date.now()}"`);
+}).catch(error => { output.textContent = error.message; });
+const timer = setInterval(() => {
+  const win = document.getElementById("production").contentWindow;
+  if (!win.DemoFlow || !win.RequestLog) return;
+  clearInterval(timer);
+  const h = win.React.createElement;
+  const root = win.ReactDOM.createRoot(fixture);
+  const events = win.MOCK_EVENTS.slice(0, 2);
+  eventId = events[0].id; tierId = events[0].pricing[0].tierId;
+  const act = (name, change) => { counts[name]++; if (change) change(); render(); };
+  function render() {
+    let view;
+    if (scenario === "toggle") view = h(win.TopBar, { mode, apiBase: "http://localhost", onToggleMock: () => act("toggle", () => { mode = mode === "mock" ? "live" : "mock"; }) });
+    if (scenario === "step") view = h(win.StepCard, { n: 99, title: "Keyboard disclosure", status: "idle", expanded, onToggle: () => act("step", () => { expanded = !expanded; }) },
+      h("button", { type: "button", onClick: () => act("requests") }, "Request once"),
+      h("button", { type: "button", disabled: true, onClick: () => act("disabled") }, "Disabled request"));
+    if (scenario === "selection") view = h("div", { className: "keyboard-selection" }, h(win.DemoFlow, {
+      state: { mode: "mock", events, selectedEventId: eventId, selectedTierId: tierId, userId: win.SEED_USER_ID, quantity: 2,
+        liveSessionUserId: "", liveSessionExpiresAt: "", liveSessionStatus: "idle", liveSessionError: "",
+        reservation: null, order: null, settlement: null, duplicateReplay: null, duplicateSemantic: null, ticketByCode: null, lookupCode: "",
+        stepStatus: { s1: "idle", s2: "idle", s3: "idle", s4: "idle", s5: "idle", s6: "idle", s7: "idle" }, stepTiming: {}, requests: [], activeStep: 1,
+        expandedSteps: { s1: true, s2: true }, checkoutIdemKey: "", settlementIdemKey: "", providerTxnId: "", dupBusy: { A: false, B: false } },
+      actions: { selectEvent: id => act("event", () => { eventId = id; }), selectTier: id => act("tier", () => { tierId = id; }) }
+    }));
+    if (scenario === "log") view = h(win.RequestLog, { requests: [{ method: "GET", url: "/keyboard-check", status: 200, elapsed: 1, request: null, response: { sample: "preserved" } }], onClear: () => act("requests") });
+    root.render(view); update();
+  }
+  render();
+}, 100);
+setTimeout(() => { if (output.textContent === "Loading production components…") { clearInterval(timer); output.textContent = "ERROR: production components failed to load"; } }, 20000);
+</script>
+</html>

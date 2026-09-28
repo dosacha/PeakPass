@@ -29,6 +29,7 @@ function createSettlementResult(orderId: string, userId: string, duplicate: bool
       totalAmount: '50.00',
       status: 'paid' as const,
       idempotencyKey: randomUUID(),
+      paymentDeadlineAt: null,
       createdAt: now,
       updatedAt: now,
       paidAt: now,

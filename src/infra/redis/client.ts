@@ -3,53 +3,100 @@ import { getConfig } from '../config';
 import { getLogger } from '../logger';
 
 let redisClient: RedisClientType | null = null;
+let connecting: Promise<RedisClientType> | null = null;
+let socketAbort: AbortController | null = null;
+let shuttingDown = false;
 
 export async function initRedis(): Promise<RedisClientType> {
-  const config = getConfig();
-  const logger = getLogger();
-
-  if (redisClient) {
+  if (shuttingDown) throw new Error('Redis is shutting down');
+  if (connecting) return connecting;
+  if (redisClient?.isOpen) {
+    if (!redisClient.isReady) throw new Error('Redis unavailable');
     return redisClient;
   }
 
-  redisClient = createClient({
-    socket: {
-      host: config.REDIS_HOST,
-      port: config.REDIS_PORT,
-      reconnectStrategy: (retries: number) => {
-        if (retries > 10) {
-          return new Error('Redis: Max reconnection attempts exceeded');
-        }
-
-        return Math.min(retries * 50, 500);
-      },
+  const config = getConfig();
+  const logger = getLogger();
+  socketAbort?.abort();
+  const abort = new AbortController();
+  socketAbort = abort;
+  const socket = {
+    host: config.REDIS_HOST,
+    port: config.REDIS_PORT,
+    signal: abort.signal,
+    connectTimeout: 1000,
+    reconnectStrategy: (retries: number) => {
+      if (shuttingDown || abort.signal.aborted) return false;
+      if (retries > 10) return new Error('Redis: Max reconnection attempts exceeded');
+      return Math.min(retries * 50, 500);
     },
+  };
+  const client: RedisClientType = createClient({
+    disableOfflineQueue: true,
+    socket,
     password: config.REDIS_PASSWORD || undefined,
   });
+  redisClient = client;
+  client.on('error', (err) => {
+    if (!shuttingDown) logger.error({ err }, 'Redis connection error');
+  });
+  client.on('connect', () => logger.info('Redis connected'));
 
-  redisClient.on('error', (err) => logger.error({ err }, 'Redis connection error'));
-  redisClient.on('connect', () => logger.info('Redis connected'));
-
-  await redisClient.connect();
-  logger.info(`Redis connected to ${config.REDIS_HOST}:${config.REDIS_PORT}`);
-
-  return redisClient;
+  // Bound acquisition, including a TCP peer that accepts but never completes the Redis handshake.
+  const timeout = setTimeout(() => abort.abort(), 5000);
+  connecting = (async () => {
+    try {
+      await client.connect();
+      if (shuttingDown || !client.isReady || abort.signal.aborted) {
+        throw new Error('Redis unavailable');
+      }
+      return client;
+    } catch (err) {
+      abort.abort();
+      if (client.isOpen) await client.disconnect();
+      throw err;
+    } finally {
+      clearTimeout(timeout);
+      connecting = null;
+    }
+  })();
+  return connecting;
 }
 
 export function getRedis(): RedisClientType {
-  if (!redisClient) {
-    throw new Error('Redis not initialized. Call initRedis() first.');
-  }
-
+  if (shuttingDown) throw new Error('Redis is shutting down');
+  if (!redisClient) throw new Error('Redis not initialized. Call initRedis() first.');
   return redisClient;
 }
 
-export async function closeRedis(): Promise<void> {
-  if (redisClient) {
-    await redisClient.quit();
-    getLogger().info('Redis connection closed');
-    redisClient = null;
+export async function getReadyRedis(): Promise<RedisClientType> {
+  const client = getRedis();
+  if (connecting) return connecting;
+  if (!client.isOpen) return initRedis();
+  if (!client.isReady) throw new Error('Redis unavailable');
+  return client;
+}
+
+export async function withRedis<T>(operation: (client: RedisClientType) => Promise<T>): Promise<T> {
+  const client = await getReadyRedis();
+  if (shuttingDown || client !== redisClient) throw new Error('Redis unavailable');
+  const abort = socketAbort;
+  // Retire the stalled socket and flush its real command queue, not just the caller's wait.
+  const timeout = setTimeout(() => abort?.abort(), 5000);
+  try {
+    return await operation(client);
+  } finally {
+    clearTimeout(timeout);
   }
+}
+
+export async function closeRedis(): Promise<void> {
+  shuttingDown = true;
+  // Abort also owns a TCP socket not yet assigned by node-redis's connect loop.
+  socketAbort?.abort();
+  if (redisClient?.isOpen) await redisClient.disconnect();
+  await connecting?.catch(() => undefined);
+  redisClient = null;
 }
 
 /**

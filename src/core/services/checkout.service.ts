@@ -2,6 +2,7 @@ import { PoolClient } from 'pg';
 import { v4 as uuid } from 'uuid';
 import Decimal from 'decimal.js';
 import { Order, CreateOrderInput } from '../models/order';
+import { MAX_MONEY_AMOUNT, UnitPriceSchema } from '../models/money';
 import { Ticket } from '../models/ticket';
 import {
   ValidationError,
@@ -13,6 +14,7 @@ import { InventoryService } from './inventory.service';
 import { OrderService } from './order.service';
 import { TicketService } from './ticket.service';
 import { getLogger } from '@/infra/logger';
+import { getConfig } from '@/infra/config';
 
 export interface CheckoutResult {
   order: Order;
@@ -39,7 +41,10 @@ export class CheckoutService {
   private orderService = new OrderService();
   private ticketService = new TicketService();
 
-  async checkout(input: CreateOrderInput, client: PoolClient): Promise<CheckoutResult> {
+  async checkout(
+    input: CreateOrderInput,
+    client: PoolClient,
+  ): Promise<CheckoutResult | { reservationExpired: true }> {
     // 동일 idempotency_key 동시 진입 race를 차단한다.
     //
     // 문제 시나리오: Redis idempotency lock이 1차 layer지만 Redis 장애 시
@@ -132,15 +137,23 @@ export class CheckoutService {
 
       if (convertResult.rowCount === 0) {
         const reservationCheck = await client.query(
-          `SELECT user_id, event_id, tier_id, quantity, status, expires_at FROM reservations WHERE id = $1`,
+          `SELECT user_id, event_id, tier_id, quantity, status, expires_at <= NOW() AS expired
+           FROM reservations WHERE id = $1 FOR UPDATE`,
           [input.reservationId],
         );
         if (reservationCheck.rows.length === 0) {
           throw new NotFoundError('Reservation', input.reservationId);
         }
         const r = reservationCheck.rows[0];
-        if (r.status !== 'active' || new Date(r.expires_at) <= new Date()) {
-          await this.reservationService.expireReservationWithClient(input.reservationId, client);
+        if (
+          r.user_id === input.userId && r.event_id === input.eventId &&
+          r.tier_id === input.tierId && r.quantity === input.quantity
+        ) {
+          if (r.status === 'active' && r.expired) {
+            await this.reservationService.expireReservationWithClient(input.reservationId, client);
+            // Return normally so cleanup commits; the route maps this outcome to HTTP 409.
+            return { reservationExpired: true };
+          }
           throw new ConflictError('Reservation has expired or is no longer valid');
         }
         this.logger.warn(
@@ -170,10 +183,12 @@ export class CheckoutService {
     const eventResult = await client.query<{
       id: string;
       pricing: Array<{ id: string; price: number }>;
+      saleEligible: boolean;
     }>(
       `SELECT
          id,
-         pricing::jsonb as "pricing"
+         pricing::jsonb as "pricing",
+         status = 'published' AND ends_at > NOW() AS "saleEligible"
        FROM events
        WHERE id = $1
        FOR UPDATE`,
@@ -185,14 +200,25 @@ export class CheckoutService {
     }
 
     const event = eventResult.rows[0];
+    // Existing-order replay and expired-reservation cleanup have already returned.
+    if (!event.saleEligible) {
+      throw new ConflictError('Event is not available for sale');
+    }
 
     const tier = event.pricing.find((candidate) => candidate.id === input.tierId);
     if (!tier) {
       throw new ValidationError(`Pricing tier not found: ${input.tierId}`);
     }
 
-    const unitPrice = new Decimal(tier.price);
+    const price = UnitPriceSchema.safeParse(tier.price);
+    if (!price.success) {
+      throw new ValidationError('Pricing tier price must be between 0.01 and 99999999.99 with at most two decimal places');
+    }
+    const unitPrice = new Decimal(price.data);
     const totalAmount = unitPrice.times(input.quantity);
+    if (totalAmount.gt(MAX_MONEY_AMOUNT)) {
+      throw new ValidationError('Order total exceeds the supported money range');
+    }
 
     this.logger.debug(
       {
@@ -208,13 +234,14 @@ export class CheckoutService {
     const orderResult = await client.query<Order>(
       `INSERT INTO orders (
          id, user_id, event_id, quantity, tier_id, unit_price, total_amount,
-         idempotency_key, reservation_id, status
-       ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, 'pending')
+         idempotency_key, reservation_id, status, payment_deadline_at
+       ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, 'pending', NOW() + $10 * INTERVAL '1 minute')
        RETURNING
          id, user_id as "userId", event_id as "eventId", quantity,
          tier_id as "tierId", unit_price as "unitPrice", total_amount as "totalAmount",
          status, idempotency_key as "idempotencyKey",
          reservation_id as "reservationId",
+         payment_deadline_at as "paymentDeadlineAt",
          created_at as "createdAt", updated_at as "updatedAt"`,
       [
         orderId,
@@ -226,6 +253,7 @@ export class CheckoutService {
         totalAmount.toString(),
         input.idempotencyKey,
         input.reservationId || null,
+        getConfig().ORDER_PAYMENT_WINDOW_MINUTES,
       ],
     );
 

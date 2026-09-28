@@ -12,7 +12,7 @@ const TicketCard = ({ ticket, event }) => {
         <div className="t-title">{event?.name || "Ticket"}</div>
         <div className="t-code">{ticket.ticketNumber}</div>
         <div className="t-meta">
-          {ticket.tier} · {ticket.seat || "자유석"} · {fmtDate(ticket.issuedAt)}
+          {ticket.tier} · {ticket.seat || "자유석"} · {fmtDate(ticket.createdAt)}
         </div>
       </div>
       <div className="t-qr">
@@ -27,25 +27,25 @@ const StepCard = ({ n, title, endpoint, method, status, active, onToggle, expand
   const cls = `step ${status} ${active ? "active" : ""}`;
   return (
     <div className={cls}>
-      <div className="step-head" onClick={onToggle}>
-        <div className="step-num">{status === "done" ? <Icon name="check" size={14}/> : n}</div>
-        <div className="step-title-block">
-          <div className="step-title">{title}</div>
-          <div className="step-meta">
+      <button type="button" className="step-head" onClick={onToggle} aria-expanded={expanded}>
+        <span className="step-num">{status === "done" ? <Icon name="check" size={14}/> : n}</span>
+        <span className="step-title-block">
+          <span className="step-title">{title}</span>
+          <span className="step-meta">
             {endpoint && <span className={`endpoint-chip ${method === "GQL" || method === "GET" ? "read" : "write"}`}>{method} {endpoint}</span>}
             {status === "idle" && <span style={{color:"var(--muted-2)"}}>대기 중</span>}
             {status === "running" && <span style={{color:"var(--blue)"}}>실행 중…</span>}
             {status === "done" && <span style={{color:"var(--green)"}}>완료</span>}
             {status === "error" && <span style={{color:"var(--red)"}}>에러</span>}
-          </div>
-        </div>
-        <div className="step-timing">
-          {timing ? <><div className="t">{timing}ms</div><div>elapsed</div></> : <span style={{color:"var(--muted-2)"}}>—</span>}
-        </div>
-        <div style={{color:"var(--muted)", transform: expanded ? "rotate(90deg)" : "none", transition:"transform 0.15s"}}>
+          </span>
+        </span>
+        <span className="step-timing">
+          {timing ? <><span className="t">{timing}ms</span><span>elapsed</span></> : <span style={{color:"var(--muted-2)"}}>—</span>}
+        </span>
+        <span style={{color:"var(--muted)", transform: expanded ? "rotate(90deg)" : "none", transition:"transform 0.15s"}}>
           <Icon name="chev" size={16}/>
-        </div>
-      </div>
+        </span>
+      </button>
       {expanded && <div className="step-body">{children}</div>}
     </div>
   );
@@ -66,6 +66,8 @@ const DemoFlow = ({ state, actions }) => {
   const selectedTier = selectedEvent?.pricing?.find(p => p.tierId === selectedTierId);
   const orderStatus = order?.order?.status;
   const paymentStatus = settlement?.paymentStatus || settlement?.order?.paymentStatus;
+  const settlementOrderStatus = String(settlement?.order?.status || "—").toUpperCase();
+  const needsReconciliation = settlementOrderStatus === "EXPIRED" && String(paymentStatus).toUpperCase() === "SETTLED";
   const tickets = settlement?.tickets || order?.tickets || [];
   const isLiveDemo = mode === "live";
   const liveSessionReady = !isLiveDemo || !!liveSessionUserId;
@@ -141,17 +143,18 @@ const DemoFlow = ({ state, actions }) => {
                       const ratio = total > 0 ? available / total : 0;
                       const cls = ratio < 0.1 ? "crit" : ratio < 0.3 ? "low" : "";
                       return (
-                        <div key={ev.id}
+                        <button type="button" key={ev.id}
                              className={`event-card ${selectedEventId === ev.id ? "selected" : ""}`}
+                             aria-pressed={selectedEventId === ev.id}
                              onClick={() => actions.selectEvent(ev.id)}>
-                          <div className="event-date">{ev?.startsAt ? fmtDate(ev.startsAt) : "—"}</div>
-                          <div className="event-title">{ev?.name || "(이름 없음)"}</div>
-                          <div className="event-meta">
+                          <span className="event-date">{ev?.startsAt ? fmtDate(ev.startsAt) : "—"}</span>
+                          <span className="event-title">{ev?.name || "(이름 없음)"}</span>
+                          <span className="event-meta">
                             <span>{available.toLocaleString()} / {total.toLocaleString()} 좌석</span>
                             <span>{pricingCount} tiers</span>
-                          </div>
-                          <div className="capacity-bar"><div className={`fill ${cls}`} style={{width: `${ratio * 100}%`}}/></div>
-                        </div>
+                          </span>
+                          <span className="capacity-bar"><span className={`fill ${cls}`} style={{width: `${ratio * 100}%`}}/></span>
+                        </button>
                       );
                     })}
                   </div>
@@ -184,13 +187,14 @@ const DemoFlow = ({ state, actions }) => {
                   <div className="field-label">Pricing Tier</div>
                   <div className="tier-grid">
                     {(selectedEvent.pricing || []).map(p => (
-                      <div key={p.tierId}
+                      <button type="button" key={p.tierId}
                            className={`tier-card ${selectedTierId === p.tierId ? "selected" : ""}`}
+                           aria-pressed={selectedTierId === p.tierId}
                            onClick={() => actions.selectTier(p.tierId)}>
-                        <div className="tier-name">{p?.name || "(no name)"}</div>
-                        <div className="tier-price">{fmtKRW(p?.price)}</div>
-                        <div className="tier-sub">정원 {(Number(p?.seats) || 0).toLocaleString()}석</div>
-                      </div>
+                        <span className="tier-name">{p?.name || "(no name)"}</span>
+                        <span className="tier-price">{fmtKRW(p?.price)}</span>
+                        <span className="tier-sub">정원 {(Number(p?.seats) || 0).toLocaleString()}석</span>
+                      </button>
                     ))}
                   </div>
                 </div>
@@ -388,11 +392,11 @@ const DemoFlow = ({ state, actions }) => {
             </div>
             {settlement && (
               <>
-                <div className="result-banner paid">
+                <div className={`result-banner ${settlementOrderStatus === "PAID" ? "paid" : "pending"}`}>
                   <div className="rb-icon"><Icon name="check" size={16}/></div>
                   <div>
-                    <div className="rb-title">order: <span style={{color:"#206a41"}}>PAID</span> · payment: <span style={{color:"#206a41"}}>SETTLED</span> · ticket: <span style={{color:"#206a41"}}>ISSUED</span></div>
-                    <div className="rb-sub">settlement 이후에만 티켓이 발급됩니다. 각 티켓은 UNIQUE(order_id, seat)로 보호.</div>
+                    <div className="rb-title">order: <span>{settlementOrderStatus}</span> · payment: <span>{String(paymentStatus || "—").toUpperCase()}</span> · ticket: <span>{tickets.length > 0 ? "ISSUED" : "NONE"}</span></div>
+                    <div className="rb-sub">{needsReconciliation ? "만료된 주문의 결제가 확인되었습니다. 확인·환불 조치 필요." : tickets.length > 0 ? "결제 확인 후 발급된 티켓입니다." : "발급된 티켓이 없습니다."}</div>
                   </div>
                   <div className="rb-stat">
                     <div className="stat"><div className="n" style={{color:"var(--green)"}}>{tickets.length}</div><div className="l">tickets</div></div>
@@ -649,7 +653,7 @@ const RequestLog = ({ requests, onClear }) => {
           <div className="log-empty">아직 호출 없음 — 위 Step을 실행하면 여기 기록됩니다.</div>
         ) : requests.map((r, i) => (
           <div key={i} className="log-entry">
-            <div className="le-head" onClick={() => toggle(i)}>
+            <button type="button" className="le-head" onClick={() => toggle(i)} aria-expanded={openIdx.has(i)}>
               <span className={`method ${r.method}`}>{r.method === "GQL" ? "GQL" : r.method}</span>
               <span style={{fontFamily:"var(--font-mono)", fontSize:11, color:"var(--muted)"}}>#{String(i+1).padStart(2,"0")}</span>
               <span className="url">{r.url}{r.idemKey ? ` · Idem: ${fmtShort(r.idemKey, 10)}` : ""}</span>
@@ -658,7 +662,7 @@ const RequestLog = ({ requests, onClear }) => {
               <span className="chev" style={{transform: openIdx.has(i) ? "rotate(180deg)" : "none", transition:"transform 0.15s"}}>
                 <Icon name="chev-d" size={12}/>
               </span>
-            </div>
+            </button>
             {openIdx.has(i) && (
               <div className="le-body">
                 <div className="lb-col">

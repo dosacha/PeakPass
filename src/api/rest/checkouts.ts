@@ -4,6 +4,7 @@ import { CheckoutService } from '@/core/services/checkout.service';
 import { OrderService } from '@/core/services/order.service';
 import { TicketService } from '@/core/services/ticket.service';
 import { CreateOrderSchema } from '@/core/models/order';
+import { ConflictError } from '@/core/errors';
 import { getConfig } from '@/infra/config';
 import { getLogger } from '@/infra/logger';
 import {
@@ -11,7 +12,6 @@ import {
   invalidateEventCache,
   releaseIdempotencyLock,
 } from '@/infra/redis/commands';
-import { storeIdempotencyResult } from '@/api/middleware/idempotency';
 import { assertBodyUserMatchesAuth } from '@/api/middleware/auth';
 
 /**
@@ -63,8 +63,9 @@ export async function registerCheckoutRoutes(app: FastifyInstance) {
       }
 
       await invalidateEventCache(input.eventId);
-      if (request.idempotencyScope) {
-        await storeIdempotencyResult(orderResult, 201, request.idempotencyScope, idempotencyKey);
+
+      if ('reservationExpired' in orderResult) {
+        throw new ConflictError('Reservation has expired or is no longer valid');
       }
 
       logger.info(

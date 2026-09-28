@@ -29,13 +29,15 @@ window.highlightJson = (obj) => {
 
 window.fmtDate = (iso) => {
   try {
+    if (iso == null || iso === "") return "—";
     const d = new Date(iso);
+    if (Number.isNaN(d.getTime())) return "—";
     const mm = String(d.getMonth() + 1).padStart(2, "0");
     const dd = String(d.getDate()).padStart(2, "0");
     const hh = String(d.getHours()).padStart(2, "0");
     const mi = String(d.getMinutes()).padStart(2, "0");
     return `${d.getFullYear()}.${mm}.${dd} ${hh}:${mi}`;
-  } catch { return iso; }
+  } catch { return "—"; }
 };
 
 window.fmtKRW = (n) => {

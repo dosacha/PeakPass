@@ -1,5 +1,6 @@
 import { ApolloServer } from '@apollo/server';
 import { FastifyInstance } from 'fastify';
+import { z } from 'zod';
 import { graphqlTypeDefs } from './types';
 import { resolvers } from './resolvers';
 import { clearGraphQLContext, createGraphQLContext, GraphQLContext } from './loaders';
@@ -9,10 +10,11 @@ import { getLogger } from '@/infra/logger';
 
 const logger = getLogger();
 
-type GraphQLRequestBody = {
-  query: string;
-  variables?: Record<string, unknown>;
-};
+const graphQLRequestSchema = z.object({
+  query: z.string().refine((query) => query.trim().length > 0, 'Query must not be blank'),
+  variables: z.record(z.unknown()).nullish(),
+  operationName: z.string().nullish(),
+});
 
 export async function createApolloServer(): Promise<ApolloServer<GraphQLContext>> {
   const config = getConfig();
@@ -38,8 +40,8 @@ export async function registerGraphQLRoute(
   fastify: FastifyInstance,
   apollo: ApolloServer<GraphQLContext>,
 ): Promise<void> {
-  fastify.post<{ Body: GraphQLRequestBody }>('/graphql', async (request, reply) => {
-    const { query, variables } = request.body;
+  fastify.post<{ Body: unknown }>('/graphql', async (request, reply) => {
+    const { query, variables, operationName } = graphQLRequestSchema.parse(request.body);
     const context = createGraphQLContext((request as { user?: { id?: string } }).user?.id);
 
     try {
@@ -48,7 +50,8 @@ export async function registerGraphQLRoute(
       const result = await apollo.executeOperation(
         {
           query,
-          variables,
+          variables: variables ?? undefined,
+          operationName: operationName ?? undefined,
         },
         {
           contextValue: context,
@@ -56,7 +59,7 @@ export async function registerGraphQLRoute(
       );
 
       if (result.body.kind === 'single') {
-        return reply.code(result.body.singleResult.errors ? 400 : 200).send(result.body.singleResult);
+        return reply.code(result.http.status ?? 200).send(result.body.singleResult);
       }
 
       logger.error({ result }, 'GraphQL response streaming not supported');

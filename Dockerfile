@@ -26,15 +26,15 @@ COPY --from=builder --chown=nodejs:nodejs /app/dist ./dist
 COPY --from=builder --chown=nodejs:nodejs /app/node_modules ./node_modules
 COPY --from=builder --chown=nodejs:nodejs /app/package*.json ./
 
-# 스크립트 복사
-COPY --chown=nodejs:nodejs src/infra/migrations ./migrations
+# 컴파일된 실행기가 자기 디렉터리에서 SQL을 찾는다.
+COPY --chown=nodejs:nodejs src/infra/migrations/*.sql ./dist/infra/migrations/
 
 USER nodejs
 
 EXPOSE 3000
 
 HEALTHCHECK --interval=10s --timeout=3s --start-period=5s --retries=3 \
-  CMD node -e "require('http').get('http://localhost:3000/health', (r) => {if (r.statusCode !== 200) throw new Error(r.statusCode)})"
+  CMD node -e "require('http').get('http://127.0.0.1:3000/health', (r) => {if (r.statusCode !== 200) throw new Error(r.statusCode)})"
 
 # dumb-init 사용
 ENTRYPOINT ["dumb-init", "--"]

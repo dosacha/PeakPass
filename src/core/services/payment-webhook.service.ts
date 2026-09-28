@@ -31,6 +31,7 @@ type PaymentTransition =
   | { kind: 'fail' };
 
 type WebhookOutcome =
+  | { kind: 'expired'; order: Order; paymentStatus: string; duplicate: boolean }
   | { kind: 'idempotent_settled'; order: Order; tickets: Ticket[] }
   | { kind: 'idempotent_failed'; order: Order }
   | { kind: 'newly_settled'; order: Order; tickets: Ticket[] }
@@ -57,11 +58,31 @@ export class PaymentWebhookService {
       throw new NotFoundError('Order', input.orderId);
     }
 
+    await this.reserveCallbackKey(order.id, input.providerTransactionId, input.status, idempotencyKey, client);
+
     const transition: PaymentTransition =
       input.status === 'settled' ? { kind: 'settle' } : { kind: 'fail' };
     const outcome = await this.applyTransition(order, transition, input, idempotencyKey, client);
 
     return this.mapOutcomeToResponse(outcome);
+  }
+
+  private async reserveCallbackKey(orderId: string, providerTransactionId: string, status: PaymentWebhookInput['status'], idempotencyKey: string, client: PoolClient): Promise<void> {
+    // Reserve every accepted callback, including early terminal replays and
+    // failure-to-success corrections. Rejected transitions roll this back too.
+    const inserted = await client.query(`INSERT INTO payment_callback_keys (idempotency_key, order_id, provider_transaction_id, callback_status)
+      VALUES ($1, $2, $3, $4) ON CONFLICT (idempotency_key) DO NOTHING RETURNING idempotency_key`,
+    [idempotencyKey, orderId, providerTransactionId, status]);
+    if (inserted.rowCount) return;
+    const result = await client.query<{ order_id: string; provider_transaction_id: string; callback_status: string | null }>(
+      `SELECT order_id, provider_transaction_id, callback_status FROM payment_callback_keys WHERE idempotency_key=$1`,
+      [idempotencyKey],
+    );
+    const existing = result.rows[0];
+    // NULL is an unverifiable legacy request, not permission to bind a new status on replay.
+    if (!existing || existing.order_id !== orderId || existing.provider_transaction_id !== providerTransactionId || existing.callback_status !== status) {
+      throw new ConflictError('Idempotency key already used for a different payment callback');
+    }
   }
 
   private async applyTransition(
@@ -71,6 +92,12 @@ export class PaymentWebhookService {
     idempotencyKey: string,
     client: PoolClient,
   ): Promise<WebhookOutcome> {
+    if (order.status === 'expired') {
+      // Provider success is a durable financial fact, even when seats have already been returned.
+      const record = await this.insertPaymentRecord(order.id, input.status,
+        input.providerTransactionId, idempotencyKey, client, input.status === 'settled');
+      return { kind: 'expired', order, paymentStatus: record.status, duplicate: !record.changed };
+    }
     if (transition.kind === 'settle') {
       return this.handleSettle(order, input, idempotencyKey, client);
     }
@@ -154,6 +181,8 @@ export class PaymentWebhookService {
     outcome: WebhookOutcome,
   ): CheckoutResult & { paymentStatus: string; duplicate: boolean } {
     switch (outcome.kind) {
+      case 'expired':
+        return { order: outcome.order, tickets: [], paymentStatus: outcome.paymentStatus, duplicate: outcome.duplicate };
       case 'idempotent_settled':
         return {
           order: outcome.order,
@@ -210,6 +239,7 @@ export class PaymentWebhookService {
         id, user_id as "userId", event_id as "eventId", quantity,
         tier_id as "tierId", unit_price as "unitPrice", total_amount as "totalAmount",
         status, idempotency_key as "idempotencyKey",
+        payment_deadline_at as "paymentDeadlineAt",
         created_at as "createdAt", updated_at as "updatedAt", paid_at as "paidAt"
       `,
       [orderId],
@@ -238,6 +268,7 @@ export class PaymentWebhookService {
         tier_id as "tierId", unit_price as "unitPrice", total_amount as "totalAmount",
         status, idempotency_key as "idempotencyKey",
         reservation_id as "reservationId",
+        payment_deadline_at as "paymentDeadlineAt",
         created_at as "createdAt", updated_at as "updatedAt", paid_at as "paidAt"
       `,
       [orderId],
@@ -296,10 +327,9 @@ export class PaymentWebhookService {
    * payment_records insert with provider_transaction_id 충돌 검사.
    *
    * 동작:
-   *   1. INSERT를 시도하되 provider_transaction_id partial unique index에 걸리면
-   *      ON CONFLICT DO NOTHING으로 silent skip
-   *   2. 같은 트랜잭션에서 동일 provider_transaction_id를 가진 기존 행을 조회
-   *   3. 기존 행이 같은 order에 속하면 OK (duplicate webhook), 다른 order면 ConflictError
+   * Same-provider duplicates retain their successful fact; late expired success upgrades failure
+   * and marks reconciliation required. Cross-order provider identity reuse remains a conflict.
+   * The conflict lookup is a separate statement so READ COMMITTED sees a concurrent insert.
    *
    * partial index의 WHERE provider_transaction_id IS NOT NULL은 "checkout 시점에
    * provider_transaction_id 없이 INSERT된 pending record"는 unique 제약에서 제외하기
@@ -311,45 +341,41 @@ export class PaymentWebhookService {
     providerTransactionId: string,
     idempotencyKey: string,
     client: PoolClient,
-  ): Promise<{ inserted: boolean; conflictingOrderId: string | null }> {
+    reconciliationRequired = false,
+  ): Promise<{ changed: boolean; status: string }> {
     const result = await client.query<{
       id: string;
       orderId: string;
-      inserted: boolean;
+      status: string;
+      reconciliationRequired: boolean;
     }>(
       `
-      WITH attempted AS (
         INSERT INTO payment_records (
-          id, order_id, status, provider_transaction_id, idempotency_key, webhook_received_at
+          id, order_id, status, provider_transaction_id, idempotency_key, webhook_received_at, reconciliation_required
         )
-        VALUES ($1, $2, $3, $4, $5, NOW())
+        VALUES ($1, $2, $3, $4, $5, NOW(), $6)
         ON CONFLICT (provider_transaction_id) WHERE provider_transaction_id IS NOT NULL DO NOTHING
-        RETURNING id, order_id as "orderId"
-      )
-      SELECT a.id, a."orderId", true as inserted
-      FROM attempted a
-      UNION ALL
-      SELECT pr.id, pr.order_id as "orderId", false as inserted
-      FROM payment_records pr
-      WHERE pr.provider_transaction_id = $4
-        AND NOT EXISTS (SELECT 1 FROM attempted)
+        RETURNING id, order_id as "orderId", status, reconciliation_required as "reconciliationRequired"
       `,
-      [uuid(), orderId, status, providerTransactionId, idempotencyKey],
+      [uuid(), orderId, status, providerTransactionId, idempotencyKey, reconciliationRequired],
     );
-    const row = result.rows[0];
+    if (result.rows[0]) return { changed: true, status: result.rows[0].status };
+    const existing = await client.query<{ id: string; orderId: string; status: string; reconciliationRequired: boolean }>(
+      `SELECT id, order_id as "orderId", status, reconciliation_required as "reconciliationRequired"
+       FROM payment_records WHERE provider_transaction_id=$1`, [providerTransactionId],
+    );
+    const row = existing.rows[0];
     if (!row) {
       throw new Error('insertPaymentRecord: no row returned');
     }
 
-    if (row.inserted || row.orderId === orderId) {
-      if (!row.inserted) {
-        this.logger.warn(
-          { orderId, providerTransactionId },
-          'Duplicate payment record (same order) ignored',
-        );
+    if (row.orderId === orderId) {
+      if (reconciliationRequired && (row.status !== 'settled' || !row.reconciliationRequired)) {
+        await client.query(`UPDATE payment_records SET status='settled', reconciliation_required=true,
+          webhook_received_at=NOW() WHERE id=$1`, [row.id]);
+        return { changed: true, status: 'settled' };
       }
-
-      return { inserted: row.inserted, conflictingOrderId: null };
+      return { changed: false, status: row.status };
     }
 
     this.logger.error(

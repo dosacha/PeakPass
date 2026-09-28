@@ -212,6 +212,36 @@ curl http://localhost:3000/health
 curl http://localhost:3000/ready
 ```
 
+### 운영 이미지 마이그레이션
+
+운영 이미지에서는 앱 시작 전에 같은 이미지로 마이그레이션을 실행합니다.
+빌드 컨텍스트 밖의 `../production.env`에 DB/Redis 연결 설정과 운영용
+`JWT_SECRET`, `API_KEY`, `WEBHOOK_SIGNING_SECRET`을 제공하세요.
+
+```bash
+docker build -t peakpass:latest .
+docker run --rm --env-file ../production.env --env NODE_ENV=production peakpass:latest node dist/infra/migrations/runner.js up
+docker run --rm --env-file ../production.env --env NODE_ENV=production -p 3000:3000 peakpass:latest
+```
+
+SQL 파일은 컴파일된 실행기 옆에 포함됩니다. 이미 적용한 마이그레이션은
+재실행 시 건너뜁니다. `down`은 아직 구현되지 않았으므로 롤백 명령으로
+사용하지 마세요. 개발 소스의 `npm run migrate:up`은 기존대로 사용합니다.
+
+CI는 전용 빈 DB에서 운영 이미지의 001–007 적용, 재실행 이력 불변,
+`/ready`, 서명된 인증 요청을 확인합니다. 같은 검증은 DB/Redis 환경 변수를
+설정한 뒤 실행할 수 있습니다. 이 명령은 기존 테이블을 삭제하지 않으며
+이미 마이그레이션을 적용한 DB를 거부합니다.
+
+```bash
+node .github/scripts/production-image-check.mjs peakpass:latest
+```
+
+호스트의 DB/Redis에 연결하는 Docker Desktop 환경에서는
+`IMAGE_DB_HOST=host.docker.internal`, `IMAGE_REDIS_HOST=host.docker.internal`을
+설정합니다. Linux에서 호스트 네트워크를 사용하면 `IMAGE_NETWORK=host`를
+설정합니다.
+
 ## 🎬 데모 시나리오
 
 아래 명령들은 로컬(`http://localhost:3000`)을 기준으로 작성되어 있습니다. **`http://localhost:3000`을 `https://peak-pass.com`으로 바꾸면 라이브 API에 그대로 적용**할 수 있습니다.

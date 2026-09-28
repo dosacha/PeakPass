@@ -5,8 +5,11 @@ import { initRedis, closeRedis } from '@/infra/redis/client';
 import { createApp } from '@/api/app';
 import { startReservationSweeper, stopReservationSweeper } from '@/infra/cron/reservation-sweeper';
 
+import { startOrderSweeper } from '@/infra/cron/order-sweeper';
+
 let app: Awaited<ReturnType<typeof createApp>> | null = null;
 let sweeperHandle: NodeJS.Timeout | null = null;
+let orderSweeper: ReturnType<typeof startOrderSweeper> | null = null;
 let shuttingDown = false;
 
 async function gracefulShutdown(signal: string) {
@@ -15,6 +18,8 @@ async function gracefulShutdown(signal: string) {
   }
 
   shuttingDown = true;
+  const redisClosed = Promise.allSettled([closeRedis()]);
+  const ordersStopped = orderSweeper?.stop();
 
   const logger = getLogger() || console;
   logger.info(`${signal} 수신, 종료 절차 시작`);
@@ -30,10 +35,12 @@ async function gracefulShutdown(signal: string) {
       logger.info('HTTP 서버 종료');
     }
 
+    await ordersStopped;
     await closePostgresPool();
     logger.info('PostgreSQL 연결 종료');
 
-    await closeRedis();
+    const [redisResult] = await redisClosed;
+    if (redisResult.status === 'rejected') throw redisResult.reason;
     logger.info('Redis 연결 종료');
 
     logger.info('종료 절차 완료');
@@ -63,15 +70,11 @@ async function main() {
 
     app = await createApp();
 
-    process.once('SIGTERM', () => void gracefulShutdown('SIGTERM'));
-    process.once('SIGINT', () => void gracefulShutdown('SIGINT'));
+    process.on('SIGTERM', () => void gracefulShutdown('SIGTERM'));
+    process.on('SIGINT', () => void gracefulShutdown('SIGINT'));
 
-    // sweeper는 HTTP listen 직전에 시작한다.
-    // - DB pool은 위에서 이미 초기화됨
-    // - listen 실패해도 catch 블록에서 process.exit 전에
-    //   pool/redis가 closeRedis/closePostgresPool로 정리됨
-    //   (unref 처리된 sweeper는 process exit과 함께 자동 종료)
     sweeperHandle = startReservationSweeper();
+    orderSweeper = startOrderSweeper();
 
     await app.listen({ port: config.PORT, host: '0.0.0.0' });
 
@@ -82,12 +85,12 @@ async function main() {
     const logger = getLogger() || console;
     logger.error({ err }, '애플리케이션 시작 실패');
 
-    await Promise.allSettled([
-      app ? app.close() : Promise.resolve(),
-      closePostgresPool(),
-      closeRedis(),
-    ]);
-
+    // Fence Redis and scheduling immediately; finish the active order transaction before closing its pool.
+    const redisClosed = Promise.allSettled([closeRedis()]);
+    const ordersStopped = orderSweeper?.stop();
+    if (sweeperHandle) stopReservationSweeper(sweeperHandle);
+    await Promise.allSettled([ordersStopped, app ? app.close() : Promise.resolve()]);
+    await Promise.allSettled([closePostgresPool(), redisClosed]);
     process.exit(1);
   }
 }

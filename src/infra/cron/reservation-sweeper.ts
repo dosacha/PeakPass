@@ -47,7 +47,7 @@ export function stopReservationSweeper(handle: NodeJS.Timeout): void {
 }
 
 /**
- * 만료된 reservation을 정리하고 회수한 좌석 수를 반환한다.
+ * 만료된 reservation을 정리하고 성공한 만료 처리 호출 수를 반환한다.
  *
  * 한 iteration에서 처리하는 reservation 개수를 maxPerSweep로 상한 두어
  * 한 사이클이 너무 길어지지 않도록 제어한다. 모든 만료를 한 번에 처리할 필요는 없고
@@ -58,35 +58,30 @@ export function stopReservationSweeper(handle: NodeJS.Timeout): void {
  */
 export async function sweepExpiredReservations(maxPerSweep = MAX_PER_SWEEP): Promise<number> {
   const pool = getPostgresPool();
-  const client = await pool.connect();
   const reservationService = new ReservationService();
 
-  try {
-    const result = await client.query<{ id: string }>(
-      `SELECT id FROM reservations
+  const result = await pool.query<{ id: string }>(
+    `SELECT id FROM reservations
        WHERE status = 'active' AND expires_at <= NOW()
        ORDER BY expires_at ASC
        LIMIT $1`,
-      [maxPerSweep],
-    );
+    [maxPerSweep],
+  );
 
-    if (result.rows.length === 0) {
-      return 0;
-    }
-
-    let expiredCount = 0;
-    for (const row of result.rows) {
-      try {
-        await reservationService.expireReservation(row.id);
-        expiredCount += 1;
-      } catch (err) {
-        // 한 reservation 실패가 다른 expire를 막지 않게 개별 try/catch.
-        logger.warn({ err, reservationId: row.id }, 'Failed to expire reservation in sweeper');
-      }
-    }
-
-    return expiredCount;
-  } finally {
-    client.release();
+  if (result.rows.length === 0) {
+    return 0;
   }
+
+  let expiredCount = 0;
+  for (const row of result.rows) {
+    try {
+      await reservationService.expireReservation(row.id);
+      expiredCount += 1;
+    } catch (err) {
+      // 한 reservation 실패가 다른 expire를 막지 않게 개별 try/catch.
+      logger.warn({ err, reservationId: row.id }, 'Failed to expire reservation in sweeper');
+    }
+  }
+
+  return expiredCount;
 }

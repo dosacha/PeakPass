@@ -34,7 +34,7 @@ const TopBar = ({ mode, onToggleMock, apiBase }) => (
     </div>
     <div className="topbar-right">
       <span style={{color:"#8aa2bd"}}>mock mode</span>
-      <div className={`switch ${mode === "mock" ? "on" : ""}`} onClick={onToggleMock} role="button" aria-label="toggle mock"/>
+      <button type="button" className={`switch ${mode === "mock" ? "on" : ""}`} onClick={onToggleMock} aria-label="toggle mock" aria-pressed={mode === "mock"}/>
       <span className={`mode-badge ${mode}`}>
         <span className="pulse"/>
         {mode === "live" ? "LIVE API" : mode === "mock" ? "MOCK MODE" : "OFFLINE"}
@@ -224,24 +224,24 @@ const ConnectionPanel = ({ apiBase, setApiBase, mode, setMode, health, ready, on
       <div className="check-card">
         <div className="card-head">
           <div className="card-title">GET /ready</div>
-          <span className={`status-pill ${ready?.ok ? "ok" : ready?.err ? "err" : "idle"}`}>
-            <span className="dot"/>{ready?.ok ? "READY" : ready?.err ? "NOT READY" : "idle"}
+          <span className={`status-pill ${ready ? ready.ok ? "ok" : "err" : "idle"}`}>
+            <span className="dot"/>{ready ? ready.httpStatus === 0 ? "NETWORK ERROR" : `${ready.httpStatus} ${ready.ok ? "READY" : "NOT READY"}` : "idle"}
           </span>
         </div>
         {ready ? (
-          <>
+          ready.httpStatus === 0 ? <div className="field-hint">{ready.error || "Network error"}</div> : <>
             <div className="metric-row">
-              <span className="key">postgres</span>
-              <span className={`status-pill ${ready.postgres === "ok" ? "ok" : "err"}`}><span className="dot"/>{ready.postgres}</span>
+              <span className="key">status</span>
+              <span className="val">{ready.status || "—"}</span>
             </div>
-            <div className="metric-row">
-              <span className="key">redis</span>
-              <span className={`status-pill ${ready.redis === "ok" ? "ok" : "err"}`}><span className="dot"/>{ready.redis}</span>
-            </div>
-            <div className="metric-row">
-              <span className="key">latency</span>
-              <span className="val">pg {ready.pgLatency}ms · redis {ready.redisLatency}ms</span>
-            </div>
+            {["postgres", "redis"].map(dependency => (
+              <div className="metric-row" key={dependency}>
+                <span className="key">{dependency}</span>
+                <span className={`status-pill ${ready.checks?.[dependency] === true ? "ok" : ready.checks?.[dependency] === false ? "err" : "idle"}`}>
+                  <span className="dot"/>{ready.checks?.[dependency] === true ? "ok" : ready.checks?.[dependency] === false ? "error" : "—"}
+                </span>
+              </div>
+            ))}
           </>
         ) : (
           <div className="field-hint">postgres/redis 각각의 연결을 분리해서 확인합니다.</div>

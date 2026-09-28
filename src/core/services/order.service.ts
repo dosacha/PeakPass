@@ -20,6 +20,7 @@ export class OrderService {
         tier_id as "tierId", unit_price as "unitPrice", total_amount as "totalAmount",
         status, idempotency_key as "idempotencyKey",
         reservation_id as "reservationId",
+        payment_deadline_at as "paymentDeadlineAt",
         created_at as "createdAt", updated_at as "updatedAt", paid_at as "paidAt"
       FROM orders WHERE id = $1
       `,
@@ -41,6 +42,7 @@ export class OrderService {
         tier_id as "tierId", unit_price as "unitPrice", total_amount as "totalAmount",
         status, idempotency_key as "idempotencyKey",
         reservation_id as "reservationId",
+        payment_deadline_at as "paymentDeadlineAt",
         created_at as "createdAt", updated_at as "updatedAt", paid_at as "paidAt"
       FROM orders
       WHERE id = $1
@@ -70,6 +72,7 @@ export class OrderService {
         tier_id as "tierId", unit_price as "unitPrice", total_amount as "totalAmount",
         status, idempotency_key as "idempotencyKey",
         reservation_id as "reservationId",
+        payment_deadline_at as "paymentDeadlineAt",
         created_at as "createdAt", updated_at as "updatedAt", paid_at as "paidAt"
       FROM orders WHERE idempotency_key = $1
       `,
@@ -103,6 +106,7 @@ export class OrderService {
         o.status,
         o.idempotency_key as "idempotencyKey",
         o.reservation_id as "reservationId",
+        o.payment_deadline_at as "paymentDeadlineAt",
         COALESCE(pr.status, 'pending') as "paymentStatus",
         o.created_at as "createdAt",
         o.updated_at as "updatedAt",

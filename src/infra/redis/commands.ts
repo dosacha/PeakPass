@@ -1,5 +1,5 @@
 import { randomUUID } from 'crypto';
-import { getRedis, redisKeys, IdempotencyScope } from './client';
+import { withRedis, redisKeys, IdempotencyScope } from './client';
 import { getLogger } from '../logger';
 
 export type { IdempotencyScope } from './client';
@@ -44,11 +44,10 @@ export async function setReservationHold(
   data: Record<string, any>,
   ttlSeconds: number = REDIS_TTL.RESERVATION_HOLD,
 ): Promise<void> {
-  const redis = getRedis();
   const key = redisKeys.reservation(reservationId);
 
   try {
-    await redis.setEx(key, ttlSeconds, JSON.stringify(data));
+    await withRedis((redis) => redis.setEx(key, ttlSeconds, JSON.stringify(data)));
     logger.debug({ reservationId, ttlSeconds }, 'Reservation hold stored in Redis');
   } catch (err) {
     logger.warn({ err }, 'Failed to set reservation hold in Redis (non-critical)');
@@ -63,11 +62,10 @@ export async function setReservationHold(
 export async function getReservationHold(
   reservationId: string,
 ): Promise<Record<string, any> | null> {
-  const redis = getRedis();
   const key = redisKeys.reservation(reservationId);
 
   try {
-    const data = await redis.get(key);
+    const data = await withRedis((redis) => redis.get(key));
     if (!data) return null;
     return safeJsonParse(data, null);
   } catch (err) {
@@ -77,11 +75,10 @@ export async function getReservationHold(
 }
 
 export async function deleteReservationHold(reservationId: string): Promise<void> {
-  const redis = getRedis();
   const key = redisKeys.reservation(reservationId);
 
   try {
-    await redis.del(key);
+    await withRedis((redis) => redis.del(key));
     logger.debug({ reservationId }, 'Reservation hold removed from Redis');
   } catch (err) {
     logger.warn({ err }, 'Failed to delete reservation hold from Redis');
@@ -104,7 +101,6 @@ export async function checkRateLimit(
   windowMs: number,
   failMode: 'open' | 'closed' = 'closed',
 ): Promise<{ allowed: boolean; count: number; resetAt: number; redisAvailable: boolean }> {
-  const redis = getRedis();
   // action 별 key prefix를 분리해 한 사용자의 여러 액션이 같은 카운터를 공유하지
   // 않도록 한다 (예: GraphQL read 60건이 checkout 5건과 같은 윈도우에 들어가면
   // 의도와 다른 거부가 발생한다).
@@ -119,20 +115,23 @@ export async function checkRateLimit(
   const key = keyByAction[action];
 
   try {
-    const now = Date.now();
-    const windowStart = now - windowMs;
+    return await withRedis(async (redis) => {
+      const now = Date.now();
+      const [allowed, count] = await redis.eval(
+        `redis.call('ZREMRANGEBYSCORE', KEYS[1], 0, ARGV[1])
+         local count = redis.call('ZCARD', KEYS[1])
+         if count >= tonumber(ARGV[2]) then return {0, count} end
+         redis.call('ZADD', KEYS[1], ARGV[3], ARGV[4])
+         redis.call('EXPIRE', KEYS[1], ARGV[5])
+         return {1, count + 1}`,
+        {
+          keys: [key],
+          arguments: [String(now - windowMs), String(limit), String(now), randomUUID(), String(Math.ceil(windowMs / 1000))],
+        },
+      ) as [number, number];
 
-    await redis.zRemRangeByScore(key, 0, windowStart);
-    const count = await redis.zCard(key);
-
-    if (count >= limit) {
-      return { allowed: false, count, resetAt: now + windowMs, redisAvailable: true };
-    }
-
-    await redis.zAdd(key, { score: now, value: `${now}-${Math.random()}` });
-    await redis.expire(key, Math.ceil(windowMs / 1000));
-
-    return { allowed: true, count: count + 1, resetAt: now + windowMs, redisAvailable: true };
+      return { allowed: allowed === 1, count, resetAt: now + windowMs, redisAvailable: true };
+    });
   } catch (err) {
     logger.error({ err, userId, action, failMode }, '레이트 리미트 확인 실패 (Redis 장애)');
     if (failMode === 'open') {
@@ -159,11 +158,10 @@ export async function setIdempotencyResult(
   result: Record<string, unknown>,
   ttlSeconds: number = 24 * 60 * 60,
 ): Promise<void> {
-  const redis = getRedis();
   const key = redisKeys.idempotencyKey(scope, idempotencyKey);
 
   try {
-    await redis.setEx(key, ttlSeconds, JSON.stringify(result));
+    await withRedis((redis) => redis.setEx(key, ttlSeconds, JSON.stringify(result)));
     logger.debug({ scope, idempotencyKey }, 'Idempotency result cached');
   } catch (err) {
     logger.warn({ err }, 'Failed to set idempotency result');
@@ -180,11 +178,10 @@ export async function getIdempotencyResult(
   scope: IdempotencyScope,
   idempotencyKey: string,
 ): Promise<Record<string, unknown> | null> {
-  const redis = getRedis();
   const key = redisKeys.idempotencyKey(scope, idempotencyKey);
 
   try {
-    const data = await redis.get(key);
+    const data = await withRedis((redis) => redis.get(key));
     if (!data) return null;
     return safeJsonParse(data, null);
   } catch (err) {
@@ -212,13 +209,12 @@ export async function tryAcquireIdempotencyLock(
   idempotencyKey: string,
   ttlSeconds: number = REDIS_TTL.IDEMPOTENCY_LOCK,
 ): Promise<string | null> {
-  const redis = getRedis();
   const key = redisKeys.idempotencyLock(scope, idempotencyKey);
   const token = randomUUID();
-  const result = await redis.set(key, token, {
+  const result = await withRedis((redis) => redis.set(key, token, {
     NX: true,
     EX: ttlSeconds,
-  });
+  }));
 
   return result === 'OK' ? token : null;
 }
@@ -235,17 +231,16 @@ export async function releaseIdempotencyLock(
   idempotencyKey: string,
   token: string,
 ): Promise<void> {
-  const redis = getRedis();
   const key = redisKeys.idempotencyLock(scope, idempotencyKey);
 
   try {
-    await redis.eval(
+    await withRedis((redis) => redis.eval(
       `if redis.call("get", KEYS[1]) == ARGV[1] then return redis.call("del", KEYS[1]) else return 0 end`,
       {
         keys: [key],
         arguments: [token],
       },
-    );
+    ));
   } catch (err) {
     logger.warn({ err, scope, idempotencyKey }, 'Failed to release idempotency lock');
   }
@@ -260,11 +255,10 @@ export async function setInventoryCount(
   count: number,
   ttlSeconds: number = 5 * 60, // 5 minutes
 ): Promise<void> {
-  const redis = getRedis();
   const key = redisKeys.inventoryCount(eventId);
 
   try {
-    await redis.setEx(key, ttlSeconds, String(count));
+    await withRedis((redis) => redis.setEx(key, ttlSeconds, String(count)));
     logger.debug({ eventId, count, ttlSeconds }, 'Inventory count cached');
   } catch (err) {
     logger.warn({ err }, 'Failed to cache inventory count');
@@ -277,11 +271,10 @@ export async function setInventoryCount(
  * @returns 캐시된 수량 또는 누락 시 null
  */
 export async function getInventoryCount(eventId: string): Promise<number | null> {
-  const redis = getRedis();
   const key = redisKeys.inventoryCount(eventId);
 
   try {
-    const data = await redis.get(key);
+    const data = await withRedis((redis) => redis.get(key));
     if (!data) return null;
     const count = parseInt(data, 10);
     return Number.isNaN(count) ? null : count;
@@ -296,14 +289,12 @@ export async function getInventoryCount(eventId: string): Promise<number | null>
  * 재고 변경 후 호출됨
  */
 export async function invalidateEventCache(eventId: string): Promise<void> {
-  const redis = getRedis();
-
   try {
-    await redis.del([
+    await withRedis((redis) => redis.del([
       redisKeys.eventById(eventId),
       redisKeys.eventAvailability(eventId),
       redisKeys.inventoryCount(eventId),
-    ]);
+    ]));
     logger.debug({ eventId }, 'Event cache invalidated');
   } catch (err) {
     logger.warn({ err }, 'Failed to invalidate event cache');

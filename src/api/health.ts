@@ -1,7 +1,7 @@
 import { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
 import { getLogger } from '@/infra/logger';
 import { getPostgresPool } from '@/infra/postgres/client';
-import { getRedis } from '@/infra/redis/client';
+import { withRedis } from '@/infra/redis/client';
 
 const logger = getLogger();
 
@@ -29,8 +29,7 @@ export async function readinessProbe(_request: FastifyRequest, reply: FastifyRep
   }
 
   try {
-    const redis = getRedis();
-    const pongResult = await redis.ping();
+    const pongResult = await withRedis((redis) => redis.ping());
     checks.redis = pongResult === 'PONG';
     logger.debug('Redis ready');
   } catch (err) {

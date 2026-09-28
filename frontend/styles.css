@@ -1041,6 +1041,17 @@ body::before {
 }
 .switch.on::after { transform: translateX(16px); }
 
+/* Native controls retain the existing card/disclosure layout. */
+.step-head, .le-head, .switch, .event-card, .tier-card {
+  font: inherit; color: inherit; text-align: left;
+}
+.step-head, .le-head { width: 100%; border: 0; background: transparent; }
+.switch { border: 0; padding: 0; }
+.step-title, .step-timing > span, .event-date, .event-title,
+.capacity-bar, .capacity-bar .fill, .tier-name, .tier-price, .tier-sub { display: block; }
+button:focus-visible { outline: 3px solid var(--blue); outline-offset: 3px; }
+.step-head:focus-visible, .le-head:focus-visible { outline-offset: -3px; }
+
 /* select */
 .select {
   appearance: none;
