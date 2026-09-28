@@ -130,7 +130,7 @@ function createMockServer() {
         orderId: order.id, eventId: order.eventId, eventName: event?.name,
         startsAt: event?.startsAt, endsAt: event?.endsAt,
         tier: tier?.name, seat: `${String.fromCharCode(65 + i)}-${10 + i}`,
-        status: "ISSUED", issuedAt: new Date().toISOString()
+        status: "ISSUED", createdAt: new Date().toISOString()
       });
     }
     tickets.set(order.id, issued);
@@ -142,7 +142,7 @@ function createMockServer() {
   }
 
   async function health() { await delay(); return { ok: true, status: 200, data: { status: "ok", uptime: 4281, version: "1.4.0", node: "20.11.1" } }; }
-  async function ready()  { await delay(); return { ok: true, status: 200, data: { status: "ready", postgres: "ok", redis: "ok", pgLatency: 3, redisLatency: 1 } }; }
+  async function ready()  { await delay(); return { ok: true, status: 200, data: { status: "ready", timestamp: new Date().toISOString(), checks: { postgres: true, redis: true } } }; }
 
   return { graphql, reservations, checkouts, settlement, health, ready };
 }
@@ -713,7 +713,7 @@ const App = () => {
   const onCheckReady = async () => {
     const res = await api.ready();
     logReq({ method: "GET", url: "/ready", status: res.status, elapsed: res.elapsed || 100, request: null, response: res.data });
-    setReady(res.ok ? { ok: true, ...res.data } : { err: true, ...res.data });
+    setReady({ ...res.data, ok: res.ok, httpStatus: res.status });
   };
   const onLoadEvents = () => actions.step1();
 

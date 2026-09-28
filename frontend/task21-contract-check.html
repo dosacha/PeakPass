@@ -1,0 +1,71 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<title>Task21 frontend contract check</title>
+<h1>Task21 frontend contract check</h1>
+<p>Run: python -m http.server 8765 --bind 127.0.0.1 --directory frontend, then open this page.</p>
+<pre id="results">Loading production page…</pre>
+<div id="cases"></div>
+<iframe id="app" hidden></iframe>
+<script>
+const output = document.getElementById("results");
+fetch("index.html", { cache: "no-store" }).then(response => response.text()).then(html => {
+  document.getElementById("app").srcdoc = html.replace(/src="(?!https?:)([^"]+)"/g,
+    (_, path) => `src="${path}?task21=${Date.now()}"`);
+}).catch(error => { output.textContent = `ERROR loading production page: ${error.message}`; });
+const lines = [];
+let failed = 0;
+const check = async (name, run) => {
+  try { await run(); lines.push(`PASS ${name}`); }
+  catch (error) { failed++; lines.push(`FAIL ${name}: ${error.message}`); }
+  output.textContent = lines.join("\n");
+};
+const assert = (condition, message) => { if (!condition) throw new Error(message); };
+const timer = setInterval(async () => {
+  const win = document.getElementById("app").contentWindow;
+  if (!win.TicketCard || !win.ConnectionPanel || !win.createMockServer) return;
+  clearInterval(timer);
+  const render = (component, props) => {
+    const container = document.createElement("div");
+    document.getElementById("cases").append(container);
+    win.ReactDOM.flushSync(() => win.ReactDOM.createRoot(container).render(win.React.createElement(component, props)));
+    return container;
+  };
+  await check("missing and invalid dates have safe placeholder", () => {
+    for (const value of [undefined, null, "", "not-a-date"])
+      assert(win.fmtDate(value) === "—", `fmtDate(${String(value)}) was ${win.fmtDate(value)}`);
+    assert(/^2026\.09\.28 \d{2}:\d{2}$/.test(win.fmtDate("2026-09-28T12:00:00Z")), "valid date lost");
+  });
+  await check("REST ticket createdAt appears on TicketCard", () => {
+    const card = render(win.TicketCard, { ticket: { id: "ticket-1", ticketNumber: "PP-REST", createdAt: "2026-09-28T12:00:00Z" }, event: { name: "Contract event" } });
+    assert(/2026\.09\.28 \d{2}:\d{2}/.test(card.textContent), `ticket text: ${card.textContent}`);
+    assert(!card.textContent.includes("NaN"), "invalid date rendered");
+  });
+  for (const [name, ready, expected] of [
+    ["healthy", { ok: true, httpStatus: 200, status: "ready", checks: { postgres: true, redis: true } }, ["200 READY", "ready", "postgresok", "redisok"]],
+    ["degraded", { ok: false, httpStatus: 503, status: "not_ready", checks: { postgres: true, redis: false } }, ["503 NOT READY", "not_ready", "postgresok", "rediserror"]],
+    ["network failure", { ok: false, httpStatus: 0, error: "Network error" }, ["NETWORK ERROR", "Network error"]]
+  ]) await check(`${name} readiness renders the REST contract`, () => {
+    const panel = render(win.ConnectionPanel, { apiBase: "http://127.0.0.1", mode: "live", ready });
+    const card = panel.querySelectorAll(".check-card")[1];
+    const text = card.textContent.replace(/\s+/g, " ").trim();
+    for (const value of expected) assert(text.includes(value), `missing ${value}: ${text}`);
+    assert(!text.includes("latency") && !text.includes("undefined"), `unsupported fields: ${text}`);
+    if (ready.httpStatus === 0) assert(!text.includes("postgres") && !text.includes("redis"), "network failure claims dependency results");
+  });
+  await check("mock tickets and readiness use the REST fields", async () => {
+    const mock = win.createMockServer();
+    const event = win.MOCK_EVENTS[0];
+    const checkout = await mock.checkouts({ eventId: event.id, tierId: event.pricing[0].tierId, userId: "test-user", quantity: 1, reservationId: "test-reservation" }, "checkout-key");
+    const settlement = await mock.settlement({ orderId: checkout.data.order.id, providerTransactionId: "test-transaction" }, "settlement-key");
+    assert(typeof settlement.data.tickets[0].createdAt === "string", "mock ticket createdAt absent");
+    const ready = await mock.ready();
+    assert(ready.data.checks?.postgres === true && ready.data.checks?.redis === true, "mock checks booleans absent");
+  });
+  lines.push(`${failed ? "FAIL" : "PASS"}: ${lines.length - failed}/${lines.length} checks`);
+  output.textContent = lines.join("\n");
+  document.title = `${failed ? "FAIL" : "PASS"} Task21 frontend contract check`;
+}, 100);
+setTimeout(() => { if (!lines.length) { clearInterval(timer); output.textContent = "ERROR: production React/Babel scripts did not load within 20 seconds"; } }, 20000);
+</script>
+</html>

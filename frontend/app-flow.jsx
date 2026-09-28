@@ -12,7 +12,7 @@ const TicketCard = ({ ticket, event }) => {
         <div className="t-title">{event?.name || "Ticket"}</div>
         <div className="t-code">{ticket.ticketNumber}</div>
         <div className="t-meta">
-          {ticket.tier} · {ticket.seat || "자유석"} · {fmtDate(ticket.issuedAt)}
+          {ticket.tier} · {ticket.seat || "자유석"} · {fmtDate(ticket.createdAt)}
         </div>
       </div>
       <div className="t-qr">
