@@ -55,8 +55,8 @@ type GraphQLTicketParent = {
   userId: string;
   ticketNumber: string;
   status: string;
-  createdAt: string;
-  updatedAt: string;
+  createdAt: string | Date;
+  updatedAt: string | Date;
 };
 
 function toIsoString(value: string | Date | null | undefined): string | null {
@@ -306,7 +306,7 @@ export const resolvers = {
     user: async (parent: GraphQLTicketParent, _: unknown, context: GraphQLContext) => {
       return context.loaders.userLoader.load(parent.userId);
     },
-    issuedAt: (parent: GraphQLTicketParent) => parent.createdAt,
+    issuedAt: (parent: GraphQLTicketParent) => toIsoString(parent.createdAt),
     expiresAt: async (parent: GraphQLTicketParent, _: unknown, context: GraphQLContext) => {
       const event = await context.loaders.eventLoader.load(parent.eventId);
       return event ? toIsoString(event.endsAt) : null;
