@@ -181,10 +181,12 @@ export class CheckoutService {
     const eventResult = await client.query<{
       id: string;
       pricing: Array<{ id: string; price: number }>;
+      saleEligible: boolean;
     }>(
       `SELECT
          id,
-         pricing::jsonb as "pricing"
+         pricing::jsonb as "pricing",
+         status = 'published' AND ends_at > NOW() AS "saleEligible"
        FROM events
        WHERE id = $1
        FOR UPDATE`,
@@ -196,6 +198,10 @@ export class CheckoutService {
     }
 
     const event = eventResult.rows[0];
+    // Existing-order replay and expired-reservation cleanup have already returned.
+    if (!event.saleEligible) {
+      throw new ConflictError('Event is not available for sale');
+    }
 
     const tier = event.pricing.find((candidate) => candidate.id === input.tierId);
     if (!tier) {
