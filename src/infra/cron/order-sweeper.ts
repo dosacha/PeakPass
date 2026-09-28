@@ -10,9 +10,10 @@ export async function sweepExpiredOrders(batchSize = getConfig().ORDER_SWEEP_BAT
   const stats = { scanned: 0, expired: 0, skipped: 0, failed: 0, unprocessed: 0, oldestOverdueAgeSeconds: 0, durationMs: 0 };
   // pool.query releases the scan connection before per-order transactions, including at pool max 1.
   const candidates = await getPostgresPool().query<{ id: string; overdue_age_seconds: number }>(
-    `SELECT id,EXTRACT(EPOCH FROM NOW()-payment_deadline_at)::float8 AS overdue_age_seconds
+    `SELECT id,(SELECT EXTRACT(EPOCH FROM NOW()-MIN(payment_deadline_at))::float8
+        FROM orders WHERE status='pending' AND payment_deadline_at<=NOW()) AS overdue_age_seconds
      FROM orders WHERE status='pending' AND payment_deadline_at IS NOT NULL AND payment_deadline_at<=NOW()
-     ORDER BY payment_deadline_at,id LIMIT $1`, [batchSize],
+     ORDER BY COALESCE(expiration_last_failed_at,payment_deadline_at),payment_deadline_at,id LIMIT $1`, [batchSize],
   );
   stats.scanned = candidates.rows.length;
   stats.oldestOverdueAgeSeconds = candidates.rows[0]?.overdue_age_seconds ?? 0;
@@ -31,6 +32,14 @@ export async function sweepExpiredOrders(batchSize = getConfig().ORDER_SWEEP_BAT
     } catch (err) {
       stats.failed++;
       getLogger().warn({ err, orderId: id }, 'Order sweeper expiration failed');
+      // The failed transaction has rolled back and released its connection. Persist fair retry
+      // ordering across workers/restarts without changing the deadline or making the order terminal.
+      try {
+        await getPostgresPool().query(`UPDATE orders SET expiration_last_failed_at=clock_timestamp()
+          WHERE id=$1 AND status='pending'`, [id]);
+      } catch (retryErr) {
+        getLogger().warn({ err: retryErr, orderId: id }, 'Order sweeper retry ordering could not be saved');
+      }
     }
   }
   stats.unprocessed = stats.scanned - stats.expired - stats.skipped - stats.failed;

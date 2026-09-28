@@ -112,12 +112,14 @@ describe('bounded order sweeper on real PostgreSQL and Redis', () => {
     const c = await pool.connect();
     try {
       await c.query('SET enable_seqscan=off');
-      const plan = await c.query(`EXPLAIN SELECT id,EXTRACT(EPOCH FROM NOW()-payment_deadline_at)::float8 AS overdue_age_seconds
+      await c.query('SET enable_sort=off');
+      const plan = await c.query(`EXPLAIN SELECT id,(SELECT EXTRACT(EPOCH FROM NOW()-MIN(payment_deadline_at))::float8
+        FROM orders WHERE status='pending' AND payment_deadline_at<=NOW()) AS overdue_age_seconds
         FROM orders WHERE status='pending' AND payment_deadline_at IS NOT NULL AND payment_deadline_at<=NOW()
-        ORDER BY payment_deadline_at,id LIMIT 10`);
-      expect(JSON.stringify(plan.rows)).toContain('idx_orders_pending_payment_deadline');
+        ORDER BY COALESCE(expiration_last_failed_at,payment_deadline_at),payment_deadline_at,id LIMIT 10`);
+      expect(JSON.stringify(plan.rows)).toContain('idx_orders_pending_expiration_retry');
       process.stdout.write(JSON.stringify({ candidatePlan: plan.rows }) + '\n');
-    } finally { await c.query('RESET enable_seqscan'); c.release(); }
+    } finally { await c.query('RESET enable_seqscan'); await c.query('RESET enable_sort'); c.release(); }
   });
   it('has no overlapping ticks while locked and stop awaits current transaction while skipping new orders', async () => {
     const first = await data.order(); await data.order();
