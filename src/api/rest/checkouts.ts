@@ -4,6 +4,7 @@ import { CheckoutService } from '@/core/services/checkout.service';
 import { OrderService } from '@/core/services/order.service';
 import { TicketService } from '@/core/services/ticket.service';
 import { CreateOrderSchema } from '@/core/models/order';
+import { ConflictError } from '@/core/errors';
 import { getConfig } from '@/infra/config';
 import { getLogger } from '@/infra/logger';
 import {
@@ -62,6 +63,10 @@ export async function registerCheckoutRoutes(app: FastifyInstance) {
       }
 
       await invalidateEventCache(input.eventId);
+
+      if ('reservationExpired' in orderResult) {
+        throw new ConflictError('Reservation has expired or is no longer valid');
+      }
 
       logger.info(
         {

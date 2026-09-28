@@ -108,6 +108,7 @@ describe('webhook idempotency integration tests', () => {
       ),
     );
 
+    if ('reservationExpired' in result) throw new Error('Unexpected expired reservation');
     return result.order;
   }
 

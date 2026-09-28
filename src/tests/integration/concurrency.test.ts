@@ -417,6 +417,7 @@ describe('concurrency integration tests', () => {
       const firstResult = await serializableTransactionWithRetry((client) =>
         checkoutService.checkout(firstInput, client),
       );
+      if ('reservationExpired' in firstResult) throw new Error('Unexpected expired reservation');
       expect(firstResult.order.quantity).toBe(1);
 
       // 같은 idempotency_key, 다른 quantity → 409 (ConflictError)
@@ -438,6 +439,7 @@ describe('concurrency integration tests', () => {
       const idempotentResult = await serializableTransactionWithRetry((client) =>
         checkoutService.checkout(firstInput, client),
       );
+      if ('reservationExpired' in idempotentResult) throw new Error('Unexpected expired reservation');
       expect(idempotentResult.order.id).toBe(firstResult.order.id);
 
       // 좌석은 1개만 차감되어 있어야 함

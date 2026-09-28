@@ -39,7 +39,10 @@ export class CheckoutService {
   private orderService = new OrderService();
   private ticketService = new TicketService();
 
-  async checkout(input: CreateOrderInput, client: PoolClient): Promise<CheckoutResult> {
+  async checkout(
+    input: CreateOrderInput,
+    client: PoolClient,
+  ): Promise<CheckoutResult | { reservationExpired: true }> {
     // 동일 idempotency_key 동시 진입 race를 차단한다.
     //
     // 문제 시나리오: Redis idempotency lock이 1차 layer지만 Redis 장애 시
@@ -132,15 +135,23 @@ export class CheckoutService {
 
       if (convertResult.rowCount === 0) {
         const reservationCheck = await client.query(
-          `SELECT user_id, event_id, tier_id, quantity, status, expires_at FROM reservations WHERE id = $1`,
+          `SELECT user_id, event_id, tier_id, quantity, status, expires_at <= NOW() AS expired
+           FROM reservations WHERE id = $1 FOR UPDATE`,
           [input.reservationId],
         );
         if (reservationCheck.rows.length === 0) {
           throw new NotFoundError('Reservation', input.reservationId);
         }
         const r = reservationCheck.rows[0];
-        if (r.status !== 'active' || new Date(r.expires_at) <= new Date()) {
-          await this.reservationService.expireReservationWithClient(input.reservationId, client);
+        if (
+          r.user_id === input.userId && r.event_id === input.eventId &&
+          r.tier_id === input.tierId && r.quantity === input.quantity
+        ) {
+          if (r.status === 'active' && r.expired) {
+            await this.reservationService.expireReservationWithClient(input.reservationId, client);
+            // Return normally so cleanup commits; the route maps this outcome to HTTP 409.
+            return { reservationExpired: true };
+          }
           throw new ConflictError('Reservation has expired or is no longer valid');
         }
         this.logger.warn(
