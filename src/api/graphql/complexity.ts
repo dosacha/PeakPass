@@ -1,10 +1,24 @@
 import {
   DocumentNode,
   FieldNode,
+  FragmentDefinitionNode,
+  GraphQLCompositeType,
   GraphQLError,
   GraphQLSchema,
+  Kind,
+  SelectionSetNode,
+  SchemaMetaFieldDef,
+  TypeMetaFieldDef,
+  TypeNameMetaFieldDef,
+  getArgumentValues,
   getNamedType,
+  getOperationAST,
+  getVariableValues,
   isCompositeType,
+  isInterfaceType,
+  isListType,
+  isNonNullType,
+  isObjectType,
 } from 'graphql';
 import type { ApolloServerPlugin, BaseContext } from '@apollo/server';
 
@@ -43,117 +57,113 @@ export const complexityRulesMap: ComplexityRulesMap = {
   },
 };
 
-/**
- * 단일 field의 복잡도를 재귀적으로 계산한다.
- *
- * - complexityRulesMap에 정의된 rule이 있으면 그 값/함수를 사용
- * - 없으면 default 1
- * - nested selectionSet은 재귀로 합산
- * - depth가 maxDepth를 넘으면 큰 페널티(1000)를 반환해 deep-nested DoS를 차단
- */
+type ComplexityContext = {
+  schema: GraphQLSchema;
+  variables: Record<string, unknown>;
+  fragments: Map<string, FragmentDefinitionNode>;
+  maxComplexity: number;
+  maxDepth: number;
+};
+
+function rejectComplexity(message: string): never {
+  throw new GraphQLError(`Query too complex: ${message}`, {
+    extensions: { code: 'QUERY_TOO_COMPLEX', http: { status: 400 } },
+  });
+}
+
+function selectionComplexity(
+  selectionSet: SelectionSetNode,
+  type: GraphQLCompositeType,
+  context: ComplexityContext,
+  depth = 0,
+  fragmentPath = new Set<string>(),
+  fragmentDepth = 0,
+): number {
+  if (depth > context.maxDepth || fragmentDepth > context.maxDepth) {
+    rejectComplexity(`maximum depth ${context.maxDepth} exceeded`);
+  }
+
+  let total = 0;
+  for (const selection of selectionSet.selections) {
+    if (selection.kind === Kind.FIELD) {
+      const fieldName = selection.name.value;
+      const field = fieldName === '__typename' ? TypeNameMetaFieldDef
+        : fieldName === '__schema' && type === context.schema.getQueryType() ? SchemaMetaFieldDef
+          : fieldName === '__type' && type === context.schema.getQueryType() ? TypeMetaFieldDef
+            : isObjectType(type) || isInterfaceType(type) ? type.getFields()[fieldName] : undefined;
+      const args = field ? getArgumentValues(field, selection, context.variables) : {};
+      const rule = complexityRulesMap[type.name]?.[fieldName]?.complexity ?? 1;
+      const baseCost = typeof rule === 'function' ? rule({ args }) : rule;
+      const returnType = field ? getNamedType(field.type) : undefined;
+      let nestedCost = 0;
+      if (selection.selectionSet && returnType && isCompositeType(returnType)) {
+        nestedCost = selectionComplexity(selection.selectionSet, returnType, context, depth + 1, fragmentPath);
+      }
+      const outputType = field && isNonNullType(field.type) ? field.type.ofType : field?.type;
+      // ponytail: unpaginated lists estimate 10 items; a tier-count bound or measurement must replace this if needed.
+      const cardinality = outputType && isListType(outputType)
+        ? numericLimit(args.limit, typeof rule === 'function' ? baseCost : 10) : 1;
+      total += baseCost + cardinality * nestedCost;
+    } else {
+      const name = selection.kind === Kind.FRAGMENT_SPREAD ? selection.name.value : undefined;
+      if (name && fragmentPath.has(name)) rejectComplexity(`fragment cycle at ${name}`);
+      const fragment = name ? context.fragments.get(name) : selection;
+      if (!fragment || !('selectionSet' in fragment)) continue;
+      const condition = fragment.typeCondition;
+      const fragmentType = condition ? context.schema.getType(condition.name.value) : type;
+      if (fragmentType && isCompositeType(fragmentType)) {
+        total += selectionComplexity(fragment.selectionSet, fragmentType, context, depth,
+          name ? new Set([...fragmentPath, name]) : fragmentPath, fragmentDepth + 1);
+      }
+    }
+    if (total > context.maxComplexity) {
+      rejectComplexity(`complexity ${total} exceeds limit of ${context.maxComplexity}`);
+    }
+  }
+  return total;
+}
+
 export function calculateFieldComplexity(
   node: FieldNode,
   schema: GraphQLSchema,
-  type: { name?: string; getFields?: () => Record<string, { type: unknown }> },
+  type: GraphQLCompositeType,
   variables: Record<string, unknown> = {},
   depth = 0,
   maxDepth = 10,
 ): number {
-  void schema;
-
-  if (depth > maxDepth) {
-    return 1000;
-  }
-
-  const typeName = type.name ?? 'Unknown';
-  const fieldName = node.name.value;
-  const fieldRule = complexityRulesMap[typeName]?.[fieldName];
-
-  let complexity = fieldRule?.complexity ?? 1;
-  if (typeof complexity === 'function') {
-    const args =
-      node.arguments?.reduce<Record<string, unknown>>((acc, arg) => {
-        if (arg.value.kind === 'IntValue') {
-          acc[arg.name.value] = parseInt(arg.value.value, 10);
-        } else if (arg.value.kind === 'StringValue') {
-          acc[arg.name.value] = arg.value.value;
-        } else if (arg.value.kind === 'Variable') {
-          const varName = arg.value.name.value;
-          if (variables[varName] !== undefined) {
-            acc[arg.name.value] = variables[varName];
-          }
-        }
-        return acc;
-      }, {}) ?? {};
-
-    complexity = complexity({ args });
-  }
-
-  let nestedComplexity = 0;
-  if (node.selectionSet && isCompositeType(type as never)) {
-    for (const selection of node.selectionSet.selections) {
-      if (selection.kind !== 'Field') {
-        continue;
-      }
-
-      const fieldType = type.getFields?.()[selection.name.value];
-      if (!fieldType) {
-        continue;
-      }
-
-      const namedType = getNamedType(fieldType.type as never);
-      nestedComplexity += calculateFieldComplexity(
-        selection,
-        schema,
-        namedType as never,
-        variables,
-        depth + 1,
-        maxDepth,
-      );
-    }
-  }
-
-  return complexity + nestedComplexity;
+  return selectionComplexity({ kind: Kind.SELECTION_SET, selections: [node] }, type,
+    { schema, variables, fragments: new Map(), maxComplexity: Infinity, maxDepth }, depth);
 }
 
-/**
- * Query 전체의 누적 복잡도가 maxComplexity를 초과하면 GraphQLError를 던진다.
- * Apollo plugin의 didResolveOperation 단계에서 호출되어, resolver 진입 전에
- * 폭주성 query를 거부한다.
- */
+// Validate only the selected operation, using the same variable/argument defaults as execution.
 export function validateQueryComplexity(
   document: DocumentNode,
   schema: GraphQLSchema,
   variables: Record<string, unknown> = {},
   maxComplexity = 5000,
+  operationName?: string,
 ): void {
-  let totalComplexity = 0;
-
-  for (const definition of document.definitions) {
-    if (definition.kind !== 'OperationDefinition') {
-      continue;
-    }
-
-    const queryType = schema.getQueryType();
-    if (!queryType || !definition.selectionSet) {
-      continue;
-    }
-
-    for (const selection of definition.selectionSet.selections) {
-      if (selection.kind !== 'Field') {
-        continue;
-      }
-
-      totalComplexity += calculateFieldComplexity(selection, schema, queryType, variables, 0);
-    }
+  const operation = getOperationAST(document, operationName);
+  if (!operation) {
+    throw new GraphQLError('Unable to select operation', {
+      extensions: { code: 'OPERATION_RESOLUTION_FAILURE', http: { status: 400 } },
+    });
   }
-
-  if (totalComplexity > maxComplexity) {
-    throw new GraphQLError(
-      `Query too complex: complexity ${totalComplexity} exceeds limit of ${maxComplexity}`,
-      { extensions: { code: 'QUERY_TOO_COMPLEX', http: { status: 400 } } },
-    );
+  const effectiveVariables = getVariableValues(schema, operation.variableDefinitions ?? [], variables);
+  if (effectiveVariables.errors) {
+    throw new GraphQLError(effectiveVariables.errors[0].message, {
+      extensions: { code: 'BAD_USER_INPUT', http: { status: 400 } },
+    });
   }
+  const rootType = operation.operation === 'query' ? schema.getQueryType()
+    : operation.operation === 'mutation' ? schema.getMutationType() : schema.getSubscriptionType();
+  if (!rootType) return;
+  const fragments = new Map(document.definitions
+    .filter((definition): definition is FragmentDefinitionNode => definition.kind === Kind.FRAGMENT_DEFINITION)
+    .map((definition) => [definition.name.value, definition]));
+  selectionComplexity(operation.selectionSet, rootType, {
+    schema, variables: effectiveVariables.coerced, fragments, maxComplexity, maxDepth: 10,
+  });
 }
 
 /**
@@ -174,7 +184,7 @@ export function createComplexityPlugin<TContext extends BaseContext = BaseContex
         async didResolveOperation({ document, schema, request }) {
           try {
             const variables = (request.variables ?? {}) as Record<string, unknown>;
-            validateQueryComplexity(document, schema, variables, maxComplexity);
+            validateQueryComplexity(document, schema, variables, maxComplexity, request.operationName ?? undefined);
           } catch (err) {
             if (err instanceof GraphQLError) {
               throw err;
@@ -182,6 +192,7 @@ export function createComplexityPlugin<TContext extends BaseContext = BaseContex
 
             throw new GraphQLError(
               `Query validation failed: ${err instanceof Error ? err.message : String(err)}`,
+              { extensions: { code: 'BAD_USER_INPUT', http: { status: 400 } } },
             );
           }
         },

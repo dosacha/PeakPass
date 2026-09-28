@@ -123,6 +123,35 @@ describe('GraphQL HTTP transport through createApp and Apollo', () => {
     expect(queryResolvers.events).not.toHaveBeenCalled();
   });
 
+  it('accepts a selected cheap operation despite an unused expensive operation', async () => {
+    const response = await app.inject({
+      method: 'POST', url: '/graphql', payload: {
+        query: 'query Cheap { event(id: "cheap") { id } } query Expensive { events(limit: 10000) { id } }',
+        operationName: 'Cheap',
+      },
+    });
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toEqual({ data: { event: null } });
+    expect(queryResolvers.event).toHaveBeenCalledTimes(1);
+    expect(queryResolvers.events).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ['named fragment', 'fragment Root on Query { events(limit: 10000) { ...Item } } fragment Item on Event { id } query Expensive { ...Root }'],
+    ['inline fragment', 'query Expensive { ... on Query { events(limit: 10000) { ... on Event { id } } } }'],
+    ['variable default', 'query Expensive($limit: Int = 10000) { events(limit: $limit) { id } }'],
+    ['multiplied aliases', 'query Expensive { events(limit: 100) { ' + Array.from({ length: 51 }, (_, index) => `f${index}: id`).join(' ') + ' } }'],
+    ['selected operation', 'query Cheap { event(id: "cheap") { id } } query Expensive { events(limit: 10000) { id } }'],
+  ])('rejects expensive %s before Apollo resolver execution with 400', async (_name, query) => {
+    const response = await app.inject({
+      method: 'POST', url: '/graphql', payload: { query, operationName: 'Expensive' },
+    });
+    expect(response.statusCode).toBe(400);
+    expect(response.json()).toMatchObject({ errors: [{ extensions: { code: 'QUERY_TOO_COMPLEX' } }] });
+    expect(queryResolvers.event).not.toHaveBeenCalled();
+    expect(queryResolvers.events).not.toHaveBeenCalled();
+  });
+
   it.each(['query {', '{ unknownField }', query])(
     'keeps GraphQL parse/validation/operation selection failures at 400', async (invalidQuery) => {
       const response = await app.inject({
