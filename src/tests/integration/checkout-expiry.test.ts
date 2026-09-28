@@ -170,4 +170,3 @@ describe('expired reservation checkout commit boundary (real PG/Redis/HTTP)', ()
     expect(await holds.getReservationHold(input.reservationId!)).not.toBeNull();
   });
 });
-
