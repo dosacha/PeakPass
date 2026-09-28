@@ -2,6 +2,7 @@ import { PoolClient } from 'pg';
 import { v4 as uuid } from 'uuid';
 import Decimal from 'decimal.js';
 import { Order, CreateOrderInput } from '../models/order';
+import { MAX_MONEY_AMOUNT, UnitPriceSchema } from '../models/money';
 import { Ticket } from '../models/ticket';
 import {
   ValidationError,
@@ -208,8 +209,15 @@ export class CheckoutService {
       throw new ValidationError(`Pricing tier not found: ${input.tierId}`);
     }
 
-    const unitPrice = new Decimal(tier.price);
+    const price = UnitPriceSchema.safeParse(tier.price);
+    if (!price.success) {
+      throw new ValidationError('Pricing tier price must be between 0.01 and 99999999.99 with at most two decimal places');
+    }
+    const unitPrice = new Decimal(price.data);
     const totalAmount = unitPrice.times(input.quantity);
+    if (totalAmount.gt(MAX_MONEY_AMOUNT)) {
+      throw new ValidationError('Order total exceeds the supported money range');
+    }
 
     this.logger.debug(
       {

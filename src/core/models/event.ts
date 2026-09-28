@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { UnitPriceSchema } from './money';
 
 export const EventStatus = z.enum(['draft', 'published', 'closed', 'cancelled']);
 export type EventStatus = z.infer<typeof EventStatus>;
@@ -34,7 +35,7 @@ export const CreateEventSchema = z.object({
   pricing: z.array(
     z.object({
       name: z.string(),
-      price: z.number().positive(),
+      price: UnitPriceSchema,
       quantity: z.number().int().positive(),
       description: z.string().optional(),
     }),
