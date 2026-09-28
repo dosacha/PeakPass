@@ -53,6 +53,21 @@ jobs:
       - name: TypeScript check
         run: npm run build
 
+      - name: Build production image
+        run: docker build -t peakpass:ci .
+
+      - name: Check production image migrations and startup on empty DB
+        env:
+          DB_HOST: localhost
+          DB_PORT: '5432'
+          DB_USER: peakpass
+          DB_PASSWORD: peakpass
+          DB_NAME: peakpass
+          REDIS_HOST: localhost
+          REDIS_PORT: '6379'
+          IMAGE_NETWORK: host
+        run: node .github/scripts/production-image-check.mjs peakpass:ci
+
       - name: Apply DB migrations
         env:
           NODE_ENV: test
@@ -68,7 +83,7 @@ jobs:
           NODE_ENV: test
         run: npm test -- --coverage
 
-      - name: Run integration tests (concurrency)
+      - name: Run integration tests
         env:
           NODE_ENV: test
           DB_HOST: localhost
@@ -78,67 +93,7 @@ jobs:
           DB_NAME: peakpass
           REDIS_HOST: localhost
           REDIS_PORT: '6379'
-        run: npm run test:concurrency
-
-      - name: Run integration tests (webhook idempotency)
-        env:
-          NODE_ENV: test
-          DB_HOST: localhost
-          DB_PORT: '5432'
-          DB_USER: peakpass
-          DB_PASSWORD: peakpass
-          DB_NAME: peakpass
-          REDIS_HOST: localhost
-          REDIS_PORT: '6379'
-        run: npm run test:webhook
-
-      - name: Run integration tests (redis)
-        env:
-          NODE_ENV: test
-          DB_HOST: localhost
-          DB_PORT: '5432'
-          DB_USER: peakpass
-          DB_PASSWORD: peakpass
-          DB_NAME: peakpass
-          REDIS_HOST: localhost
-          REDIS_PORT: '6379'
-        run: npm run test:redis
-
-      - name: Run integration tests (route-level contract)
-        env:
-          NODE_ENV: test
-          DB_HOST: localhost
-          DB_PORT: '5432'
-          DB_USER: peakpass
-          DB_PASSWORD: peakpass
-          DB_NAME: peakpass
-          REDIS_HOST: localhost
-          REDIS_PORT: '6379'
-        run: npm run test:routes
-
-      - name: Run integration tests (status constraints)
-        env:
-          NODE_ENV: test
-          DB_HOST: localhost
-          DB_PORT: '5432'
-          DB_USER: peakpass
-          DB_PASSWORD: peakpass
-          DB_NAME: peakpass
-          REDIS_HOST: localhost
-          REDIS_PORT: '6379'
-        run: npm run test:constraints
-
-      - name: Run integration tests (inventory constraints)
-        env:
-          NODE_ENV: test
-          DB_HOST: localhost
-          DB_PORT: '5432'
-          DB_USER: peakpass
-          DB_PASSWORD: peakpass
-          DB_NAME: peakpass
-          REDIS_HOST: localhost
-          REDIS_PORT: '6379'
-        run: npm run test:inventory-constraints
+        run: npx --no-install jest --runInBand --config jest.integration.cjs
 
       - name: Upload coverage
         uses: codecov/codecov-action@v3

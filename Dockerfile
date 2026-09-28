@@ -26,8 +26,8 @@ COPY --from=builder --chown=nodejs:nodejs /app/dist ./dist
 COPY --from=builder --chown=nodejs:nodejs /app/node_modules ./node_modules
 COPY --from=builder --chown=nodejs:nodejs /app/package*.json ./
 
-# 스크립트 복사
-COPY --chown=nodejs:nodejs src/infra/migrations ./migrations
+# 컴파일된 실행기가 자기 디렉터리에서 SQL을 찾는다.
+COPY --chown=nodejs:nodejs src/infra/migrations/*.sql ./dist/infra/migrations/
 
 USER nodejs
 
