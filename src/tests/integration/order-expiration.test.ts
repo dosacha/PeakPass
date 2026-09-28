@@ -211,7 +211,9 @@ describe('atomic order expiration and provider facts (real PostgreSQL)', () => {
     await expireNow();
     const key = uuid();
     await webhook('settled', uuid(), key);
-    await expect(webhook('settled', uuid(), key)).rejects.toMatchObject({ code: '23505', constraint: 'uq_payment_records_settlement_idempotency_key' });
+    await expect(webhook('settled', uuid(), key)).rejects.toMatchObject({
+      code: 'CONFLICT', statusCode: 409, message: 'Idempotency key already used for a different payment callback',
+    });
     await expectExpired([pendingRecord, settledRecord]);
   });
 

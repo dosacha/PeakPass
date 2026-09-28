@@ -58,11 +58,30 @@ export class PaymentWebhookService {
       throw new NotFoundError('Order', input.orderId);
     }
 
+    await this.reserveCallbackKey(order.id, input.providerTransactionId, idempotencyKey, client);
+
     const transition: PaymentTransition =
       input.status === 'settled' ? { kind: 'settle' } : { kind: 'fail' };
     const outcome = await this.applyTransition(order, transition, input, idempotencyKey, client);
 
     return this.mapOutcomeToResponse(outcome);
+  }
+
+  private async reserveCallbackKey(orderId: string, providerTransactionId: string, idempotencyKey: string, client: PoolClient): Promise<void> {
+    // Reserve every accepted callback, including early terminal replays and
+    // failure-to-success corrections. Rejected transitions roll this back too.
+    const inserted = await client.query(`INSERT INTO payment_callback_keys (idempotency_key, order_id, provider_transaction_id)
+      VALUES ($1, $2, $3) ON CONFLICT (idempotency_key) DO NOTHING RETURNING idempotency_key`,
+    [idempotencyKey, orderId, providerTransactionId]);
+    if (inserted.rowCount) return;
+    const result = await client.query<{ order_id: string; provider_transaction_id: string }>(
+      `SELECT order_id, provider_transaction_id FROM payment_callback_keys WHERE idempotency_key=$1`,
+      [idempotencyKey],
+    );
+    const existing = result.rows[0];
+    if (!existing || existing.order_id !== orderId || existing.provider_transaction_id !== providerTransactionId) {
+      throw new ConflictError('Idempotency key already used for a different payment callback');
+    }
   }
 
   private async applyTransition(
