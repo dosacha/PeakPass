@@ -151,7 +151,7 @@ export function validateQueryComplexity(
   if (totalComplexity > maxComplexity) {
     throw new GraphQLError(
       `Query too complex: complexity ${totalComplexity} exceeds limit of ${maxComplexity}`,
-      { extensions: { code: 'QUERY_TOO_COMPLEX' } },
+      { extensions: { code: 'QUERY_TOO_COMPLEX', http: { status: 400 } } },
     );
   }
 }

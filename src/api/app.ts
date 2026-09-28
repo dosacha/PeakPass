@@ -58,7 +58,9 @@ export async function createApp() {
       try {
         done(null, JSON.parse(buffer.toString('utf8')));
       } catch (err) {
-        const error = err instanceof Error ? err : new Error('Invalid JSON body');
+        const error = err instanceof SyntaxError
+          ? new AppError('BAD_REQUEST', 400, 'Invalid JSON body')
+          : err instanceof Error ? err : new Error('Invalid JSON body');
         done(error, undefined);
       }
     },
