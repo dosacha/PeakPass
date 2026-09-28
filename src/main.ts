@@ -15,6 +15,7 @@ async function gracefulShutdown(signal: string) {
   }
 
   shuttingDown = true;
+  const redisClosed = Promise.allSettled([closeRedis()]);
 
   const logger = getLogger() || console;
   logger.info(`${signal} 수신, 종료 절차 시작`);
@@ -33,7 +34,8 @@ async function gracefulShutdown(signal: string) {
     await closePostgresPool();
     logger.info('PostgreSQL 연결 종료');
 
-    await closeRedis();
+    const [redisResult] = await redisClosed;
+    if (redisResult.status === 'rejected') throw redisResult.reason;
     logger.info('Redis 연결 종료');
 
     logger.info('종료 절차 완료');
@@ -83,9 +85,9 @@ async function main() {
     logger.error({ err }, '애플리케이션 시작 실패');
 
     await Promise.allSettled([
+      closeRedis(),
       app ? app.close() : Promise.resolve(),
       closePostgresPool(),
-      closeRedis(),
     ]);
 
     process.exit(1);

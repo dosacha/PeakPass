@@ -7,7 +7,7 @@
  *
  * 검증 계층 표기:
  *   - "route-level"           : HTTP inject 경유, middleware 포함
- *   - "Redis unavailable"     : Redis client를 의도적으로 끊은 뒤의 DB fallback
+ *   - "Redis unavailable"     : Redis acquisition에 명시적 장애를 주입한 DB fallback
  *   - "provider transaction"  : Redis 캐시가 아닌 order FOR UPDATE +
  *                               provider_transaction_id partial UNIQUE 검증
  *
@@ -541,11 +541,10 @@ describe('route-level contract: checkout idempotency and settlement webhook', ()
       const fixture = await setupEventAndUser(5);
       const idempotencyKey = uuid();
 
-      const redis = await ensureRedisOpen();
-      // Redis 장애 시뮬레이션: client를 끊으면 이후 모든 명령이 즉시 reject되고,
-      // idempotency lock/result cache/rate limit이 전부 degrade 경로로 빠진다.
-      // (RATE_LIMIT_FAIL_MODE=open이므로 rate limiter가 503으로 가리지 않는다)
-      await redis.disconnect();
+      // Inject acquisition failure: a disconnected client now automatically recovers.
+      // Real container outage/recovery is covered by redis-recovery.test.ts.
+      const unavailable = jest.spyOn(redisModule, 'withRedis')
+        .mockRejectedValue(new Error('Injected Redis outage'));
 
       let responses;
       try {
@@ -555,7 +554,7 @@ describe('route-level contract: checkout idempotency and settlement webhook', ()
           postCheckout(fixture, idempotencyKey),
         ]);
       } finally {
-        await redis.connect();
+        unavailable.mockRestore();
       }
 
       const statuses = responses.map((response) => response.statusCode);
