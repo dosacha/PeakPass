@@ -44,7 +44,7 @@ export const CreateEventSchema = z.object({
 export type CreateEventInput = z.infer<typeof CreateEventSchema>;
 
 export const GetEventsSchema = z.object({
-  limit: z.coerce.number().int().positive().default(20).optional(),
+  limit: z.coerce.number().int().positive().max(100).default(20).optional(),
   offset: z.coerce.number().int().nonnegative().default(0).optional(),
   status: EventStatus.optional(),
 });
