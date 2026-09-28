@@ -34,7 +34,7 @@ const TopBar = ({ mode, onToggleMock, apiBase }) => (
     </div>
     <div className="topbar-right">
       <span style={{color:"#8aa2bd"}}>mock mode</span>
-      <div className={`switch ${mode === "mock" ? "on" : ""}`} onClick={onToggleMock} role="button" aria-label="toggle mock"/>
+      <button type="button" className={`switch ${mode === "mock" ? "on" : ""}`} onClick={onToggleMock} aria-label="toggle mock" aria-pressed={mode === "mock"}/>
       <span className={`mode-badge ${mode}`}>
         <span className="pulse"/>
         {mode === "live" ? "LIVE API" : mode === "mock" ? "MOCK MODE" : "OFFLINE"}
