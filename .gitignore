@@ -153,5 +153,8 @@ load-test-event.sql
 load-test/results/*.json
 !load-test/results/*-summary.json
 
+# Full flash-sale runs stay local; explicitly add only reviewed reference evidence.
+load-test/results/flash-sale/*/
+
 # SSH private key
 peakpass-key.pem

@@ -56,6 +56,9 @@ jobs:
       - name: Check callback load-test run isolation
         run: node --experimental-vm-modules load-test/payment-callback-check.mjs
 
+      - name: Check authenticated write-load harness contracts
+        run: npm run test:flash-sale
+
       - name: Build production image
         run: docker build -t peakpass:ci .
 

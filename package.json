@@ -28,6 +28,8 @@
     "load-test:spike": "k6 run load-test/spike.js",
     "load-test:sustained": "k6 run load-test/sustained.js",
     "load-test:callbacks": "k6 run load-test/payment-callback.js",
+    "load-test:flash-sale": "node load-test/flash-sale-fixture.mjs",
+    "test:flash-sale": "node --experimental-vm-modules --test load-test/flash-sale-check.mjs",
     "load-test:rate-limit:graphql": "k6 run load-test/graphql-rate-limit.js",
     "load-test:rate-limit:reservations": "k6 run load-test/reservation-rate-limit.js",
     "load-test:baseline:report": "k6 run --summary-export=load-test/results/baseline-summary.json load-test/baseline.js",
