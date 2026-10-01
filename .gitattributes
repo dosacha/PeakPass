@@ -1,2 +1,2 @@
 # Evidence metadata is hashed as bytes; preserve it across Windows/Linux checkout.
-load-test/results/flash-sale-baseline/*.json -text
+load-test/results/flash-sale-baseline/*.json -text whitespace=blank-at-eol,blank-at-eof,space-before-tab,cr-at-eol
