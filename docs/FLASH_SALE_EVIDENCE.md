@@ -1,4 +1,18 @@
-# 실제 쓰기 부하 측정 계약 — P1 / flash-sale-v1
+# 실제 쓰기 부하 측정 계약 — P2 / flash-sale-v2
+
+## v2 변경 계약
+
+P2의 실행 전 프로토콜·분모·중단 기준·결과는 [FLASH_SALE_BASELINE.md](FLASH_SALE_BASELINE.md)에 있다. 아래 P1 설명에서 v2가 바꾼 사항은 이 절이 우선한다. P1 reference ZIP/검증 기록은 수정하지 않으며 `flash-sale-v1` 저부하 증거로만 보존한다.
+
+- `--warmup-seconds`(기본0), `--drain-seconds`(기본30, 최대240), `--limiter-max`(기본1,000,000)를 추가했다. `users/rate`는 warmup을 포함한 연속 도착 기간이다. 측정창은 k6 scenario start + warmup부터 도착 종료까지의 반개방 구간이며 최소2초다. `sample-ms`는 최대250ms로 제한하고 실제 표본 간격/경계도 검사한다.
+- 명시적 실험 limiter는 run 규모와 독립적으로 고정한다. fail-closed/auth/production 쓰기 로직과 CPU·메모리/pool/info 로그는 유지한다. 부모 환경의 `K6_*` override는 provisioning 전에 거절한다.
+- `api_duration`/`api_responses`의 `business=success|failure`는 실제 응답의 status·사용자·이벤트·수량·연결 검증 결과다. `normal|retry|replay`와 별개다. buyer index/cohort로 원본과 SQL identity를 대조한다. 시작 시각·도착 지연도 raw metric으로 보존한다.
+- paid 집계는 실제 status별이다. pending/active hold/expired reconciliation은 미완료와 정합성 위반을 구분한다. 기존 엄격한 smoke `passed`와 k6 종료코드를 유지하고 `analysis.json`에 측정 유효성/안정·과부하·제한재고 결과를 별도로 기록한다.
+- 관측·로그·최종 SQL·cleanup을 독립 시도하므로 smoke 실패가 관측 검사나 cleanup을 건너뛰지 않는다. `resources.jsonl`은 앱/PG/Redis Docker CPU·메모리, host CPU·가용 메모리, k6 process CPU 누적초·메모리 표본이다. `clockChecks`로 PG와 host 시각을 비교한다. CPU 표본은 단독 인과관계 증거가 아니다.
+- child 로그는 줄 단위로 비밀값을 제거해 파일에 저장하고 반환 버퍼는64KiB tail로 제한한다. 앱 로그도 줄 단위로 읽는다. `sourceHashes`는 명명된 SHA256 canonical UTF-8 LF 계약이며 `rawSourceHashes`는 실제 실행 바이트다. 결과 `artifactHashes`는 원본 바이트 SHA256이다.
+- 재분석: `node load-test/flash-sale-analysis.mjs <run-folder>`는 원본을 변경하지 않고 JSON을 출력한다. 성공 throughput은 창 안의 검증된 HTTP 완료와 최종 SQL paid가 일치하는 고유 구매/창 초다. SQL `paid_at`은 transaction-start timestamp이므로 commit 시간으로 쓰지 않는다.
+
+## P1에서 인수한 기본 동작 (v1 역사 포함)
 
 [Issue #10](https://github.com/dosacha/PeakPass/issues/10)의 산출물이다. 기존 예매 계약을 호출하는 측정 도구이며 대기열·캐시 재고 차감·처리량 개선 구현은 포함하지 않는다. 아래 작은 실행은 하네스 정합성 증거다. 서비스의 최대 처리량이나 성능 개선 수치로 사용하지 않는다.
 
