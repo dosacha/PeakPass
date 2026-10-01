@@ -48,7 +48,9 @@ function request(stage, body, user, key, kind = 'normal', expectedOrderId, expec
   const route = { reservation: '/reservations', checkout: '/checkouts', settlement: '/webhooks/payments/settlement' }[stage];
   const response = http.post(`${__ENV.FS_BASE_URL}${route}`, payload, { headers, tags, timeout: '10s' });
   const result = json(response);
-  const valid = stage === 'settlement' ? response.status === 200 && paid(result, user, body.orderId, expectedTicketIds)
+  // Retries/replays may return either the first cached result or a DB replay.
+  const duplicateValid = typeof result.duplicate === 'boolean' && (kind !== 'normal' || result.duplicate === false);
+  const valid = stage === 'settlement' ? response.status === 200 && duplicateValid && paid(result, user, body.orderId, expectedTicketIds)
     : stage === 'reservation' ? response.status === 201 && !!result.id && result.status === 'active'
       && result.userId === user.id && result.eventId === fixture.eventId && result.quantity === s.quantity && result.tierId === fixture.tierId
     : response.status === 201 && !!result.order?.id && (!expectedOrderId || result.order.id === expectedOrderId) && result.order.userId === user.id && result.order.eventId === fixture.eventId
@@ -60,7 +62,7 @@ function request(stage, body, user, key, kind = 'normal', expectedOrderId, expec
   responses.add(1, metricTags);
   apiDuration.add(response.timings.duration, metricTags);
   const expiredSettlement = stage === 'settlement' && kind !== 'replay' && response.status === 200 && result.paymentStatus === 'settled'
-    && typeof result.duplicate === 'boolean'
+    && duplicateValid
     && result.order?.id === body.orderId && result.order.status === 'expired' && result.order.userId === user.id
     && result.order.eventId === fixture.eventId && result.order.quantity === s.quantity && Array.isArray(result.tickets) && result.tickets.length === 0;
   if (response.status >= 200 && response.status < 300 && !valid && !expiredSettlement) protocolFailures.add(1, metricTags);
@@ -88,9 +90,8 @@ function ticketsMatch(tickets, user, orderId, expectedIds) {
 }
 
 function paid(result, user, orderId, expectedTicketIds) {
-  // Same-key HTTP replays can return the cached first response (duplicate: false).
-  return typeof result.duplicate === 'boolean' && result.paymentStatus === 'settled' && result.order?.id === orderId && result.order.status === 'paid'
-    && result.order.userId === user.id && result.order.eventId === fixture.eventId && result.order.quantity === s.quantity
+  return result.paymentStatus === 'settled' && result.order?.id === orderId && result.order.status === 'paid'
+    && result.order.userId === user.id && result.order.eventId === fixture.eventId && result.order.quantity === s.quantity && result.order.tierId === fixture.tierId
     && ticketsMatch(result.tickets, user, orderId, expectedTicketIds);
 }
 
@@ -109,10 +110,10 @@ function purchase() {
   started.add(1, tags);
   activeVUs.add(exec.instance.vusActive);
   unexpected.add(0); replayFailures.add(0);
-  function finish(outcome) {
+  function finish(outcome, result) {
     outcomes.add(1, { ...tags, outcome });
     journeyDuration.add(Date.now() - start, { ...tags, outcome });
-    if (outcome === 'paid') completed.add(1, tags);
+    if (outcome === 'paid') completed.add(1, { ...tags, order_id: result.order.id, ticket_ids: JSON.stringify(result.tickets.map(t => t.id).sort()) });
     else if (outcome !== 'stock_rejected') unexpected.add(1);
   }
   function rejected(response) {
@@ -134,7 +135,7 @@ function purchase() {
   const settlement = { orderId: order.id, providerTransactionId: user.provider, status: 'settled' };
   const response = attempt('settlement', settlement, user, user.callbackKey);
   if (!response.businessValid) { rejected(response); return; }
-  finish('paid');
+  finish('paid', json(response));
   // Deliberate replays are outside purchase latency and never create another completion.
   if (s.replayEvery > 0 && index % s.replayEvery === 0) {
     const ticketIds = json(response).tickets.map(t => t.id);

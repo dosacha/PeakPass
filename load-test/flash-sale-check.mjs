@@ -95,6 +95,9 @@ test('both purchase paths sign requests and replay without counting extra buyers
       assert.equal(calls[1].options.tags.kind, 'replay');
     }
     assert.equal(metrics.filter(m => m.name === 'buyers_completed').length, 1);
+    const completion = metrics.find(m => m.name === 'buyers_completed');
+    assert.equal(completion.tags.order_id, 'order');
+    assert.deepEqual(JSON.parse(completion.tags.ticket_ids), ['ticket-0', 'ticket-1']);
   }
 });
 
@@ -163,12 +166,28 @@ test('settlement duplicate marker is boolean, including cached false and uncache
       const faults = [{ stage: 'settlement', kind, status: 200, body }];
       if (kind === 'retry') faults.unshift({ stage: 'settlement', kind: 'normal', status: 503, once: true });
       const { metrics, requests } = await runScenario(faults);
-      const valid = typeof duplicate === 'boolean';
+      const valid = kind === 'normal' ? duplicate === false : typeof duplicate === 'boolean';
       assert.ok(requests.some(r => r.stage === 'settlement' && r.options.tags.kind === kind));
       assert.equal(metrics.some(m => m.name === 'protocol_failures' && m.value === 1), !valid);
       assert.equal(metrics.some(m => m.name === 'api_duration' && m.tags.stage === 'settlement' && m.tags.kind === kind && m.tags.business === 'success'), valid);
       assert.equal(metrics.filter(m => m.name === 'buyers_completed').length, valid || kind === 'replay' ? 1 : 0);
       assert.equal(metrics.some(m => m.name === 'replay_failures' && m.value === 1), !valid && kind === 'replay');
+    }
+  }
+});
+
+test('paid settlement responses retain the fixture tier on normal, retry and replay', async () => {
+  for (const kind of ['normal', 'retry', 'replay']) {
+    for (const tierId of [undefined, null, 'other', 'standard']) {
+      const body = { paymentStatus: 'settled', duplicate: false,
+        order: { id: 'order', status: 'paid', userId: 'user-0', eventId: 'event', quantity: 2, tierId },
+        tickets: [0, 1].map(i => ({ id: `ticket-${i}`, orderId: 'order', userId: 'user-0', eventId: 'event', status: 'active' })) };
+      const faults = [{ stage: 'settlement', kind, status: 200, body }];
+      if (kind === 'retry') faults.unshift({ stage: 'settlement', kind: 'normal', status: 503, once: true });
+      const { metrics } = await runScenario(faults);
+      assert.equal(metrics.some(m => m.name === 'protocol_failures'), tierId !== 'standard');
+      assert.equal(metrics.filter(m => m.name === 'buyers_completed').length, tierId === 'standard' || kind === 'replay' ? 1 : 0);
+      assert.equal(metrics.some(m => m.name === 'replay_failures' && m.value === 1), tierId !== 'standard' && kind === 'replay');
     }
   }
 });
@@ -188,6 +207,10 @@ test('pending orders and expired settled reconciliation are not paid or corrupt'
   data.callbackKeys.push({ order_id: 'o', provider_transaction_id: 'provider', idempotency_key: 'cb', callback_status: 'settled' });
   v = harness.verifySnapshot(data, users, settings, {}, 99);
   assert.equal(v.integrityPassed, true); assert.equal(v.counts.paidOrders, 0);
+  for (const reconciliation_required of [false, null, undefined]) {
+    const payments = [data.payments[0], { ...data.payments[1], reconciliation_required }];
+    assert.equal(harness.verifySnapshot({ ...data, payments }, users, settings, {}, 99).integrityPassed, false);
+  }
   data.callbackKeys[0].provider_transaction_id = 'other';
   assert.equal(harness.verifySnapshot(data, users, settings, {}, 99).integrityPassed, false);
 });
@@ -208,10 +231,16 @@ test('every order retains exactly one pending checkout audit with the buyer key'
       tickets: status === 'paid' ? [0, 1].map(i => ({ id: `t${i}`, order_id: 'o', user_id: 'u', event_id: 'e', status: 'active' })) : [],
       payments: [pending], callbackKeys: [] };
     if (status === 'paid') {
-      data.payments.push({ order_id: 'o', status: 'settled', provider_transaction_id: 'provider', idempotency_key: 'cb' });
+      data.payments.push({ order_id: 'o', status: 'settled', provider_transaction_id: 'provider', idempotency_key: 'cb', reconciliation_required: false });
       data.callbackKeys.push({ order_id: 'o', provider_transaction_id: 'provider', idempotency_key: 'cb', callback_status: 'settled' });
     }
     assert.equal(harness.verifySnapshot(data, users, settings, {}, 99).integrityPassed, true);
+    if (status === 'paid') {
+      for (const reconciliation_required of [true, null, undefined]) {
+        const payments = [pending, { ...data.payments[1], reconciliation_required }];
+        assert.equal(harness.verifySnapshot({ ...data, payments }, users, settings, {}, 99).integrityPassed, false);
+      }
+    }
     const terminal = data.payments.filter(p => p !== pending);
     for (const facts of [[], [pending, pending], [{ ...pending, status: 'settled' }], [{ ...pending, idempotency_key: 'wrong' }],
       [pending, { ...pending, order_id: 'unknown' }]]) {
@@ -226,14 +255,40 @@ test('measurement window includes its left boundary only and keeps warmup spillo
   const point = (metric, seconds, tags = {}, value = 1) => ({ metric, data: { time: new Date(start + seconds * 1000).toISOString(), value, tags } });
   const points = [point('scenario_start_ms', 0, {}, start), point('buyers_started', 0, { buyer: '0', cohort: 'warmup' }),
     point('buyers_started', 10, { buyer: '10', cohort: 'measurement' }), point('buyers_started', 39, { buyer: '39', cohort: 'measurement' }),
-    point('buyers_completed', 10, { buyer: '0', cohort: 'warmup' }), point('buyers_completed', 39.999, { buyer: '10', cohort: 'measurement' }),
-    point('buyers_completed', 40, { buyer: '39', cohort: 'measurement' })];
+    point('buyers_completed', 10, { buyer: '0', cohort: 'warmup', order_id: 'o0', ticket_ids: '["t0"]' }), point('buyers_completed', 39.999, { buyer: '10', cohort: 'measurement', order_id: 'o10', ticket_ids: '["t10"]' }),
+    point('buyers_completed', 40, { buyer: '39', cohort: 'measurement', order_id: 'o39', ticket_ids: '["t39"]' })];
   const manifest = { settings: { users: 40, rate: 1, warmupSeconds: 10, durationSeconds: 40, measurementSeconds: 30, drainSeconds: 30 },
     fixture: { userIds: Array.from({ length: 40 }, (_, i) => `u${i}`) } };
-  const result = analyzePoints(points, manifest, { orders: [0, 10, 39].map(i => ({ user_id: `u${i}`, status: 'paid' })) });
+  const result = analyzePoints(points, manifest, { orders: [0, 10, 39].map(i => ({ id: `o${i}`, user_id: `u${i}`, status: 'paid' })), tickets: [0, 10, 39].map(i => ({ id: `t${i}`, order_id: `o${i}` })) });
   assert.equal(result.window.confirmedPaid, 2); assert.equal(result.window.warmupSpillover, 1);
   assert.equal(result.window.paidPerSecond, 2 / 30); assert.equal(result.cohort.confirmedPaid, 2);
   assert.equal(result.cohort.offered, 30); assert.equal(result.cohort.actualWindowArrivals, 2);
+});
+
+test('confirmed paid requires the captured order and exact SQL ticket identity', async () => {
+  const { analyzePoints } = await import('./flash-sale-analysis.mjs');
+  const start = Date.parse('2026-10-01T00:00:00Z');
+  const manifest = { settings: { users: 2, rate: 1, warmupSeconds: 0, durationSeconds: 2, measurementSeconds: 2, drainSeconds: 30 }, fixture: { userIds: ['u0', 'u1'] } };
+  const sql = { orders: [{ id: 'o0', user_id: 'u0', status: 'paid' }], tickets: [{ id: 't1', order_id: 'o0' }, { id: 't0', order_id: 'o0' }] };
+  const analyze = tags => analyzePoints([
+    { metric: 'scenario_start_ms', data: { value: start } },
+    { metric: 'buyers_completed', data: { time: new Date(start + 1000).toISOString(), value: 1, tags: { buyer: '0', ...tags } } },
+  ], manifest, sql);
+  const valid = { order_id: 'o0', ticket_ids: '["t0","t1"]' };
+  assert.equal(analyze(valid).window.confirmedPaid, 1, 'SQL ordering is irrelevant');
+  assert.equal(analyze({ ...valid, ticket_ids: '["t1","t0"]' }).window.confirmedPaid, 1, 'HTTP ordering is irrelevant');
+  for (const tags of [{ ...valid, ticket_ids: '["fake0","fake1"]' }, { ...valid, ticket_ids: '["t0"]' }, { ...valid, order_id: 'other' }]) {
+    const a = analyze(tags);
+    assert.equal(a.window.confirmedPaid, 0);
+    assert.equal(a.all.httpPaidIdentityMismatches, 1);
+    assert.equal(a.all.missingPaidIdentity, 0);
+  }
+  for (const tags of [{}, { order_id: 'o0' }, { ...valid, ticket_ids: 'bad-json' }, { ...valid, ticket_ids: '["t0","t0"]' }]) {
+    const a = analyze(tags);
+    assert.equal(a.window.confirmedPaid, 0);
+    assert.equal(a.all.missingPaidIdentity, 1);
+    assert.equal(a.all.httpPaidIdentityMismatches, 0);
+  }
 });
 
 test('coverage detects missing boundaries and errors even for failed smoke', async () => {
@@ -333,7 +388,7 @@ test('errors and settled-but-expired responses cannot count as a successful purc
   for (const duplicate of [undefined, null, 'true', false, true]) {
     const expired = await runScenario({ stage: 'settlement', status: 200, body: { paymentStatus: 'settled', duplicate, order: { id: 'order', status: 'expired', userId: 'user-0', eventId: 'event', quantity: 2 }, tickets: [] } });
     assert.equal(expired.metrics.filter(m => m.name === 'buyers_completed').length, 0);
-    assert.equal(expired.metrics.some(m => m.name === 'protocol_failures'), typeof duplicate !== 'boolean', 'valid expired settlement is unfinished; malformed metadata is a protocol failure');
+    assert.equal(expired.metrics.some(m => m.name === 'protocol_failures'), duplicate !== false, 'first expired ACK requires duplicate false and remains unfinished');
   }
 });
 

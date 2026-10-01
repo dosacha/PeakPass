@@ -7,7 +7,7 @@ import { join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { createHash } from 'node:crypto';
 
-export const ANALYSIS_REVISION = 'flash-sale-analysis-v2.5';
+export const ANALYSIS_REVISION = 'flash-sale-analysis-v2.6';
 
 export function stats(values) {
   const a = values.filter(Number.isFinite).sort((x, y) => x - y);
@@ -66,9 +66,27 @@ export function analyzePoints(points, manifest, sql) {
   const inWindow = p => inside(p.data.time, left, right);
   const buyer = p => Number(p.data.tags.buyer);
   const measured = p => buyer(p) >= s.warmupSeconds * s.rate && buyer(p) < s.users;
-  const paidUsers = new Set(sql.orders.filter(o => o.status === 'paid').map(o => o.user_id));
+  const paidOrders = new Map(sql.orders.filter(o => o.status === 'paid').map(o => [o.user_id, o]));
+  const paidUsers = new Set(paidOrders.keys());
   const starts = select('buyers_started'), completions = select('buyers_completed');
-  const confirmed = completions.filter(p => paidUsers.has(manifest.fixture.userIds[buyer(p)]));
+  const ticketsByOrder = new Map();
+  for (const ticket of sql.tickets ?? []) {
+    if (!ticketsByOrder.has(ticket.order_id)) ticketsByOrder.set(ticket.order_id, []);
+    ticketsByOrder.get(ticket.order_id).push(ticket.id);
+  }
+  const identities = new Map(completions.map(p => {
+    try {
+      const orderId = p.data.tags.order_id, ids = JSON.parse(p.data.tags.ticket_ids);
+      if (typeof orderId === 'string' && orderId.length > 0 && Array.isArray(ids) && ids.length > 0
+        && ids.every(id => typeof id === 'string' && id.length > 0) && new Set(ids).size === ids.length) return [p, { orderId, ids: ids.sort() }];
+    } catch { /* Missing or malformed captured identity is incomplete evidence. */ }
+    return [p, null];
+  }));
+  const matchesSql = p => {
+    const order = paidOrders.get(manifest.fixture.userIds[buyer(p)]), identity = identities.get(p);
+    return order && identity && identity.orderId === order.id && JSON.stringify(identity.ids) === JSON.stringify((ticketsByOrder.get(order.id) ?? []).sort());
+  };
+  const confirmed = completions.filter(matchesSql);
   const windowPaid = confirmed.filter(inWindow), cohortPaid = confirmed.filter(measured);
   const journeys = select('journey_duration').filter(measured);
   const responsePoints = select('api_responses');
@@ -104,7 +122,10 @@ export function analyzePoints(points, manifest, sql) {
       maximumDrainEnd: new Date(right - 1 + s.drainSeconds * 1000).toISOString() },
     all: { offered: s.users, started: count('buyers_started'), httpPaid: count('buyers_completed'), sqlPaid: paidUsers.size,
       sqlPaidWithoutHttp: [...paidUsers].filter(id => !completions.some(p => manifest.fixture.userIds[buyer(p)] === id)).length,
-      httpPaidWithoutSql: completions.length - confirmed.length, duplicateStarts: starts.length - unique(starts), duplicateCompletions: completions.length - unique(completions),
+      httpPaidWithoutSql: completions.filter(p => !paidUsers.has(manifest.fixture.userIds[buyer(p)])).length,
+      missingPaidIdentity: completions.filter(p => !identities.get(p)).length,
+      httpPaidIdentityMismatches: completions.filter(p => identities.get(p) && paidUsers.has(manifest.fixture.userIds[buyer(p)]) && !matchesSql(p)).length,
+      duplicateStarts: starts.length - unique(starts), duplicateCompletions: completions.length - unique(completions),
       dropped: count('dropped_iterations'), scriptFailures: count('script_failures'), protocolFailures: count('protocol_failures'), replayFailures: count('replay_failures'),
       arrivalLagMs: stats(select('arrival_lag_ms').map(p => p.data.value)), responses: counts,
       maxActiveVUs: Math.max(0, ...select('active_vus_at_arrival').map(p => p.data.value)) },
@@ -145,7 +166,8 @@ export async function analyzeRun(directory, suppliedManifest) {
   const observed = observations.filter(inWindow), pools = app.poolSamples.filter(inWindow), resourceWindow = resources.filter(inWindow);
   const clocks = m.clockChecks ?? [];
   const evidence = {
-    checkoutProtocol: m.revision === 'flash-sale-v2.5',
+    checkoutProtocol: m.revision === 'flash-sale-v2.6',
+    paidIdentityObserved: a.missingPaidIdentity === 0,
     checkoutAuditObserved: verification.integrityNames?.includes('checkoutPaymentIdentity') === true,
     accounting: metricAccounting(points, summary.metrics),
     observer: coverage(observations, left, right, 1000), pool: coverage(app.poolSamples, left, right, 1000), resources: coverage(resources, left, right, 6000),
@@ -166,7 +188,7 @@ export async function analyzeRun(directory, suppliedManifest) {
   if (Object.keys(a.responses).some(k => /\/(401|403|429)\//.test(k))) invalidReasons.push('auth-or-limiter');
   const stable = a.replayFailures === 0 && c.completionFraction >= .99 && w.failureFraction !== null && w.failureFraction <= .01 && c.paidJourneyMs.p99 !== null && c.paidJourneyMs.p99 <= 2000
     && Math.abs(w.firstHalfPaidPerSecond - w.secondHalfPaidPerSecond) / m.settings.rate <= .2;
-  const integrity = verification.integrityPassed && a.httpPaidWithoutSql === 0;
+  const integrity = verification.integrityPassed && a.httpPaidWithoutSql === 0 && a.httpPaidIdentityMismatches === 0;
   return { revision: m.revision, analysisRevision: ANALYSIS_REVISION, runId: m.runId, classification: classify({ integrity, valid: invalidReasons.length === 0, stable, stock: m.settings.stock }),
     smokePassed: m.smokePassed ?? m.passed, k6ExitCode: m.k6ExitCode, invalidReasons, evidence, ...analysis,
     diagnostics: { poolWaiting: stats(pools.map(o => o.waiting)), poolCheckedOut: stats(pools.map(o => o.checkedOut)),

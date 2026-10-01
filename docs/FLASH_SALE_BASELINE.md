@@ -1,6 +1,6 @@
 # P2 A baseline — protocol and results (2026-10-01 KST)
 
-현재 gate: **v2.5 정산 응답 검증을 추가했으며 전체12회 재측정 전이므로 P2 재수용 미완료**다. v2.4는 호스트 메모리 부족으로 중단됐고, 아래 남은7회 재개 계획도 새 계약으로 대체했다. v2.3 수용은 이전 revision의 이력이며, #12의 consumed 입력과 #17의 A는 stale/blocked다. v2.3/v2.4 raw에 HTTP 응답 본문이 없어 새 boolean 검사를 소급 통과시킬 수 없다. 아래 수치·원본은 삭제하거나 새 revision으로 재표기하지 않는다. 최신 중단 원본은 [v2.4 인덱스](../load-test/results/flash-sale-baseline-v24/index.json)에 있다.
+현재 gate: **v2.6 정산 응답·SQL 티켓 identity 대조를 추가하고 전체12회 재측정을 준비 중이며 P2 재수용 미완료**다. v2.5는 메모리 시작 조건에 미달해 부하0회였고, 아래 계획은 새 v2.6 계획으로 대체한다. v2.3의 수용과 v2.4의 중단은 당시 revision의 이력이다. #12의 consumed 입력과 #17의 A는 stale/blocked이며 기존 원본·판정은 보존한다.
 
 ## Input gate and scope
 
@@ -242,3 +242,12 @@ main의 branch diff 검토와 일반 reviewer 및 별도 최종 reviewer의6파�
 2026-10-01 04:12:12/04:12:39 UTC 시작 점검은 각각2,067,136,512/2,081,751,040bytes(약1.93/1.94GiB)로2GiB에 미달했다. 따라서 **v2.5 HTTP 부하는 아직0회이며 preflight 자원도 생성하지 않았다**. 이 점검 실패는 서비스 부하 실패나 처리량 관측이 아니다. [v2.5 검증 기록](../load-test/results/flash-sale-baseline-v25/validation.json)·validation ZIP의21파일에 RED/GREEN·전체 검사·측정 실행 스크립트·시각/bytes를 보존했다. 새 accepted tuple/IDs는 없고 P2 및 #12/#17은 재검증 대기다.
 
 동일 별도 최종 reviewer가 전달5파일까지 검토하고 No findings를 반환했다.21개 ZIP 항목·artifact/archive/supplemental 해시, staged JSON/ZIP 바이트, 구현 커밋의4개 코드 해시, 기존44파일 불변, 검증 메타데이터 및2개 메모리 점검값을 독립 확인했다. 실행/수용 IDs가 비어 있는 상태와 문서가 일치한다.
+
+
+## v2.6 실행 전 계획 — 응답과 SQL identity 대조
+
+PR20 c65a1b3의 오토리뷰4151818757/4151818761/4151818765/4151818770을 explorer·테스트 조사 agent·reviewer가 읽기 전용으로 조사한 뒤 main이 검증 공백4건을 재현했다. 신규 callback/provider인 최초 normal 정산은 duplicate:false, retry/replay는 boolean 양쪽을 허용한다. paid 응답의 tier와 fixture를 대조하고 paid SQL 정산 fact의 reconciliation_required는 false, expired fact는 true를 요구한다. 기존 buyers_completed에 첫 정산의 order_id와 정렬된 ticket_ids JSON을 기록해 fixture buyer와 SQL paid 주문·티켓 집합을 정확히 대조한다. 누락/비정상 identity 증거는 invalid, 관측된 SQL 불일치는 integrity-defect다. 앱·스키마·의존성은 바꾸지 않는다.
+
+하네스 flash-sale-v2.6 / 분석 flash-sale-analysis-v2.6. 실행 source를 깨끗한 커밋으로 고정한다. **preflight24명/2s^-1=12초, warmup0/drain30,10/20VU**의 ample 및 limited6석 각1회(`p2-v26-preflight-{ample,limited}-01`) 뒤, 정식 ample **2/10/25;25/10/2;2/10/25**의9회(`p2-v26-ample-r<rate>-01..03`), limited10/s·300명·60석3회(`p2-v26-limited-01..03`)를 실행한다. ample warmup10초/측정30초, limited0/30초, 최대drain30초, 정식100/100VU, 자원·pool·로그·250ms표본·혼합·think/retry/replay·limiter·분모·반복·안정/중단 기준은 앞서 고정한 그대로다. 각 실행 전2GiB 이상5초 간격3표본, 창 내1GiB 미만 연속3표본 중단 기준도 유지한다. invalid/integrity 또는 ample nonpaid>=20%/paid p99>5초면 중단하고 실패 원본을 보존한다. 테스트/build와 측정은 겹치지 않는다.
+
+새 raw/ZIP 위치는 flash-sale-baseline-v26이며 v2.3/v2.4 원본과 v2.5 검증 ZIP은 변경하지 않는다. 기존 raw에는 최초 반환 티켓 identity가 없어 새 계약으로 소급 수용하지 않는다. v2.5 계획은 부하 미실행 이력으로 남긴다. 새 전체 행렬과 검토 완료 전 accepted tuple/IDs는 없고 #12/#17은 stale/blocked다. 최초 확인한 메모리는 약4.99GiB였으며 실제 실행마다 다시 시작 조건을 확인한다.

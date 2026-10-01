@@ -1,10 +1,12 @@
-# 실제 쓰기 부하 측정 계약 — P2 / flash-sale-v2.5
+# 실제 쓰기 부하 측정 계약 — P2 / flash-sale-v2.6
 
 v2.4는 PR20 오토리뷰를 반영한다. 전체 started buyer와 terminal journey를 buyer별로 대조하고 terminal 수=완료 iterations를 함께 요구해 drain 중단을 배제한다. 각 주문의 null-provider pending payment audit는 해당 buyer checkout key로 정확히1개여야 한다. checkout 응답은 pending일 때 빈 tickets 배열, 정산 후 replay일 때 paid와 최초 정산의 동일한 유효 티켓 ID 집합을 요구한다. 이미 paid인 replay에 expired 응답 예외는 허용하지 않는다.
 
 v2.5는 모든 성공 정산 응답(normal/retry/replay 및 expired ACK)의 `duplicate`에 boolean 타입을 요구한다. 동일 키의 HTTP replay는 첫 응답 캐시를 그대로 반환하므로 `false`도 정상이며, DB 재처리 경로의 `true`도 허용한다. 누락/null/문자열은 protocol failure다. expired ACK는 이 검사를 통과해도 paid가 아니며, 이미 paid인 replay의 expired 응답은 계속 거절한다. [기존 HTTP 경로 테스트](../src/tests/integration/route-contract.test.ts)의 cached false 계약을 유지한다.
 
-분석 `flash-sale-analysis-v2.5`는 현재 revision과 audit 검사의 존재를 확인한다. v2.3/v2.4 원본에는 전체 HTTP 응답 본문이 없어 새 boolean 검사를 소급 통과시킬 수 없다. v2.4는 정식6번째 시도에서 메모리 gate로 중단된 미수용 이력이며, 남은7회 재개 계획은 v2.5 전체12회 계획으로 대체했다. 현재 accepted tuple은 없고 후행 ready/수용을 선언하지 않는다. 현재 상태·고정 행렬·원본은 [FLASH_SALE_BASELINE.md](FLASH_SALE_BASELINE.md)를 따른다.
+v2.6은 최초 `normal` 정산(만료 ACK 포함)에 `duplicate:false`를 요구하며 retry/replay의 boolean 양쪽은 유지한다. paid 응답은 fixture tier와 일치해야 하고, SQL provider 정산 fact의 `reconciliation_required`는 paid일 때 false, expired일 때 true여야 한다. `buyers_completed`에 최초 정산의 `order_id`와 정렬한 티켓 ID 배열 JSON인 `ticket_ids`를 보존한다. 분석은 fixture buyer→paid SQL 주문→그 주문의 정확한 티켓 집합을 모두 대조한 완료만 분자에 포함한다. 태그 누락/파싱 불가/중복 ID는 관측 불완전으로 invalid, 정상 형식이지만 SQL identity와 다르면 integrity-defect다.
+
+분석 `flash-sale-analysis-v2.6`는 현재 revision과 위 관측을 요구한다. v2.3/v2.4 raw에 최초 HTTP 티켓 ID가 없어 소급 수용하지 않는다. v2.5는 메모리 시작 조건에 미달해 부하0회였으며 v2.6 전체12회 계획으로 대체했다. 새 accepted tuple은 아직 없고 후행은 stale/blocked다. 현재 상태·고정 행렬·원본은 [FLASH_SALE_BASELINE.md](FLASH_SALE_BASELINE.md)를 따른다.
 
 ## v2 변경 계약
 
@@ -12,7 +14,7 @@ v2.3은 Windows Chocolatey launcher와 그 자식 k6 프로세스를 소유 PID 
 
 v2.2부터 checkout replay도 원본 주문 ID를 검증하며, 잘못된 성공 응답은 protocol failure다. graceful drain cutoff에서 iteration이 중단되면 완전한 시도 집계를 확인할 수 없어 무효 측정으로 남긴다.
 
-분석기 v2.5는 `flash-sale-analysis-v2.3.1`의 종료 경계 보정을 유지한다. 측정 종료와 정상 k6 종료를 모두 가로지르는 마지막 자원 수집의 engine 부재만 허용하며, 실제 engine 표본에는 기존 최대6000ms 간격을 적용하고 중간 누락은 거절한다. 이전 원본 판정과 당시 재분석 SHA/revision은 보존한다.
+분석기 v2.6은 `flash-sale-analysis-v2.3.1`의 종료 경계 보정을 유지한다. 측정 종료와 정상 k6 종료를 모두 가로지르는 마지막 자원 수집의 engine 부재만 허용하며, 실제 engine 표본에는 기존 최대6000ms 간격을 적용하고 중간 누락은 거절한다. 이전 원본 판정과 당시 재분석 SHA/revision은 보존한다.
 
 P2의 실행 전 프로토콜·분모·중단 기준·결과는 [FLASH_SALE_BASELINE.md](FLASH_SALE_BASELINE.md)에 있다. 아래 P1 설명에서 v2가 바꾼 사항은 이 절이 우선한다. P1 reference ZIP/검증 기록은 수정하지 않으며 `flash-sale-v1` 저부하 증거로만 보존한다.
 

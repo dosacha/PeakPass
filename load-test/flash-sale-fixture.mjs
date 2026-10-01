@@ -17,7 +17,7 @@ import { createClient } from 'redis';
 import { analyzeRun } from './flash-sale-analysis.mjs';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
-export const REVISION = 'flash-sale-v2.5';
+export const REVISION = 'flash-sale-v2.6';
 const defaults = { users: 12, rate: 2, 'think-ms': 20, retries: 1, 'retry-delay-ms': 100, 'replay-every': 3, quantity: 2, 'pre-vus': 10, 'max-vus': 20, 'pool-max': 10, 'sample-ms': 250, 'warmup-seconds': 0, 'drain-seconds': 30, 'limiter-max': 1000000 };
 
 export function parseOptions(args) {
@@ -98,7 +98,7 @@ export function verifySnapshot(data, users, settings, metrics, exitCode) {
     const legalFact = p => {
       const o = orderById.get(p.order_id), u = byUser.get(o?.user_id);
       return !!o && !!u && p.provider_transaction_id === u.provider && p.idempotency_key === u.callbackKey
-        && p.status === 'settled' && (o.status === 'paid' || (o.status === 'expired' && p.reconciliation_required === true));
+        && p.status === 'settled' && ((o.status === 'paid' && p.reconciliation_required === false) || (o.status === 'expired' && p.reconciliation_required === true));
     };
     const checks = {
       inventory: e.available_seats >= 0 && e.available_seats + activeHolds + allocated === e.total_seats,

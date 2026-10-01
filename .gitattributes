@@ -2,3 +2,4 @@
 load-test/results/flash-sale-baseline/*.json -text whitespace=blank-at-eol,blank-at-eof,space-before-tab,cr-at-eol
 load-test/results/flash-sale-baseline-v24/*.json -text whitespace=blank-at-eol,blank-at-eof,space-before-tab,cr-at-eol
 load-test/results/flash-sale-baseline-v25/*.json -text whitespace=blank-at-eol,blank-at-eof,space-before-tab,cr-at-eol
+load-test/results/flash-sale-baseline-v26/*.json -text whitespace=blank-at-eol,blank-at-eof,space-before-tab,cr-at-eol
