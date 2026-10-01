@@ -1,5 +1,7 @@
 # P2 A baseline — protocol and results (2026-10-01 KST)
 
+현재 gate: PR20의 `673f0c0` 오토리뷰3건을 재현하여 아래 v2.3 수용은 **이전 revision의 이력**으로 전환한다. v2.4 재측정 전에는 #12의 ready/consumed 입력과 #17의 A 수용을 stale로 본다. HTTP 응답 티켓 배열은 원본에 없어 새 검사를 소급 통과시킬 수 없다. 아래 수치·원본은 삭제하거나 새 revision으로 재표기하지 않는다.
+
 ## Input gate and scope
 
 Base `8f645395bc54c86049a8137b1c0887c4590a2723` contains PR #19 head `09b94fe11b4557097cf0c65ca7969def02c9b414`. Accepted P1 input: implementation `e0fbc78754e17dd6380b1a899373168c3ddf6153`, `flash-sale-v1`, three `p1-reference-{ample-01,ample-02,limited-01}` archives. ZIP hashes, 21 files/archive, all 60 artifact hashes and SQL/cleanup were checked again. Seven sources match after canonical LF normalization. This accepts stored low-load correctness evidence, not capacity. #9/#11 record acceptance; #12/#17 have no accepted P2 input and remain blocked.
@@ -173,3 +175,13 @@ main의 전체 branch diff 검토 후, 별도 fresh-context Astra 최종 reviewe
 최종 전달 바이트 검사에서 main이 JSON 인덱스3개의 Git LF 정규화와 로컬 CRLF 바이트 해시 불일치를 재현했다(원본 ZIP은 일치). `.gitattributes`로 이 증거 디렉터리의 JSON만 `-text`로 고정해 원본 바이트를 보존한다. JSON 내용·측정·분석은 그대로이며, Git blob과 로컬 파일의 SHA256 및 supplemental 해시를 다시 대조했다. 이는 실행 후 아카이브 전달 형식 수정이라 부하를 재실행하지 않는다.
 
 동일 최종 reviewer가 `a769fbc..6334b6100006e3a40fc1a828dbb23b8ef1a75e45`의 전달 수정5파일을 추가 검토하고 **No findings**를 반환했다. JSON3개의 의미·정규화 내용 동일성, Git blob/로컬/supplemental SHA256, 전체 ZIP Git blob 해시, `core.autocrlf=true/false/input`의 checkout-filter 바이트 보존, 전체 branch whitespace를 확인했다. 실제 별도 checkout이나 부하·Docker 실행은 추가하지 않았다. 최종 변경 범위는 기존36파일에 `.gitattributes`를 더한37파일이다.
+
+## 오토리뷰 수정·재측정 사전 고정 — v2.4
+
+오토리뷰4151324845/4151324854/4151324857을 main과 읽기 전용3개 agent가 재현했다. (1) started와 terminal/iterations를 buyer별 대조해 finish 이전·paid 후 replay 중단을 모두 invalid로 만든다. (2) 모든 주문에 buyer checkout key와 일치하는 pending/null-provider 결제 audit가 정확히1개인지 integrity gate에서 검사한다. (3) pending checkout은 tickets 빈 배열, 정산 뒤 checkout replay는 paid 주문과 최초 정산의 유효 티켓 ID 집합(순서 무관)을 요구한다. settlement replay도 같은 티켓 집합을 대조한다. 기존 VM의 replay 응답도 실제 paid 계약으로 고친다.
+
+기존12회의 raw에는 전체5340 starts와 terminal/iterations가 모두 대응하고, SQL4529주문에 pending audit4529개가 주문 키와 일치했다. 이는 저장 원본의 보강 검사이며 원래 비공개 buyer key를 독립 재취득한 검사가 아니다. HTTP 응답 배열은 소급 확인할 수 없으므로 새 정식 전체 행렬을 실행한다. 앱·DB·Compose·로그·자원·사용자 혼합·재고·think/retry/replay·통계 임계값은 변경하지 않는다.
+
+실행 전 확정: 하네스 `flash-sale-v2.4`, 분석 `flash-sale-analysis-v2.4`. 깨끗한 커밋 후 기존 preflight12명/2s^-1의 ample 및 limited6석 각1회(정식 제외), 이후 ample **2/10/25;25/10/2;2/10/25**, 조건당3회. IDs `p2-v24-ample-r<rate>-01..03`; limited10/s·300명·60석3회 `p2-v24-limited-01..03`. ample10s warmup+30s 측정, limited0s warmup+30s 측정, 최대drain30s, pre/max100VU, 250ms DB/pool 표본과 1000000/60s limiter 등 기존 고정값을 사용한다.50/s 이상 또는 VU 증가는 없다.
+
+분모·반복·중단·stable 기준은 기존 사전 규칙 그대로다. invalid/integrity 또는 ample nonpaid>=20%/paid p99>5s 발생 시 중단하고 원본을 보존한 채 원인을 검토한다. 자동 재시도로 불리한 run을 대체하지 않는다. 구현 오류로 revision을 바꾸면 이력과 후행 gate를 먼저 갱신한다. 테스트/build와 측정은 겹치지 않는다. 새 원본은 별도 `flash-sale-baseline-v24/`에 보존하여 v2.3 ZIP과 인덱스 바이트를 유지한다.

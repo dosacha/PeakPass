@@ -35,7 +35,7 @@ export const options = {
 };
 
 function json(response) { try { return response.json(); } catch { return {}; } }
-function request(stage, body, user, key, kind = 'normal', expectedOrderId) {
+function request(stage, body, user, key, kind = 'normal', expectedOrderId, expectedTicketIds) {
   const payload = JSON.stringify(body);
   const headers = { 'Content-Type': 'application/json' };
   if (key) headers['Idempotency-Key'] = key;
@@ -48,17 +48,18 @@ function request(stage, body, user, key, kind = 'normal', expectedOrderId) {
   const route = { reservation: '/reservations', checkout: '/checkouts', settlement: '/webhooks/payments/settlement' }[stage];
   const response = http.post(`${__ENV.FS_BASE_URL}${route}`, payload, { headers, tags, timeout: '10s' });
   const result = json(response);
-  const valid = stage === 'settlement' ? response.status === 200 && paid(result, user, body.orderId)
+  const valid = stage === 'settlement' ? response.status === 200 && paid(result, user, body.orderId, expectedTicketIds)
     : stage === 'reservation' ? response.status === 201 && !!result.id && result.status === 'active'
       && result.userId === user.id && result.eventId === fixture.eventId && result.quantity === s.quantity && result.tierId === fixture.tierId
     : response.status === 201 && !!result.order?.id && (!expectedOrderId || result.order.id === expectedOrderId) && result.order.userId === user.id && result.order.eventId === fixture.eventId
       && result.order.quantity === s.quantity && result.order.tierId === fixture.tierId
       && (result.order.reservationId ?? null) === (body.reservationId ?? null)
-      && (result.order.status === 'pending' || (kind === 'replay' && result.order.status === 'paid'));
+      && (kind === 'replay' ? result.order.status === 'paid' && ticketsMatch(result.tickets, user, result.order.id, expectedTicketIds)
+        : result.order.status === 'pending' && Array.isArray(result.tickets) && result.tickets.length === 0);
   const metricTags = { ...tags, status: String(response.status), error_code: String(response.error_code || 0), code: result.error?.code ?? 'none', business: valid ? 'success' : 'failure' };
   responses.add(1, metricTags);
   apiDuration.add(response.timings.duration, metricTags);
-  const expiredSettlement = stage === 'settlement' && response.status === 200 && result.paymentStatus === 'settled'
+  const expiredSettlement = stage === 'settlement' && kind !== 'replay' && response.status === 200 && result.paymentStatus === 'settled'
     && result.order?.id === body.orderId && result.order.status === 'expired' && result.order.userId === user.id
     && result.order.eventId === fixture.eventId && result.order.quantity === s.quantity && Array.isArray(result.tickets) && result.tickets.length === 0;
   if (response.status >= 200 && response.status < 300 && !valid && !expiredSettlement) protocolFailures.add(1, metricTags);
@@ -77,12 +78,18 @@ function attempt(stage, body, user, key) {
   return response;
 }
 
-function paid(result, user, orderId) {
+function ticketsMatch(tickets, user, orderId, expectedIds) {
+  return Array.isArray(tickets) && tickets.length === s.quantity
+    && tickets.every(t => t && typeof t.id === 'string' && t.id.length > 0 && t.orderId === orderId
+      && t.userId === user.id && t.eventId === fixture.eventId && t.status === 'active')
+    && new Set(tickets.map(t => t.id)).size === s.quantity
+    && (!expectedIds || tickets.every(t => expectedIds.includes(t.id)));
+}
+
+function paid(result, user, orderId, expectedTicketIds) {
   return result.paymentStatus === 'settled' && result.order?.id === orderId && result.order.status === 'paid'
     && result.order.userId === user.id && result.order.eventId === fixture.eventId && result.order.quantity === s.quantity
-    && Array.isArray(result.tickets) && result.tickets.length === s.quantity
-    && new Set(result.tickets.map(t => t.id)).size === s.quantity
-    && result.tickets.every(t => t.orderId === orderId && t.userId === user.id && t.eventId === fixture.eventId && t.status === 'active');
+    && ticketsMatch(result.tickets, user, orderId, expectedTicketIds);
 }
 
 export default function () {
@@ -128,8 +135,9 @@ function purchase() {
   finish('paid');
   // Deliberate replays are outside purchase latency and never create another completion.
   if (s.replayEvery > 0 && index % s.replayEvery === 0) {
-    const replayCheckout = request('checkout', body, user, user.checkoutKey, 'replay', order.id);
-    const replaySettlement = request('settlement', settlement, user, user.callbackKey, 'replay');
-    if (replayCheckout.status !== 201 || json(replayCheckout).order?.id !== order.id || replaySettlement.status !== 200 || !paid(json(replaySettlement), user, order.id)) replayFailures.add(1);
+    const ticketIds = json(response).tickets.map(t => t.id);
+    const replayCheckout = request('checkout', body, user, user.checkoutKey, 'replay', order.id, ticketIds);
+    const replaySettlement = request('settlement', settlement, user, user.callbackKey, 'replay', order.id, ticketIds);
+    if (!replayCheckout.businessValid || !replaySettlement.businessValid) replayFailures.add(1);
   }
 }

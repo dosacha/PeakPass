@@ -58,9 +58,10 @@ async function runScenario(fault = null, iteration = 0) {
       return Object.freeze({ status: fault.status, error_code: fault.status === 0 ? 1050 : 0, timings: { duration: 1 }, json: () => fault.body ?? { error: { code: fault.code ?? 'INTERNAL_ERROR' } } });
     }
     const user = users[iteration];
-  const order = { id: 'order', status: 'paid', userId: user.id, eventId: 'event', quantity: settings.quantity, tierId: 'standard', reservationId: iteration === 0 ? 'reservation' : null };
-    const result = stage === 'reservation' ? { id: 'reservation', userId: user.id, eventId: 'event', quantity: settings.quantity, tierId: 'standard', status: 'active' } : stage === 'checkout' ? { order: { ...order, status: 'pending' }, tickets: [] } : {
-      order, paymentStatus: 'settled', tickets: Array.from({ length: settings.quantity }, (_, i) => ({ id: `ticket-${i}`, orderId: 'order', userId: user.id, eventId: 'event', status: 'active' })),
+    const order = { id: 'order', status: 'paid', userId: user.id, eventId: 'event', quantity: settings.quantity, tierId: 'standard', reservationId: iteration === 0 ? 'reservation' : null };
+    const tickets = Array.from({ length: settings.quantity }, (_, i) => ({ id: `ticket-${i}`, orderId: 'order', userId: user.id, eventId: 'event', status: 'active' }));
+    const result = stage === 'reservation' ? { id: 'reservation', userId: user.id, eventId: 'event', quantity: settings.quantity, tierId: 'standard', status: 'active' } : stage === 'checkout' ? (options.tags.kind === 'replay' ? { order, tickets } : { order: { ...order, status: 'pending' }, tickets: [] }) : {
+      order, paymentStatus: 'settled', tickets,
     };
     return Object.freeze({ status: stage === 'settlement' ? 200 : 201, timings: { duration: 1 }, json: () => result });
   } };
@@ -112,11 +113,43 @@ test('a successful replay must return the original checkout identity', async () 
   assert.ok(metrics.some(m => m.name === 'api_duration' && m.tags.kind === 'replay' && m.tags.stage === 'checkout' && m.tags.business === 'failure'));
 });
 
+test('checkout requires empty pending tickets and the original paid replay ticket set', async () => {
+  const order = { id: 'order', status: 'pending', userId: 'user-0', eventId: 'event', quantity: 2, tierId: 'standard', reservationId: 'reservation' };
+  const tickets = [0, 1].map(i => ({ id: `ticket-${i}`, orderId: 'order', userId: 'user-0', eventId: 'event', status: 'active' }));
+  for (const body of [{ order }, { order, tickets: null }, { order, tickets }]) {
+    const { metrics } = await runScenario({ stage: 'checkout', status: 201, body });
+    assert.ok(metrics.some(m => m.name === 'protocol_failures' && m.value === 1));
+    assert.equal(metrics.filter(m => m.name === 'buyers_completed').length, 0);
+  }
+  const paidOrder = { ...order, status: 'paid' };
+  for (const body of [{ order, tickets: [] }, { order: paidOrder }, ...[[], [tickets[0], tickets[0]], [null, tickets[1]],
+    tickets.map(t => ({ ...t, id: '' })), tickets.map(t => ({ ...t, id: `other-${t.id}` })),
+    tickets.map(t => ({ ...t, userId: 'other' })), tickets.map(t => ({ ...t, status: 'used' }))].map(t => ({ order: paidOrder, tickets: t }))]) {
+    const { metrics } = await runScenario({ stage: 'checkout', kind: 'replay', status: 201, body });
+    assert.ok(metrics.some(m => m.name === 'protocol_failures' && m.value === 1));
+    assert.ok(metrics.some(m => m.name === 'replay_failures' && m.value === 1));
+    assert.equal(metrics.filter(m => m.name === 'buyers_completed').length, 1);
+  }
+  const { metrics } = await runScenario({ stage: 'checkout', kind: 'replay', status: 201, body: { order: paidOrder, tickets: [...tickets].reverse() } });
+  assert.ok(!metrics.some(m => ['protocol_failures', 'replay_failures'].includes(m.name) && m.value === 1));
+});
+
 test('window options bound warmup, drain and observer gaps before provisioning', () => {
   const s = parseOptions(['--users', '80', '--rate', '2', '--warmup-seconds', '10', '--drain-seconds', '30', '--limiter-max', '1000000']);
   assert.equal(s.measurementSeconds, 30);
   for (const extra of [['--warmup-seconds', '39'], ['--drain-seconds', '0'], ['--sample-ms', '1001']]) {
     assert.throws(() => parseOptions(['--users', '80', '--rate', '2', ...extra]));
+  }
+});
+
+test('settlement replay cannot replace confirmed paid tickets with expiry or another set', async () => {
+  const order = { id: 'order', status: 'paid', userId: 'user-0', eventId: 'event', quantity: 2, tierId: 'standard' };
+  const tickets = [0, 1].map(i => ({ id: `other-${i}`, orderId: 'order', userId: 'user-0', eventId: 'event', status: 'active' }));
+  for (const body of [{ paymentStatus: 'settled', order: { ...order, status: 'expired' }, tickets: [] }, { paymentStatus: 'settled', order, tickets }]) {
+    const { metrics } = await runScenario({ stage: 'settlement', kind: 'replay', status: 200, body });
+    assert.ok(metrics.some(m => m.name === 'protocol_failures' && m.value === 1));
+    assert.ok(metrics.some(m => m.name === 'replay_failures' && m.value === 1));
+    assert.equal(metrics.filter(m => m.name === 'buyers_completed').length, 1);
   }
 });
 
@@ -143,6 +176,28 @@ test('canonical source identity ignores CRLF while artifact identity does not', 
   assert.equal(typeof harness.sourceHash, 'function');
   assert.equal(harness.sourceHash('one\r\ntwo\r\n'), harness.sourceHash('one\ntwo\n'));
   assert.notEqual(harness.sourceHash('one\ntwo\n'), harness.sourceHash('one\nchanged\n'));
+});
+
+test('every order retains exactly one pending checkout audit with the buyer key', () => {
+  const users = [{ id: 'u', checkoutKey: 'ck', callbackKey: 'cb', provider: 'provider' }];
+  const settings = parseOptions(['--users', '2', '--rate', '1']);
+  const pending = { order_id: 'o', status: 'pending', provider_transaction_id: null, idempotency_key: 'ck' };
+  for (const status of ['pending', 'paid', 'expired']) {
+    const data = { events: [{ id: 'e', available_seats: status === 'expired' ? 4 : 2, total_seats: 4 }], reservations: [],
+      orders: [{ id: 'o', user_id: 'u', event_id: 'e', quantity: 2, status, idempotency_key: 'ck' }],
+      tickets: status === 'paid' ? [0, 1].map(i => ({ id: `t${i}`, order_id: 'o', user_id: 'u', event_id: 'e', status: 'active' })) : [],
+      payments: [pending], callbackKeys: [] };
+    if (status === 'paid') {
+      data.payments.push({ order_id: 'o', status: 'settled', provider_transaction_id: 'provider', idempotency_key: 'cb' });
+      data.callbackKeys.push({ order_id: 'o', provider_transaction_id: 'provider', idempotency_key: 'cb', callback_status: 'settled' });
+    }
+    assert.equal(harness.verifySnapshot(data, users, settings, {}, 99).integrityPassed, true);
+    const terminal = data.payments.filter(p => p !== pending);
+    for (const facts of [[], [pending, pending], [{ ...pending, status: 'settled' }], [{ ...pending, idempotency_key: 'wrong' }],
+      [pending, { ...pending, order_id: 'unknown' }]]) {
+      assert.equal(harness.verifySnapshot({ ...data, payments: [...terminal, ...facts] }, users, settings, {}, 99).integrityPassed, false, status);
+    }
+  }
 });
 
 test('measurement window includes its left boundary only and keeps warmup spillover separate', async () => {
@@ -199,6 +254,23 @@ test('raw accounting requires paired attempt latency and terminal journey eviden
     assert.equal(metricAccounting(raw.filter(p => p.metric !== missing), summary).complete, false, missing);
   }
   assert.equal(metricAccounting(raw.filter(p => !p.metric.startsWith('api_')), summary).complete, false);
+});
+
+test('raw accounting rejects interrupted buyers before finish and during replay', async () => {
+  const { metricAccounting } = await import('./flash-sale-analysis.mjs');
+  const p = (metric, buyer, outcome) => ({ metric, data: { value: 1, tags: { buyer: String(buyer), ...(outcome ? { outcome } : {}) } } });
+  const raw = [];
+  for (let i = 0; i < 100; i++) {
+    raw.push(p('buyers_started', i), p('active_vus_at_arrival', i), p('arrival_lag_ms', i));
+    if (i < 99) raw.push(p('buyers_completed', i), p('journey_outcomes', i, 'paid'), p('journey_duration', i, 'paid'));
+  }
+  const summary = { buyers_started: { count: 100 }, buyers_completed: { count: 99 }, iterations: { count: 99 } };
+  assert.equal(metricAccounting(raw, summary).complete, false, '99% paid must not hide one interrupted buyer');
+  raw.push(p('journey_outcomes', 99, 'http_500'), p('journey_duration', 99, 'http_500'));
+  assert.equal(metricAccounting(raw, { ...summary, iterations: { count: 100 } }).complete, true, 'fully observed failure is valid accounting');
+  assert.equal(metricAccounting(raw, summary).complete, false, 'post-finish replay interruption is invalid');
+  const duplicate = raw.map(point => point.metric.startsWith('journey_') && point.data.tags.buyer === '99' ? { ...point, data: { ...point.data, tags: { ...point.data.tags, buyer: '98' } } } : point);
+  assert.equal(metricAccounting(duplicate, { ...summary, iterations: { count: 100 } }).complete, false, 'duplicate terminal cannot replace a missing buyer');
 });
 
 test('generator evidence identifies the engine even when low-load CPU counters stay constant', async () => {

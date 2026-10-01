@@ -7,7 +7,7 @@ import { join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { createHash } from 'node:crypto';
 
-export const ANALYSIS_REVISION = 'flash-sale-analysis-v2.3.1';
+export const ANALYSIS_REVISION = 'flash-sale-analysis-v2.4';
 
 export function stats(values) {
   const a = values.filter(Number.isFinite).sort((x, y) => x - y);
@@ -45,9 +45,11 @@ export function metricAccounting(points, summary) {
   const sum = metric => select(metric).reduce((n, p) => n + p.data.value, 0);
   const key = p => Object.entries(p.data.tags).sort(([a], [b]) => a.localeCompare(b)).map(([k, v]) => `${k}=${v}`).join('/');
   const bag = metric => { const b = {}; for (const p of select(metric)) b[key(p)] = (b[key(p)] ?? 0) + 1; return Object.entries(b).sort().map(JSON.stringify).join('\n'); };
+  const buyers = metric => JSON.stringify(select(metric).map(p => p.data.tags.buyer).sort());
   const checks = {
     attempts: bag('api_responses') === bag('api_duration') && sum('api_responses') === (summary.http_reqs?.count ?? 0),
-    journeys: bag('journey_outcomes') === bag('journey_duration') && select('journey_outcomes').length === (summary.iterations?.count ?? 0),
+    journeys: bag('journey_outcomes') === bag('journey_duration') && select('journey_outcomes').length === (summary.iterations?.count ?? 0)
+      && select('journey_outcomes').length === sum('buyers_started') && buyers('journey_outcomes') === buyers('buyers_started'),
     arrivalMetrics: select('active_vus_at_arrival').length === sum('buyers_started') && select('arrival_lag_ms').length === sum('buyers_started'),
     summaryCounts: ['buyers_started', 'buyers_completed', 'dropped_iterations', 'script_failures', 'protocol_failures', 'replay_failures'].every(k => sum(k) === (summary[k]?.count ?? 0)),
   };
@@ -143,6 +145,8 @@ export async function analyzeRun(directory, suppliedManifest) {
   const observed = observations.filter(inWindow), pools = app.poolSamples.filter(inWindow), resourceWindow = resources.filter(inWindow);
   const clocks = m.clockChecks ?? [];
   const evidence = {
+    checkoutProtocol: m.revision === 'flash-sale-v2.4',
+    checkoutAuditObserved: verification.integrityNames?.includes('checkoutPaymentIdentity') === true,
     accounting: metricAccounting(points, summary.metrics),
     observer: coverage(observations, left, right, 1000), pool: coverage(app.poolSamples, left, right, 1000), resources: coverage(resources, left, right, 6000),
     clockAligned: clocks.length === 2 && clocks.every(o => Math.abs(o.offsetMs) + o.roundTripMs / 2 <= 100),

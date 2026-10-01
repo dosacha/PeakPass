@@ -17,7 +17,7 @@ import { createClient } from 'redis';
 import { analyzeRun } from './flash-sale-analysis.mjs';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
-export const REVISION = 'flash-sale-v2.3';
+export const REVISION = 'flash-sale-v2.4';
 const defaults = { users: 12, rate: 2, 'think-ms': 20, retries: 1, 'retry-delay-ms': 100, 'replay-every': 3, quantity: 2, 'pre-vus': 10, 'max-vus': 20, 'pool-max': 10, 'sample-ms': 250, 'warmup-seconds': 0, 'drain-seconds': 30, 'limiter-max': 1000000 };
 
 export function parseOptions(args) {
@@ -94,6 +94,7 @@ export function verifySnapshot(data, users, settings, metrics, exitCode) {
     const paidOrders = data.orders.filter(o => o.status === 'paid');
     const orderById = new Map(data.orders.map(o => [o.id, o]));
     const providerFacts = data.payments.filter(p => p.provider_transaction_id !== null);
+    const checkoutFacts = data.payments.filter(p => p.provider_transaction_id === null);
     const legalFact = p => {
       const o = orderById.get(p.order_id), u = byUser.get(o?.user_id);
       return !!o && !!u && p.provider_transaction_id === u.provider && p.idempotency_key === u.callbackKey
@@ -108,6 +109,8 @@ export function verifySnapshot(data, users, settings, metrics, exitCode) {
       reservationConversion: data.reservations.every(r => r.status !== 'converted' || data.orders.filter(o => o.reservation_id === r.id && o.user_id === r.user_id && o.quantity === r.quantity).length === 1),
       ticketOwnership: data.tickets.every(t => data.orders.some(o => o.id === t.order_id && o.user_id === t.user_id && o.event_id === t.event_id && o.status === 'paid') && t.status === 'active'),
       ticketQuantity: data.orders.every(o => data.tickets.filter(t => t.order_id === o.id).length === (o.status === 'paid' ? o.quantity : 0)),
+      checkoutPaymentIdentity: checkoutFacts.length === data.orders.length && data.orders.every(o => checkoutFacts.filter(p =>
+        p.order_id === o.id && p.status === 'pending' && p.idempotency_key === byUser.get(o.user_id)?.checkoutKey).length === 1),
       settlementIdentity: data.orders.every(o => o.status !== 'paid' || data.payments.filter(p => p.order_id === o.id && p.provider_transaction_id === byUser.get(o.user_id)?.provider && p.status === 'settled').length === 1),
       noExtraSettlementFacts: providerFacts.every(legalFact)
         && new Set(providerFacts.map(p => p.order_id)).size === providerFacts.length
@@ -123,7 +126,7 @@ export function verifySnapshot(data, users, settings, metrics, exitCode) {
       noUnexpectedFailures: count('unexpected_failures') === 0 && count('replay_failures') === 0 && exitCode === 0,
     };
     const integrityNames = ['inventory', 'singleOrderPerBuyer', 'singleReservationPerBuyer', 'orderIdentity', 'reservationIdentity',
-      'reservationConversion', 'ticketOwnership', 'ticketQuantity', 'settlementIdentity', 'noExtraSettlementFacts', 'callbackIdentity'];
+      'reservationConversion', 'ticketOwnership', 'ticketQuantity', 'checkoutPaymentIdentity', 'settlementIdentity', 'noExtraSettlementFacts', 'callbackIdentity'];
     const ordersByStatus = {};
     for (const order of data.orders) ordersByStatus[order.status] = (ordersByStatus[order.status] ?? 0) + 1;
     return { checks, integrityPassed: integrityNames.every(k => checks[k]), integrityNames,
