@@ -7,6 +7,8 @@ import { join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { createHash } from 'node:crypto';
 
+export const ANALYSIS_REVISION = 'flash-sale-analysis-v2.3.1';
+
 export function stats(values) {
   const a = values.filter(Number.isFinite).sort((x, y) => x - y);
   const percentile = p => { const n = (a.length - 1) * p, i = Math.floor(n); return a.length ? a[i] + (a[Math.ceil(n)] - a[i]) * (n - i) : null; };
@@ -29,9 +31,13 @@ export function classify({ integrity, valid, stable, stock }) {
   return !integrity ? 'integrity-defect' : !valid ? 'invalid-measurement' : stock === 'limited' ? 'valid-limited' : stable ? 'valid-stable' : 'valid-overload';
 }
 
-export function generatorObserved(samples) {
-  return samples.length >= 2 && samples.every(o => Number.isFinite(o.generator?.cpuSeconds))
-    && samples.every(o => o.generator.processes?.some(p => p.path && p.isShim === false && Number.isFinite(p.cpuSeconds) && p.cpuSeconds >= 0 && p.memoryBytes > 0));
+export function generatorObserved(samples, start, end, loadEndedAt) {
+  const healthy = o => Number.isFinite(o.generator?.cpuSeconds)
+    && o.generator.processes?.some(p => p.path && p.isShim === false && Number.isFinite(p.cpuSeconds) && p.cpuSeconds >= 0 && p.memoryBytes > 0);
+  // A sequential process/Docker query can straddle both window end and normal k6 exit.
+  const terminalSample = o => epoch(o.endedAt) >= end && epoch(loadEndedAt) >= epoch(o.at) && epoch(loadEndedAt) <= epoch(o.endedAt);
+  return samples.filter(o => inside(o.at, start, end)).every(o => healthy(o) || terminalSample(o))
+    && coverage(samples.filter(healthy), start, end, 6000).complete;
 }
 
 export function metricAccounting(points, summary) {
@@ -140,7 +146,7 @@ export async function analyzeRun(directory, suppliedManifest) {
     accounting: metricAccounting(points, summary.metrics),
     observer: coverage(observations, left, right, 1000), pool: coverage(app.poolSamples, left, right, 1000), resources: coverage(resources, left, right, 6000),
     clockAligned: clocks.length === 2 && clocks.every(o => Math.abs(o.offsetMs) + o.roundTripMs / 2 <= 100),
-    generatorObserved: generatorObserved(resourceWindow),
+    generatorObserved: generatorObserved(resources, left, right, m.loadEndedAt),
     containersObserved: resourceWindow.length > 0 && resourceWindow.every(o => ['app', 'postgres', 'redis'].every(service => o.containers?.some(c => c.service === service && Number.isFinite(c.cpuPercent) && Number.isFinite(c.memoryPercent)))),
     clean: cleanup.passed === true && !m.cleanupError && !m.teardownError,
     auth: negatives.dataUnchanged === true && negatives.checks.length === 3 && negatives.checks.every(o => o.status === o.expected),
@@ -157,7 +163,7 @@ export async function analyzeRun(directory, suppliedManifest) {
   const stable = a.replayFailures === 0 && c.completionFraction >= .99 && w.failureFraction !== null && w.failureFraction <= .01 && c.paidJourneyMs.p99 !== null && c.paidJourneyMs.p99 <= 2000
     && Math.abs(w.firstHalfPaidPerSecond - w.secondHalfPaidPerSecond) / m.settings.rate <= .2;
   const integrity = verification.integrityPassed && a.httpPaidWithoutSql === 0;
-  return { revision: m.revision, runId: m.runId, classification: classify({ integrity, valid: invalidReasons.length === 0, stable, stock: m.settings.stock }),
+  return { revision: m.revision, analysisRevision: ANALYSIS_REVISION, runId: m.runId, classification: classify({ integrity, valid: invalidReasons.length === 0, stable, stock: m.settings.stock }),
     smokePassed: m.smokePassed ?? m.passed, k6ExitCode: m.k6ExitCode, invalidReasons, evidence, ...analysis,
     diagnostics: { poolWaiting: stats(pools.map(o => o.waiting)), poolCheckedOut: stats(pools.map(o => o.checkedOut)),
       lockWaiters: stats(observed.map(o => o.activity?.lock_waiters)), lockTypes: [...new Set(observed.flatMap(o => o.locks?.map(l => l.locktype) ?? []))],

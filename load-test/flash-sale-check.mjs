@@ -204,10 +204,19 @@ test('raw accounting requires paired attempt latency and terminal journey eviden
 test('generator evidence identifies the engine even when low-load CPU counters stay constant', async () => {
   const { generatorObserved } = await import('./flash-sale-analysis.mjs');
   assert.equal(typeof generatorObserved, 'function');
-  const sample = isShim => ({ generator: { cpuSeconds: .0625, processes: [{ path: 'k6.exe', isShim, cpuSeconds: .0625, memoryBytes: 60000000 }] } });
-  assert.equal(generatorObserved([sample(true), sample(true)]), false);
-  assert.equal(generatorObserved([sample(false), sample(false)]), true);
-  assert.equal(generatorObserved([{ generator: null }, { generator: { cpuSeconds: 1 } }]), false);
+  const sample = (isShim, at) => ({ at, generator: { cpuSeconds: .0625, processes: [{ path: 'k6.exe', isShim, cpuSeconds: .0625, memoryBytes: 60000000 }] } });
+  assert.equal(generatorObserved([sample(true,0), sample(true,3000)],0,3000), false);
+  assert.equal(generatorObserved([sample(false,0), sample(false,3000)],0,3000), true);
+  assert.equal(generatorObserved([{ at:0,generator: null }, { at:3000,generator: { cpuSeconds: 1 } }],0,3000), false);
+});
+
+test('generator coverage tolerates process exit across the end boundary but rejects interior gaps', async () => {
+  const { generatorObserved } = await import('./flash-sale-analysis.mjs');
+  const sample = at => ({ at, generator: { cpuSeconds: 1, processes: [{ path: 'k6.exe', isShim: false, cpuSeconds: 1, memoryBytes: 60000000 }] } });
+  const samples = [0,3000,6000,9000].map(sample);
+  assert.equal(generatorObserved([...samples,{at:9999,endedAt:11000,generator:null}],0,10000,10100),true);
+  assert.equal(generatorObserved([...samples,{at:5999,endedAt:6500,generator:null}],0,10000,10100),false);
+  assert.equal(generatorObserved([sample(0),sample(9000)],0,10000),false);
 });
 
 test('reservation timeout is never replayed; transient checkout retry preserves the logical request', async () => {

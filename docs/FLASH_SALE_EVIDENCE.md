@@ -6,6 +6,8 @@ v2.3은 Windows Chocolatey launcher와 그 자식 k6 프로세스를 소유 PID 
 
 v2.2부터 checkout replay도 원본 주문 ID를 검증하며, 잘못된 성공 응답은 protocol failure다. graceful drain cutoff에서 iteration이 중단되면 완전한 시도 집계를 확인할 수 없어 무효 측정으로 남긴다.
 
+분석기 `flash-sale-analysis-v2.3.1`은 측정 종료와 정상 k6 종료를 모두 가로지르는 마지막 자원 수집의 engine 부재만 허용한다. 실제 engine 표본에는 기존 최대6000ms 간격을 적용하고 중간 누락은 거절한다. 원본 판정은 보존하며 재분석 SHA/revision과 실행 SHA를 따로 고정한다.
+
 P2의 실행 전 프로토콜·분모·중단 기준·결과는 [FLASH_SALE_BASELINE.md](FLASH_SALE_BASELINE.md)에 있다. 아래 P1 설명에서 v2가 바꾼 사항은 이 절이 우선한다. P1 reference ZIP/검증 기록은 수정하지 않으며 `flash-sale-v1` 저부하 증거로만 보존한다.
 
 - `--warmup-seconds`(기본0), `--drain-seconds`(기본30, 최대240), `--limiter-max`(기본1,000,000)를 추가했다. `users/rate`는 warmup을 포함한 연속 도착 기간이다. 측정창은 k6 scenario start + warmup부터 도착 종료까지의 반개방 구간이며 최소2초다. `sample-ms`는 최대250ms로 제한하고 실제 표본 간격/경계도 검사한다.
