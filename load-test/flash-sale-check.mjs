@@ -186,11 +186,12 @@ test('raw accounting requires paired attempt latency and terminal journey eviden
   const p = (metric, tags = {}) => ({ metric, data: { value: 1, tags } });
   const raw = [p('buyers_started', { buyer: '0' }), p('buyers_completed', { buyer: '0' }), p('journey_outcomes', { buyer: '0', outcome: 'paid' }),
     p('journey_duration', { buyer: '0', outcome: 'paid' }), p('api_responses', { buyer: '0', stage: 'checkout' }), p('api_duration', { buyer: '0', stage: 'checkout' }), p('active_vus_at_arrival'), p('arrival_lag_ms')];
-  const summary = { buyers_started: { count: 1 }, buyers_completed: { count: 1 }, iterations: { count: 1 } };
+  const summary = { buyers_started: { count: 1 }, buyers_completed: { count: 1 }, iterations: { count: 1 }, http_reqs: { count: 1 } };
   assert.equal(metricAccounting(raw, summary).complete, true);
   for (const missing of ['api_duration', 'journey_outcomes', 'journey_duration', 'active_vus_at_arrival', 'arrival_lag_ms']) {
     assert.equal(metricAccounting(raw.filter(p => p.metric !== missing), summary).complete, false, missing);
   }
+  assert.equal(metricAccounting(raw.filter(p => !p.metric.startsWith('api_')), summary).complete, false);
 });
 
 test('reservation timeout is never replayed; transient checkout retry preserves the logical request', async () => {

@@ -35,7 +35,7 @@ export function metricAccounting(points, summary) {
   const key = p => Object.entries(p.data.tags).sort(([a], [b]) => a.localeCompare(b)).map(([k, v]) => `${k}=${v}`).join('/');
   const bag = metric => { const b = {}; for (const p of select(metric)) b[key(p)] = (b[key(p)] ?? 0) + 1; return Object.entries(b).sort().map(JSON.stringify).join('\n'); };
   const checks = {
-    attempts: bag('api_responses') === bag('api_duration'),
+    attempts: bag('api_responses') === bag('api_duration') && sum('api_responses') === (summary.http_reqs?.count ?? 0),
     journeys: bag('journey_outcomes') === bag('journey_duration') && select('journey_outcomes').length === (summary.iterations?.count ?? 0),
     arrivalMetrics: select('active_vus_at_arrival').length === sum('buyers_started') && select('arrival_lag_ms').length === sum('buyers_started'),
     summaryCounts: ['buyers_started', 'buyers_completed', 'dropped_iterations', 'script_failures', 'protocol_failures', 'replay_failures'].every(k => sum(k) === (summary[k]?.count ?? 0)),
