@@ -54,4 +54,10 @@ Ruling before v2.1 pilots: repeat2,10,25/s only. The excluded50/s trial hit the 
 
 ## Formal matrix and results
 
-Not executed yet. Append pilot decision before formal execution.
+Before formal execution: v2.1 corrected pilots2/10/25 delivered every arrival with no dropped iterations and valid observation/cleanup. Rates2/10 were stable (30s paid/s2/10, cohort60/60 and300/300, paid journey p99 97.51/107.02ms). Rate25 was valid-overload: 747/750 cohort paid (99.6%), window750 paid (includes3 warmup spillover), 24/1902 non-replay attempts failed (1.2618%), p99 383.02ms. No stop threshold was reached. These are selection pilots, not formal replicates.
+
+Formal matrix fixed now: ample2,10,25/s, three each, ordered **2/10/25;25/10/2;2/10/25**. Run IDs `p2-ample-r<rate>-01..03`. Then limited10/s,300users,60seats, three runs `p2-limited-01..03`. All use the settings above and independent fresh resources; tests/builds remain suspended during measurement.
+
+Before this matrix, review tightened replay checkout identity validation: a201 response returning another order is a malformed success (invalid protocol), not merely a replay HTTP failure. Regression observed RED then GREEN. Revision **flash-sale-v2.2** changes only this harness validation, not offered load/application/resources/thresholds. v2.1 pilots only select the matrix; all accepted formal runs will use v2.2 source. Earlier revisions are not accepted P2 inputs.
+
+Explicit supported drain boundary: a k6 iteration interrupted at the30s graceful cutoff, including interruption during post-purchase replay, is **invalid-measurement** because complete request/iteration accounting cannot be established. Preserve its paid/SQL/raw facts, but do not infer delivered-capacity validity from them. Valid overload can contain fully observed failed journeys and pending SQL orders; this harness does not certify censored in-flight attempts.

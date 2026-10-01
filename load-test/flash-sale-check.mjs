@@ -53,7 +53,7 @@ async function runScenario(fault = null, iteration = 0) {
       assert.equal(options.headers.Authorization, undefined, 'provider uses HMAC, not a buyer JWT');
       assert.equal(options.headers['x-webhook-signature'], createHmac('sha256', secret).update(`${options.headers['x-webhook-timestamp']}.${body}`).digest('hex'));
     }
-    if (fault && stage === fault.stage && (!fault.once || !faultUsed)) {
+    if (fault && stage === fault.stage && (!fault.kind || fault.kind === options.tags.kind) && (!fault.once || !faultUsed)) {
       faultUsed = true;
       return Object.freeze({ status: fault.status, error_code: fault.status === 0 ? 1050 : 0, timings: { duration: 1 }, json: () => fault.body ?? { error: { code: fault.code ?? 'INTERNAL_ERROR' } } });
     }
@@ -103,6 +103,13 @@ test('malformed 201 bodies fail protocol validation and success latency excludes
     assert.ok(metrics.some(m => m.name === 'protocol_failures' && m.value === 1));
     assert.ok(metrics.some(m => m.name === 'api_duration' && m.tags.stage === stage && m.tags.business === 'failure'));
   }
+});
+
+test('a successful replay must return the original checkout identity', async () => {
+  const { metrics } = await runScenario({ stage: 'checkout', kind: 'replay', status: 201,
+    body: { order: { id: 'different-order', status: 'paid', userId: 'user-0', eventId: 'event', quantity: 2, tierId: 'standard', reservationId: 'reservation' } } });
+  assert.ok(metrics.some(m => m.name === 'protocol_failures' && m.value === 1));
+  assert.ok(metrics.some(m => m.name === 'api_duration' && m.tags.kind === 'replay' && m.tags.stage === 'checkout' && m.tags.business === 'failure'));
 });
 
 test('window options bound warmup, drain and observer gaps before provisioning', () => {

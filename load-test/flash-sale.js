@@ -35,7 +35,7 @@ export const options = {
 };
 
 function json(response) { try { return response.json(); } catch { return {}; } }
-function request(stage, body, user, key, kind = 'normal') {
+function request(stage, body, user, key, kind = 'normal', expectedOrderId) {
   const payload = JSON.stringify(body);
   const headers = { 'Content-Type': 'application/json' };
   if (key) headers['Idempotency-Key'] = key;
@@ -51,7 +51,7 @@ function request(stage, body, user, key, kind = 'normal') {
   const valid = stage === 'settlement' ? response.status === 200 && paid(result, user, body.orderId)
     : stage === 'reservation' ? response.status === 201 && !!result.id && result.status === 'active'
       && result.userId === user.id && result.eventId === fixture.eventId && result.quantity === s.quantity && result.tierId === fixture.tierId
-    : response.status === 201 && !!result.order?.id && result.order.userId === user.id && result.order.eventId === fixture.eventId
+    : response.status === 201 && !!result.order?.id && (!expectedOrderId || result.order.id === expectedOrderId) && result.order.userId === user.id && result.order.eventId === fixture.eventId
       && result.order.quantity === s.quantity && result.order.tierId === fixture.tierId
       && (result.order.reservationId ?? null) === (body.reservationId ?? null)
       && (result.order.status === 'pending' || (kind === 'replay' && result.order.status === 'paid'));
@@ -128,7 +128,7 @@ function purchase() {
   finish('paid');
   // Deliberate replays are outside purchase latency and never create another completion.
   if (s.replayEvery > 0 && index % s.replayEvery === 0) {
-    const replayCheckout = request('checkout', body, user, user.checkoutKey, 'replay');
+    const replayCheckout = request('checkout', body, user, user.checkoutKey, 'replay', order.id);
     const replaySettlement = request('settlement', settlement, user, user.callbackKey, 'replay');
     if (replayCheckout.status !== 201 || json(replayCheckout).order?.id !== order.id || replaySettlement.status !== 200 || !paid(json(replaySettlement), user, order.id)) replayFailures.add(1);
   }

@@ -17,7 +17,7 @@ import { createClient } from 'redis';
 import { analyzeRun } from './flash-sale-analysis.mjs';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
-export const REVISION = 'flash-sale-v2.1';
+export const REVISION = 'flash-sale-v2.2';
 const defaults = { users: 12, rate: 2, 'think-ms': 20, retries: 1, 'retry-delay-ms': 100, 'replay-every': 3, quantity: 2, 'pre-vus': 10, 'max-vus': 20, 'pool-max': 10, 'sample-ms': 250, 'warmup-seconds': 0, 'drain-seconds': 30, 'limiter-max': 1000000 };
 
 export function parseOptions(args) {
