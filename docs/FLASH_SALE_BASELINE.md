@@ -1,4 +1,4 @@
-# P2 A baseline — preregistered protocol (2026-10-01 KST)
+# P2 A baseline — protocol and results (2026-10-01 KST)
 
 ## Input gate and scope
 
@@ -8,10 +8,10 @@ Three read-only agents investigated before main finalized this plan. No applicat
 
 ## Implementation plan
 
-- [ ] Add failing regression cases for phase boundaries, pending/expired settlement facts, malformed business success, SQL identity reconciliation, failed-run coverage and missing evidence.
-- [ ] Modify `flash-sale.js` and fixture runner; add pure `flash-sale-analysis.mjs`. Keep strict smoke exit/result while classifying evidence independently. Stream logs; canonical LF plus raw source hashes; bound sampling input. No new dependency.
-- [ ] Verify relevant checks and actual small ample/limited HTTP+SQL preflights, then commit measured source. Fix any measurement bug before pilots.
-- [ ] Run pilot ladder, fix formal matrix before any formal execution, run each condition three times. Never overlap tests/builds/other workloads with measurement.
+- [x] Add failing regression cases for phase boundaries, pending/expired settlement facts, malformed business success, SQL identity reconciliation, failed-run coverage and missing evidence.
+- [x] Modify `flash-sale.js` and fixture runner; add pure `flash-sale-analysis.mjs`. Keep strict smoke exit/result while classifying evidence independently. Stream logs; canonical LF plus raw source hashes; bound sampling input. No new dependency.
+- [x] Verify relevant checks and actual small ample/limited HTTP+SQL preflights, then commit measured source. Fix any measurement bug before pilots.
+- [x] Run pilot ladder, fix formal matrix before any formal execution, run each condition three times. Never overlap tests/builds/other workloads with measurement.
 - [ ] Analyze/archive every run including failure; run unit/full feasible integration/build/typecheck/lint, branch diff review and separate final reviewer. Main resolves findings; update gate and handoff.
 
 ## Protocol v2 (fixed before any load)
@@ -67,3 +67,103 @@ v2.2 formal stopped after `p2-ample-r2-01`: all80 buyers paid, window60/60 and2/
 Post-hoc analysis correction, before limited-stock runs: `p2-v23-ample-r25-03` stopped the series on generatorObserved only. Window ended02:00:07.493Z; the final sequential resource query spanned07.378–09.896Z and k6 exited normally at07.776Z (1000 complete iterations,0 interrupted/dropped). Previous actual engine sample was3.356s before window end. Analysis revision **flash-sale-analysis-v2.3.1** permits only a resource query straddling BOTH measurement end and k6 exit to lack the engine, while still requiring actual-engine coverage within the preregistered6000ms and rejecting interior null/shim/error samples. A read-only reviewer checked raw timestamps and the exception; main added RED/GREEN end-boundary and interior-gap regressions.
 
 Uniformly reanalyze every v2.3 formal run with this analysis revision; preserve original `analysis.json` and all archive bytes, and label corrected analyses separately in the index. No latency/throughput/success/stop thresholds, fixture, load script, collector or application changed. Therefore existing raw measurements remain reusable with an explicit **measurement SHA + analysis SHA** tuple. This is a disclosed post-hoc instrumentation correction, not a preregistered statistical acceptance change. Limited runs use the same v2.3 measurement code and settings with only analyzer/tests/docs changed; record both measured commits and their source hashes. Resume the originally fixed three limited runs after committing this ruling; no failed run is silently replaced.
+
+## 최종 측정 결과 (2026-10-01 KST)
+
+실제 환경은 Windows11/i5-10400F(12 logical CPU), host Node24.15.0·k6 1.7.1, Docker Desktop Linux12vCPU/8,281,108,480bytes, 앱 Node18.20.8, PostgreSQL16.12, Redis7.4.8이다. 각 이미지 digest·loopback port·container ID·전체 명령은 run manifest에 있다. 앱1CPU/512MiB, PG1CPU/512MiB, Redis0.5CPU/256MiB, pool2–10 및 info 로그를 고정했다.
+
+12개 앱 이미지 digest는 실행별 Compose 프로젝트 이름 라벨 때문에 서로 다르다. 해당 소유권 라벨을 각 manifest와 대조한 뒤 제외했을 때 RootFS 모든 계층과 나머지 runtime Config/Architecture/Os는12개 모두 동일했다([동등성 기록](../load-test/results/flash-sale-baseline/image-equivalence.json), canonical runtime SHA256 `c1c8821e11f0bcb1f0da19846b41acc39efacf888d04b2b29afbf54b17e1537c`).
+
+대기열 없는 기존 쓰기 경로에서 ample 2·10·25명/초 각각3회는 사전 안정 기준을 만족했다. **이는 이 환경·30초 측정창·허용 오류 기준에서 관측한 범위이며 최대 용량이 아니다.** 25명/초에는 실제500과 미완료 주문이 있었고 모든 strict smoke는 실패했다. 안정 기준의 99% 완료/1% 요청 실패 허용은 실험 가정이며 운영 SLO가 아니다. 50명/초 예비 실행은 발생기/VU 한계로 무효여서 서비스 포화점으로 쓰지 않는다. 대기열의 필요성·개선 효과는 아직 입증하지 않았다.
+
+표의 값은 **3회 중앙값 [최솟값–최댓값]**이며 percentile을 합쳐 다시 계산하지 않았다. 구매/s는 측정창 고유 HTTP paid와 최종 SQL paid 사용자 일치를30초로 나눈다. 완료율은 scheduled measurement cohort 전체(미완료 포함)가 분모다. 오류율은 창 안 non-replay normal+retry 시도의429/5xx/전송실패 비율이며 품절409는 별도다.
+
+| 조건 | 창 paid/s | cohort 완료율 % | 요청 실패율 % | paid 여정 p95 ms | paid 여정 p99 ms |
+|---|---:|---:|---:|---:|---:|
+| ample-2 | 2.00 [2.00–2.00] | 100.00 [100.00–100.00] | 0.00 [0.00–0.00] | 82.40 [79.10–89.05] | 94.00 [89.20–113.00] |
+| ample-10 | 10.00 [10.00–10.00] | 100.00 [100.00–100.00] | 0.00 [0.00–0.13] | 81.00 [76.05–81.05] | 93.10 [88.03–118.38] |
+| ample-25 | 25.00 [24.93–25.03] | 100.00 [99.73–100.00] | 0.58 [0.21–0.79] | 125.00 [108.00–125.65] | 276.00 [186.51–332.01] |
+| limited-10 | 1.00 [1.00–1.00] | 10.00 [10.00–10.00] | 0.00 [0.00–0.00] | 88.10 [85.85–104.45] | 95.39 [93.26–145.66] |
+
+limited의1 paid/s와10%는 재고가30개 주문으로 제한된 결과다. 세 번 모두300명 시작,30 paid/60 tickets/270 INSUFFICIENT_INVENTORY, 잔여0·pending0·active hold0이었다. 마지막 paid는 scenario 시작 후2.942–2.952초, 마지막 도착은29.897초였다. 이 수치를 ample 용량 곡선에 섞지 않는다.
+
+### 실행별 분모와 미완료
+
+모든 정식 실행은 offered=started, dropped0, script/protocol failure0, replay failure0, SQL paid without HTTP0, HTTP paid without SQL0이었다. 최대 도착 lag는24ms였다. 인증 negative3개/회는 별도이며 모두 기대401/403/401 및 DB 불변을 확인했다.
+
+| Run ID (`p2-v23-` 생략) | 전체 시작 | cohort paid/offered | 창 paid/30s | 실패 시도/전체 non-replay | 전체 SQL paid | pending 주문 | active hold 좌석 | strict smoke |
+|---|---:|---:|---:|---:|---:|---:|---:|---|
+| ample-r2-01 | 80 | 60/60 | 60/30 | 0/150 | 80 | 0 | 0 | True |
+| ample-r2-02 | 80 | 60/60 | 60/30 | 0/150 | 80 | 0 | 0 | True |
+| ample-r2-03 | 80 | 60/60 | 60/30 | 0/150 | 80 | 0 | 0 | True |
+| limited-01 | 300 | 30/300 | 30/30 | 0/345 | 30 | 0 | 0 | True |
+| limited-02 | 300 | 30/300 | 30/30 | 0/345 | 30 | 0 | 0 | True |
+| limited-03 | 300 | 30/300 | 30/30 | 0/345 | 30 | 0 | 0 | True |
+| ample-r10-01 | 400 | 300/300 | 300/30 | 0/750 | 400 | 0 | 0 | True |
+| ample-r10-02 | 400 | 300/300 | 300/30 | 0/750 | 400 | 0 | 0 | True |
+| ample-r10-03 | 400 | 300/300 | 300/30 | 1/751 | 400 | 0 | 0 | True |
+| ample-r25-01 | 1000 | 750/750 | 750/30 | 4/1879 | 999 | 1 | 0 | False |
+| ample-r25-02 | 1000 | 748/750 | 748/30 | 15/1888 | 996 | 3 | 2 | False |
+| ample-r25-03 | 1000 | 750/750 | 751/30 | 11/1887 | 999 | 1 | 0 | False |
+
+25명/초의 전체 SQL paid는999/996/999였다. 측정 cohort의 미완료는0/2/0명이고 나머지 실패는 warmup cohort다. `r25-02`의2명은 최종HTTP500이며 unknown outcome은0이었다. `r25-03` 창751 paid에는 warmup 유입의 완료1개가 포함된다. cohort750과 창751은 서로 다른 분자다. paid 여정 percentile은 성공자 조건부이며 이 미완료 수를 대체하지 않는다.
+
+측정 cohort 마지막 도착/마지막 confirmed paid는 scenario 시작 기준: 2/s39.494–39.495초/39.535–39.540초, 10/s39.895초/39.932–39.940초, 25/s39.955초/39.993–40.019초였다. 최대 drain은69.999초지만 마지막 confirmed paid는40.019초 이내였다. pending/hold는 HTTP 여정이 실패로 끝난 뒤 남은 DB 상태이며 drain 중 완료됐다고 세지 않았다. 최종 SQL 후 소유 fixture를 정리했으므로 이 주문들의 장기 만료/회수는 이번 측정 결과가 아니다.
+
+### API 지연: 성공과 실패
+
+아래는 측정창의 non-replay(normal+retry), stage/business별 값이다. 건수는3회 모두(없는 그룹은0)를 포함한다. 실패 관측이 없는 반복의 지연은 정의하지 않으므로 `관측 반복`을 표시한다. flow/kind/status/error_code/API code별 세부 분모와 replay 지연은 index의 각 run `analysis.window.apiLatencyMs` 및 `analysis.all.responses`, 원본 raw에 남아 있다.
+
+| 조건 | stage/business | 관측 반복 | 시도 수 | p95 ms | p99 ms |
+|---|---|---:|---:|---:|---:|
+| ample-2 | checkout/success | 3/3 | 60 [60–60] | 15.02 [14.39–15.06] | 23.23 [16.76–29.63] |
+| ample-2 | reservation/success | 3/3 | 30 [30–30] | 14.00 [13.92–16.05] | 24.31 [14.41–40.81] |
+| ample-2 | settlement/success | 3/3 | 60 [60–60] | 17.83 [17.50–19.30] | 24.69 [18.42–25.71] |
+| ample-10 | checkout/success | 3/3 | 300 [300–300] | 15.06 [12.58–15.95] | 29.09 [20.27–35.78] |
+| ample-10 | reservation/success | 3/3 | 150 [150–150] | 12.41 [11.59–14.38] | 20.98 [17.15–27.10] |
+| ample-10 | settlement/failure | 1/3 | 0 [0–1] | 236.87 [236.87–236.87] | 236.87 [236.87–236.87] |
+| ample-10 | settlement/success | 3/3 | 300 [300–300] | 15.23 [13.81–17.70] | 28.21 [25.37–29.06] |
+| ample-25 | checkout/failure | 3/3 | 4 [1–5] | 123.69 [104.93–143.51] | 123.69 [105.69–146.98] |
+| ample-25 | checkout/success | 3/3 | 750 [750–750] | 26.75 [21.45–32.20] | 59.37 [49.34–62.20] |
+| ample-25 | reservation/success | 3/3 | 375 [375–375] | 16.28 [15.99–17.70] | 31.51 [30.57–35.71] |
+| ample-25 | settlement/failure | 3/3 | 6 [3–11] | 129.83 [103.99–154.18] | 137.04 [104.03–157.92] |
+| ample-25 | settlement/success | 3/3 | 750 [748–751] | 43.67 [37.61–47.66] | 107.01 [103.69–114.59] |
+| limited-10 | checkout/failure | 3/3 | 135 [135–135] | 13.26 [12.99–13.85] | 20.15 [18.51–25.37] |
+| limited-10 | checkout/success | 3/3 | 30 [30–30] | 15.66 [14.78–37.58] | 41.03 [29.74–75.92] |
+| limited-10 | reservation/failure | 3/3 | 135 [135–135] | 8.09 [7.60–9.89] | 14.94 [12.84–35.15] |
+| limited-10 | reservation/success | 3/3 | 15 [15–15] | 16.42 [13.75–19.14] | 19.14 [16.85–27.09] |
+| limited-10 | settlement/success | 3/3 | 30 [30–30] | 19.46 [14.36–25.69] | 24.76 [21.72–35.14] |
+
+ample의 실패 응답은500/INTERNAL_ERROR였으며, 제한 재고 실패는409/INSUFFICIENT_INVENTORY였다. 정식 실행에서401/403/429·전송오류·기타409는 구매 시도에 없었다(negative 인증 검사는 별도).
+
+### 관측된 압력과 진단 한계
+
+25/s 측정창의 transaction retry 예정 로그는77/133/126회로 늘었다. pool waiting 표본은 모든 정식 run에서0이었고 lock waiter 최대는0/2/1이었다. `transactionid`와 `tuple` 대기 표본은 hot-event 쓰기 충돌의 단서지만 DB 단독 병목이나 포화의 증거는 아니다.
+
+25/s의 run별 app CPU 중앙값은34.71–38.40%, PG는17.67–22.07%였다. Redis observer PING p99는3.61–4.47ms였다. 이는 각 컨테이너 제한(앱/PG 각1CPU)의 Docker 표본과 외부 PING이며 앱 Redis 명령 지연이 아니다. 최대 실제 active VU, host CPU/여유 메모리, 엔진 누적 CPU·RSS, 각 관측 경계/간격/오류는 index와 원본에 있다. 자원 수집은 약3초 간격의 순차 조회이고 각 구간은 종료 경계와 겹칠 수 있어 순간 인과관계를 확정하지 않는다.
+
+실제 쓰기 경로를 수정하지 않았다. checkout의 SERIALIZABLE 재시도·event row lock·멱등 키 경합, reservation의 event row lock, settlement의 order/callback 처리와 info 로그 비용이 함께 포함된다. 정식 범위에서는 pool 고갈·CPU 포화가 확인되지 않았다. 더 높은 부하에서의 포화점, 장시간 지속성, 다중 인스턴스, WAN/브라우저, 실제 네트워크 단절 및 운영 성능은 미검증이다.
+
+### 수용 tuple·원본과 제외 범위
+
+- 측정 revision: `flash-sale-v2.3`; ample SHA `076140a73d74fe82f7428cb5fe3f4a4b33b7876c`, limited SHA `ef6ea93dd9de8884b8d0652bf3bad912d4b6dd45`.
+- 분석 revision: `flash-sale-analysis-v2.3.1`; SHA `ef6ea93dd9de8884b8d0652bf3bad912d4b6dd45`; canonical source hash `32829cef78eb04e3ce555fa463005aff4acb4cb88944c37c9f74ad9171708d84`.
+- accepted IDs: `p2-v23-ample-r2-01..03`, `p2-v23-ample-r10-01..03`, `p2-v23-ample-r25-01..03`, `p2-v23-limited-01..03`.
+- 두 측정 SHA 사이의 diff는 분석기·경계 regression·문서뿐이다. 실행 하네스/부하 스크립트/Compose/Dockerfile/lockfile/앱 계측의 canonical hashes는 동일하다. 모든 원본 manifest는 clean source 상태였다. 분석을 전체12회에 같은 revision으로 적용했다.
+- [원본 인덱스](../load-test/results/flash-sale-baseline/index.json)에 SHA별 source hashes, 원본 분류, 수정 분석, 반복 통계가 있다. [ZIP SHA256](../load-test/results/flash-sale-baseline/archives.sha256)과23개 ZIP(총16.38MiB,529파일/506개 artifact hash 검증)을 함께 전달한다. JWT·private-key·credential-URL 패턴 검사에서 검출0이었다. 합성 UUID와 진단 로그는 보존했다.
+- v2 preflight3개, v2 pilot4개, v2.1 selection pilot3개, v2.2 formal 중단1개는 정식 통계에서 제외했다. script 예외·launcher 관측·CPU 증가 판정의 한계와 실패 SQL을 그대로 보존했다. v2의50/s pilot은312 dropped/max lag6173ms/100VU 한계 때문에 유효한50/s 서비스 부하가 아니다.
+- `p2-v23-ample-r25-03`의 원본 `invalid-measurement` 판정도 ZIP에서 유지한다. 종료 경계 수집 race를 위에서 공개한 사후 분석 수정으로만 보정했다. 이 보정은 통계 임계값 변경이 아니다.
+
+### #12 / #17 인계
+
+P3은 이 tuple과 환경에서2·10·25 offered arrivals/s가 사전 안정 기준을 만족했다는 제한된 근거를 소비한다. 25/s의 실제500·pending/hold와 미관측 포화점을 함께 소비해야 한다. 입장 제어의 실험 목적은 더 큰 burst에서 쓰기 재시도/오류를 줄이면서 전체 대기·포기 비용을 비교하는 것이다. 현재 결과만으로 큐 도입이나 효과를 정당화하지 않는다. R/C/TTL은 아직 미확정이며 paid/s·실제 active VU·preallocated100VU를 서로 같은 용량으로 환산하지 않는다. 10–25/s는 후속 실험 후보 범위일 뿐 운영 권고값이 아니다.
+
+P8은 이 A 조건과 원본을 부분 입력으로 소비하되 P3/P6/P7 산출물이 없어 blocked다. B/C와 비교하려면 같은 사용자/혼합/재고/think/retry/replay/auth/limiter/로그/pool/자원/30초 창/3회 반복·발생기 조건을 맞춘다. 쓰기 경로·계측·환경이 바뀌면 A도 다시 측정한다. 새 VU/고부하 조건은 먼저 프로토콜을 고정해야 하며 기존50/s 무효 run을 포화점으로 재사용하지 않는다. #13–16/#18은 수용한 결과가 없어 blocked 유지, 재오픈할 완료 결과는 없다. v1 smoke 및 제외된 v2 pilot을 용량으로 읽는 해석은 stale다.
+
+### 검증·최종 리뷰
+
+측정과 겹치지 않게 새 전용 PostgreSQL/Redis에서 실행했다. production image의 빈 DB migration001–011/재실행/readiness/서명 GraphQL 검사 통과, 하네스19/19, callback harness 통과, unit21 suites/159 tests, integration24 suites/250 tests(파괴적 opt-in15개 포함, skipped0), build/typecheck 통과, lint0errors/기존9warnings였다. 실제 명령·시간·종료코드와 원본 로그는 `validation.zip`의 `results.json` 및 각 검사 파일에 있다.
+
+새 테스트 자원은 owner label과 정확한 ID로 정리했고 cleanupErrors는0이다. 기존 중지된 Redis는 원래 ID/이름/중지 상태로 복원했다. 검증 스크립트의 실패 중 정리/복원 누락과 실패 없는 반복의0건 통계 누락은 읽기 전용 검토 후 main이 수정했다. 단위·통합 검증을 mock 기반 하네스 경계 검사와 혼동하지 않으며, 실제 HTTP/PG/Redis 부하 증거는 별도23개 run ZIP이다.
+
+전체 branch diff와 별도 최종 reviewer 결과는 마지막 검토 후 확정한다. P1 입력 origin/main `8f645395bc54c86049a8137b1c0887c4590a2723` 및 PR19 포함 여부는 완료 시 다시 확인한다.
