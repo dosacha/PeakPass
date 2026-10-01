@@ -169,3 +169,5 @@ P8은 이 A 조건과 원본을 부분 입력으로 소비하되 P3/P6/P7 산출
 main의 전체 branch diff 검토 후, 별도 fresh-context Astra 최종 reviewer는 `8f645395..d41f45312877984eb2dcd050c6a95c174f1a6201`에 **No findings**를 반환했다. 36개 변경 파일 전체(코드4·문서3·ZIP24·해시2·JSON3), skipped0; OCR preview에서 제외되거나 빠진 형식도 포함했다. reviewer가23개 run/506 artifact hashes·검증 ZIP·정식12회 raw-point 재계산·source provenance·12개 이미지 metadata를 독립 확인하고 하네스19/19 및 whitespace 검사를 재실행했다. 전체 integration/build는 앞서 보존한 실행 증거를 검토했으며 별도로 재실행하지 않았다.
 
 완료 시 fetch한 origin/main은 여전히 `8f645395bc54c86049a8137b1c0887c4590a2723`이고 PR19는 head `09b94fe11b4557097cf0c65ca7969def02c9b414`가 해당 SHA로 merged인 것을 다시 확인했다. P1 입력 valid를 유지한다. [PR #20](https://github.com/dosacha/PeakPass/pull/20)은 검토용 draft이며 병합하지 않았다. #9/#11은 이 P2 tuple을 valid로, #12는 이를 소비하는 ready로, #17은 A 부분 수용/blocked로 인계한다. 실험·분석 수정의 이력과 제외 사유는 위 기록을 보존한다.
+
+최종 전달 바이트 검사에서 main이 JSON 인덱스3개의 Git LF 정규화와 로컬 CRLF 바이트 해시 불일치를 재현했다(원본 ZIP은 일치). `.gitattributes`로 이 증거 디렉터리의 JSON만 `-text`로 고정해 원본 바이트를 보존한다. JSON 내용·측정·분석은 그대로이며, Git blob과 로컬 파일의 SHA256 및 supplemental 해시를 다시 대조했다. 이는 실행 후 아카이브 전달 형식 수정이라 부하를 재실행하지 않는다.
