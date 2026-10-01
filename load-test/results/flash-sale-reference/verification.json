@@ -1,0 +1,191 @@
+[
+  {
+    "id": "p1-reference-ample-01",
+    "commit": "e0fbc78754e17dd6380b1a899373168c3ddf6153",
+    "revision": "flash-sale-v1",
+    "cleanWorkingTree": true,
+    "sourceHashesMatch": true,
+    "artifactHashesChecked": 20,
+    "jwtPatternAbsent": true,
+    "counts": {
+      "offered": 12,
+      "started": 12,
+      "completed": 12,
+      "dropped": 0,
+      "paidOrders": 12,
+      "tickets": 24,
+      "activeHolds": 0
+    },
+    "stockRejections": 0,
+    "authNegativeChecks": [
+      {
+        "kind": "negative",
+        "name": "invalid-jwt",
+        "status": 401,
+        "expected": 401
+      },
+      {
+        "kind": "negative",
+        "name": "user-mismatch",
+        "status": 403,
+        "expected": 403
+      },
+      {
+        "kind": "negative",
+        "name": "invalid-hmac",
+        "status": 401,
+        "expected": 401
+      }
+    ],
+    "cleanup": {
+      "passed": true,
+      "event": "0",
+      "users": "0",
+      "sentinel_seats": 7,
+      "sentinel_users": "1"
+    },
+    "runtime": {
+      "hostNode": "v24.15.0",
+      "appNode": "v18.20.8",
+      "appNpm": "10.8.2",
+      "k6": "k6.exe v1.7.1 (commit/9f82e6f1fc, go1.26.1, windows/amd64)",
+      "postgres": "PostgreSQL 16.12 on x86_64-pc-linux-musl, compiled by gcc (Alpine 15.2.0) 15.2.0, 64-bit",
+      "redis": "7.4.8"
+    },
+    "sourceHashes": {
+      "load-test/flash-sale.js": "98e89c2419b12513f65ee3a68c9563e17797cbbe5bc571bff6ae26e3f04da5c9",
+      "load-test/flash-sale-fixture.mjs": "8e8f2210ee13c48cf289d726f3c9f0c8244364ab728dafc9be27a9377ef4bffa",
+      "docker-compose.flash-sale.yml": "192312953cb3b7d59ed563e16fb552ac91c312786aac9f0c9278840eb19acab5",
+      "Dockerfile": "c6e5e7838373cc7f187c93aacc96c0dbfb6ab094f5522e9997da81f3f202c63c",
+      "package-lock.json": "83abef70c87951bd0a479b9d8fca80265e28ad32274e852d4ff3e6fea8c51ed3",
+      "src/infra/config.ts": "2a5ae065f8faef316779fc81cab5ae805a9b09d4cf64752becf570c4a2906f6c",
+      "src/infra/postgres/client.ts": "79df5cc9f9b4939802e0f66fd9fbfa9be561f1469301a0e2b6e7080d24af3710"
+    }
+  },
+  {
+    "id": "p1-reference-ample-02",
+    "commit": "e0fbc78754e17dd6380b1a899373168c3ddf6153",
+    "revision": "flash-sale-v1",
+    "cleanWorkingTree": true,
+    "sourceHashesMatch": true,
+    "artifactHashesChecked": 20,
+    "jwtPatternAbsent": true,
+    "counts": {
+      "offered": 12,
+      "started": 12,
+      "completed": 12,
+      "dropped": 0,
+      "paidOrders": 12,
+      "tickets": 24,
+      "activeHolds": 0
+    },
+    "stockRejections": 0,
+    "authNegativeChecks": [
+      {
+        "kind": "negative",
+        "name": "invalid-jwt",
+        "status": 401,
+        "expected": 401
+      },
+      {
+        "kind": "negative",
+        "name": "user-mismatch",
+        "status": 403,
+        "expected": 403
+      },
+      {
+        "kind": "negative",
+        "name": "invalid-hmac",
+        "status": 401,
+        "expected": 401
+      }
+    ],
+    "cleanup": {
+      "passed": true,
+      "event": "0",
+      "users": "0",
+      "sentinel_seats": 7,
+      "sentinel_users": "1"
+    },
+    "runtime": {
+      "hostNode": "v24.15.0",
+      "appNode": "v18.20.8",
+      "appNpm": "10.8.2",
+      "k6": "k6.exe v1.7.1 (commit/9f82e6f1fc, go1.26.1, windows/amd64)",
+      "postgres": "PostgreSQL 16.12 on x86_64-pc-linux-musl, compiled by gcc (Alpine 15.2.0) 15.2.0, 64-bit",
+      "redis": "7.4.8"
+    },
+    "sourceHashes": {
+      "load-test/flash-sale.js": "98e89c2419b12513f65ee3a68c9563e17797cbbe5bc571bff6ae26e3f04da5c9",
+      "load-test/flash-sale-fixture.mjs": "8e8f2210ee13c48cf289d726f3c9f0c8244364ab728dafc9be27a9377ef4bffa",
+      "docker-compose.flash-sale.yml": "192312953cb3b7d59ed563e16fb552ac91c312786aac9f0c9278840eb19acab5",
+      "Dockerfile": "c6e5e7838373cc7f187c93aacc96c0dbfb6ab094f5522e9997da81f3f202c63c",
+      "package-lock.json": "83abef70c87951bd0a479b9d8fca80265e28ad32274e852d4ff3e6fea8c51ed3",
+      "src/infra/config.ts": "2a5ae065f8faef316779fc81cab5ae805a9b09d4cf64752becf570c4a2906f6c",
+      "src/infra/postgres/client.ts": "79df5cc9f9b4939802e0f66fd9fbfa9be561f1469301a0e2b6e7080d24af3710"
+    }
+  },
+  {
+    "id": "p1-reference-limited-01",
+    "commit": "e0fbc78754e17dd6380b1a899373168c3ddf6153",
+    "revision": "flash-sale-v1",
+    "cleanWorkingTree": true,
+    "sourceHashesMatch": true,
+    "artifactHashesChecked": 20,
+    "jwtPatternAbsent": true,
+    "counts": {
+      "offered": 12,
+      "started": 12,
+      "completed": 3,
+      "dropped": 0,
+      "paidOrders": 3,
+      "tickets": 6,
+      "activeHolds": 0
+    },
+    "stockRejections": 9,
+    "authNegativeChecks": [
+      {
+        "kind": "negative",
+        "name": "invalid-jwt",
+        "status": 401,
+        "expected": 401
+      },
+      {
+        "kind": "negative",
+        "name": "user-mismatch",
+        "status": 403,
+        "expected": 403
+      },
+      {
+        "kind": "negative",
+        "name": "invalid-hmac",
+        "status": 401,
+        "expected": 401
+      }
+    ],
+    "cleanup": {
+      "passed": true,
+      "event": "0",
+      "users": "0",
+      "sentinel_seats": 7,
+      "sentinel_users": "1"
+    },
+    "runtime": {
+      "hostNode": "v24.15.0",
+      "appNode": "v18.20.8",
+      "appNpm": "10.8.2",
+      "k6": "k6.exe v1.7.1 (commit/9f82e6f1fc, go1.26.1, windows/amd64)",
+      "postgres": "PostgreSQL 16.12 on x86_64-pc-linux-musl, compiled by gcc (Alpine 15.2.0) 15.2.0, 64-bit",
+      "redis": "7.4.8"
+    },
+    "sourceHashes": {
+      "load-test/flash-sale.js": "98e89c2419b12513f65ee3a68c9563e17797cbbe5bc571bff6ae26e3f04da5c9",
+      "load-test/flash-sale-fixture.mjs": "8e8f2210ee13c48cf289d726f3c9f0c8244364ab728dafc9be27a9377ef4bffa",
+      "docker-compose.flash-sale.yml": "192312953cb3b7d59ed563e16fb552ac91c312786aac9f0c9278840eb19acab5",
+      "Dockerfile": "c6e5e7838373cc7f187c93aacc96c0dbfb6ab094f5522e9997da81f3f202c63c",
+      "package-lock.json": "83abef70c87951bd0a479b9d8fca80265e28ad32274e852d4ff3e6fea8c51ed3",
+      "src/infra/config.ts": "2a5ae065f8faef316779fc81cab5ae805a9b09d4cf64752becf570c4a2906f6c",
+      "src/infra/postgres/client.ts": "79df5cc9f9b4939802e0f66fd9fbfa9be561f1469301a0e2b6e7080d24af3710"
+    }
+  }
+]

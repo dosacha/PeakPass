@@ -36,6 +36,8 @@ const envSchema = z.object({
   DB_NAME: z.string().default('peakpass'),
   DB_POOL_MIN: z.coerce.number().default(2),
   DB_POOL_MAX: z.coerce.number().default(10),
+  // Opt-in evidence sampling. Zero leaves normal deployments unchanged.
+  DB_POOL_SAMPLE_INTERVAL_MS: z.coerce.number().int().min(0).max(2147483647).default(0),
 
   // Redis 설정
   REDIS_URL: z.string().optional(),

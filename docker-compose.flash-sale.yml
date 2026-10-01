@@ -1,0 +1,63 @@
+# Only the fixture runner supplies FS_* variables. Never layer over the demo Compose.
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: ${FS_DATABASE:?}
+      POSTGRES_USER: flash_sale
+      POSTGRES_PASSWORD: ${FS_DB_PASSWORD:?}
+    ports: ["127.0.0.1::5432"]
+    volumes: ["postgres-data:/var/lib/postgresql/data"]
+    cpus: 1
+    mem_limit: 512m
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -h 127.0.0.1 -U flash_sale -d $$POSTGRES_DB"]
+      interval: 1s
+      timeout: 3s
+      retries: 60
+  redis:
+    image: redis:7-alpine
+    ports: ["127.0.0.1::6379"]
+    volumes: ["redis-data:/data"]
+    cpus: 0.5
+    mem_limit: 256m
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 1s
+      timeout: 3s
+      retries: 60
+  app:
+    build: .
+    image: ${FS_IMAGE:?}
+    ports: ["127.0.0.1::3000"]
+    cpus: 1
+    mem_limit: 512m
+    depends_on:
+      postgres: { condition: service_healthy }
+      redis: { condition: service_healthy }
+    environment:
+      NODE_ENV: production
+      PORT: 3000
+      DB_HOST: postgres
+      DB_PORT: 5432
+      DB_USER: flash_sale
+      DB_PASSWORD: ${FS_DB_PASSWORD:?}
+      DB_NAME: ${FS_DATABASE:?}
+      DB_POOL_MIN: 2
+      DB_POOL_MAX: ${FS_POOL_MAX:?}
+      DB_POOL_SAMPLE_INTERVAL_MS: ${FS_SAMPLE_MS:?}
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      JWT_SECRET: ${FS_JWT_SECRET:?}
+      API_KEY: ${FS_API_KEY:?}
+      WEBHOOK_SIGNING_SECRET: ${FS_WEBHOOK_SECRET:?}
+      ENFORCE_AUTH_USER_MATCH: "true"
+      ENABLE_DEMO_SESSION: "false"
+      ENABLE_RATE_LIMITING: "true"
+      RATE_LIMIT_FAIL_MODE: closed
+      RATE_LIMIT_WINDOW_MS: 60000
+      RATE_LIMIT_MAX_REQUESTS: ${FS_RATE_LIMIT:?}
+      LOG_LEVEL: info
+volumes:
+  postgres-data:
+  redis-data:

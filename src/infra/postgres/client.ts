@@ -3,6 +3,7 @@ import { getConfig } from '../config';
 import { getLogger } from '../logger';
 
 let pool: Pool | null = null;
+let sampleTimer: NodeJS.Timeout | null = null;
 
 export async function initPostgresPool(): Promise<Pool> {
   const config = getConfig();
@@ -35,6 +36,17 @@ export async function initPostgresPool(): Promise<Pool> {
   logger.info(`PostgreSQL connected to ${config.DB_HOST}:${config.DB_PORT}/${config.DB_NAME}`);
   logger.info(`Pool configured: min=${config.DB_POOL_MIN}, max=${config.DB_POOL_MAX}`);
 
+  if (config.DB_POOL_SAMPLE_INTERVAL_MS > 0) {
+    sampleTimer = setInterval(() => {
+      if (!pool) return;
+      logger.info({
+        metric: 'postgres_pool', total: pool.totalCount, idle: pool.idleCount,
+        checkedOut: pool.totalCount - pool.idleCount, waiting: pool.waitingCount,
+      }, 'PostgreSQL pool sample');
+    }, config.DB_POOL_SAMPLE_INTERVAL_MS);
+    sampleTimer.unref();
+  }
+
   return pool;
 }
 
@@ -47,6 +59,8 @@ export function getPostgresPool(): Pool {
 }
 
 export async function closePostgresPool(): Promise<void> {
+  if (sampleTimer) clearInterval(sampleTimer);
+  sampleTimer = null;
   if (pool) {
     await pool.end();
     getLogger().info('PostgreSQL pool closed');
