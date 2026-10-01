@@ -17,7 +17,7 @@ import { createClient } from 'redis';
 import { analyzeRun } from './flash-sale-analysis.mjs';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
-export const REVISION = 'flash-sale-v2.2';
+export const REVISION = 'flash-sale-v2.3';
 const defaults = { users: 12, rate: 2, 'think-ms': 20, retries: 1, 'retry-delay-ms': 100, 'replay-every': 3, quantity: 2, 'pre-vus': 10, 'max-vus': 20, 'pool-max': 10, 'sample-ms': 250, 'warmup-seconds': 0, 'drain-seconds': 30, 'limiter-max': 1000000 };
 
 export function parseOptions(args) {
@@ -330,12 +330,12 @@ export async function main(args = process.argv.slice(2)) {
           let generator = null;
           if (k6Pid) {
             if (platform() === 'win32') {
-              const r = await command('powershell.exe', ['-NoProfile', '-Command', `$all = @(Get-CimInstance Win32_Process -Filter "Name='k6.exe'"); $ids = @(${k6Pid}); do { $next = @($all | Where-Object { $_.ParentProcessId -in $ids -and $_.ProcessId -notin $ids } | Select-Object -ExpandProperty ProcessId); $ids += $next } while ($next.Count); $p = @(Get-Process -Id $ids -ErrorAction SilentlyContinue); if ($p.Count) { [pscustomobject]@{ cpuSeconds=($p | Measure-Object CPU -Sum).Sum; memoryBytes=($p | Measure-Object WorkingSet64 -Sum).Sum; pids=@($p.Id) } | ConvertTo-Json -Compress }`]);
+              const r = await command('powershell.exe', ['-NoProfile', '-Command', `$all = @(Get-CimInstance Win32_Process -Filter "Name='k6.exe'"); $ids = @(${k6Pid}); do { $next = @($all | Where-Object { $_.ParentProcessId -in $ids -and $_.ProcessId -notin $ids } | Select-Object -ExpandProperty ProcessId); $ids += $next } while ($next.Count); $p = @(Get-Process -Id $ids -ErrorAction SilentlyContinue); if ($p.Count) { [pscustomobject]@{ cpuSeconds=($p | Measure-Object CPU -Sum).Sum; memoryBytes=($p | Measure-Object WorkingSet64 -Sum).Sum; pids=@($p.Id); processes=@($p | ForEach-Object { [pscustomobject]@{ pid=$_.Id; path=$_.Path; cpuSeconds=$_.CPU; memoryBytes=$_.WorkingSet64; isShim=[bool]([Diagnostics.FileVersionInfo]::GetVersionInfo($_.Path).FileDescription -match 'ShimGen') } }) } | ConvertTo-Json -Depth 4 -Compress }`]);
               if (r.stdout.trim()) generator = JSON.parse(r.stdout);
             } else {
-              const r = await command('ps', ['-p', String(k6Pid), '-o', 'cputime=', '-o', 'rss='], undefined, true);
-              const [time, rss] = r.stdout.trim().split(/\s+/);
-              if (time) generator = { cpuSeconds: time.split(':').reduce((n, part) => n * 60 + Number(part), 0), memoryBytes: Number(rss) * 1024 };
+              const r = await command('ps', ['-p', String(k6Pid), '-o', 'cputime=', '-o', 'rss=', '-o', 'comm='], undefined, true);
+              const [time, rss, ...name] = r.stdout.trim().split(/\s+/);
+              if (time) { const process = { pid: k6Pid, path: name.join(' '), isShim: false, cpuSeconds: time.split(':').reduce((n, part) => n * 60 + Number(part), 0), memoryBytes: Number(rss) * 1024 }; generator = { ...process, processes: [process] }; }
             }
           }
           const r = await command('docker', ['stats', '--no-stream', '--format', '{{json .}}', ...manifest.containers.map(c => c.id)]);

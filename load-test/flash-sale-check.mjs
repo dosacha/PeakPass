@@ -201,11 +201,12 @@ test('raw accounting requires paired attempt latency and terminal journey eviden
   assert.equal(metricAccounting(raw.filter(p => !p.metric.startsWith('api_')), summary).complete, false);
 });
 
-test('generator evidence rejects a idle launcher masquerading as the load process', async () => {
+test('generator evidence identifies the engine even when low-load CPU counters stay constant', async () => {
   const { generatorObserved } = await import('./flash-sale-analysis.mjs');
   assert.equal(typeof generatorObserved, 'function');
-  assert.equal(generatorObserved([{ generator: { cpuSeconds: 0 } }, { generator: { cpuSeconds: 0 } }]), false);
-  assert.equal(generatorObserved([{ generator: { cpuSeconds: 1 } }, { generator: { cpuSeconds: 1.2 } }]), true);
+  const sample = isShim => ({ generator: { cpuSeconds: .0625, processes: [{ path: 'k6.exe', isShim, cpuSeconds: .0625, memoryBytes: 60000000 }] } });
+  assert.equal(generatorObserved([sample(true), sample(true)]), false);
+  assert.equal(generatorObserved([sample(false), sample(false)]), true);
   assert.equal(generatorObserved([{ generator: null }, { generator: { cpuSeconds: 1 } }]), false);
 });
 

@@ -1,8 +1,10 @@
-# 실제 쓰기 부하 측정 계약 — P2 / flash-sale-v2.1
+# 실제 쓰기 부하 측정 계약 — P2 / flash-sale-v2.3
 
 ## v2 변경 계약
 
-v2.1은 Windows Chocolatey launcher와 그 자식 k6 프로세스를 소유 PID 트리로 묶어 CPU·메모리를 합산한다. CPU 진행이 없는 launcher-only 표본은 발생기 관측 불충분으로 무효다. 이 변경 전 v2 pilot은 원본 그대로 보존하되 용량 근거에서 제외하고 새 revision으로 다시 실행한다.
+v2.3은 Windows Chocolatey launcher와 그 자식 k6 프로세스를 소유 PID 트리로 묶어 CPU·메모리를 합산하고 실행 경로·PID·ShimGen 여부를 기록한다. CPU 누적값은 저부하에서 일정할 수 있으므로 증가 여부 대신 실제 non-shim 프로세스 관측을 요구한다. v2의 launcher-only pilot과 v2.2의 CPU 증가 조건으로 중단한 실행은 원본 그대로 보존하고 formal 결과에서 제외한다.
+
+v2.2부터 checkout replay도 원본 주문 ID를 검증하며, 잘못된 성공 응답은 protocol failure다. graceful drain cutoff에서 iteration이 중단되면 완전한 시도 집계를 확인할 수 없어 무효 측정으로 남긴다.
 
 P2의 실행 전 프로토콜·분모·중단 기준·결과는 [FLASH_SALE_BASELINE.md](FLASH_SALE_BASELINE.md)에 있다. 아래 P1 설명에서 v2가 바꾼 사항은 이 절이 우선한다. P1 reference ZIP/검증 기록은 수정하지 않으며 `flash-sale-v1` 저부하 증거로만 보존한다.
 

@@ -31,7 +31,7 @@ export function classify({ integrity, valid, stable, stock }) {
 
 export function generatorObserved(samples) {
   return samples.length >= 2 && samples.every(o => Number.isFinite(o.generator?.cpuSeconds))
-    && samples.some((o, i) => i > 0 && o.generator.cpuSeconds > samples[i - 1].generator.cpuSeconds);
+    && samples.every(o => o.generator.processes?.some(p => p.path && p.isShim === false && Number.isFinite(p.cpuSeconds) && p.cpuSeconds >= 0 && p.memoryBytes > 0));
 }
 
 export function metricAccounting(points, summary) {
