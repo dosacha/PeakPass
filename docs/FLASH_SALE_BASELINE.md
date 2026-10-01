@@ -232,3 +232,13 @@ PR20 `e6bc7ed`의 오토리뷰4151721322를 읽기 전용3개 agent와 main이 �
 깨끗한 커밋 후 preflight는 **24명/2s^-1=12초, warmup0/drain30, 10/20VU**의 ample과 limited6석 각1회(`p2-v25-preflight-ample-01`, `p2-v25-preflight-limited-01`), 정식에서 제외한다. 정식 ample은 **2/10/25;25/10/2;2/10/25** 순서의9회(`p2-v25-ample-r<rate>-01..03`), 이후 limited10/s·300명·60석3회(`p2-v25-limited-01..03`)다. ample10초 warmup+30초 측정, limited0+30초 측정, drain최대30초, pre/max100VU 및 위 분모·자원·pool·로그·retry/replay·250ms표본·limiter·안정/중단 기준을 그대로 적용한다.50/s 이상·VU 증가·임계값 완화는 없다.
 
 모든 preflight/정식 실행은 provisioning 전에 **호스트 가용 메모리2GiB 이상을5초 간격3회** 확인하고 시각/bytes를 남긴다. 미달이면 자원을 만들지 않는다. 측정창의1GiB 미만 연속3표본 중단 기준은 유지한다. 기존과 같이 invalid/integrity 또는 ample nonpaid>=20%/paid p99>5초면 중단·원본 보존한다. 테스트/build는 측정과 겹치지 않으며 다른 작업의 앱/컨테이너를 임의 종료하지 않는다. 전체 반복 완료·최종 검토 전 P2 valid/후행 ready를 선언하지 않는다.
+
+### v2.5 검증 및 시작 점검 결과
+
+구현 `2a6f69a910ca746411ef046f53077da80a9dd087`. 회귀는 수정 전22통과/2실패에서 수정 후24/24로 통과했다. 전용 PG/Redis에서 unit21 suites/159개, integration24 suites/250개(skipped0, destructive opt-in15 포함), production-image 빈 DB migration/재실행/readiness/서명 GraphQL, callback harness, build/typecheck를 실행해 모두 통과했다. lint0errors/기존9warnings, 검증9개 명령 모두 exit0, cleanupErrors0, 기존 중지된 Redis는 ID/이름/상태를 복원했다. 테스트한4개 하네스 코드의 canonical hash는 커밋 코드와 일치한다.
+
+main의 branch diff 검토와 일반 reviewer 및 별도 최종 reviewer의6파일 delta 검토는 No findings였다. 실제 HTTP cached false 계약과 VM retry 분기를 확인했다. 기존v2.3/v2.4 증거44파일은 이전 커밋의 checkout 바이트와 같고 ZIP/JSON은 Git blob 바이트와도 같다. v2.4 원본을 현재 분석기로 읽으면 `checkoutProtocol` 부족으로 invalid가 되어 소급 수용을 차단한다.
+
+2026-10-01 04:12:12/04:12:39 UTC 시작 점검은 각각2,067,136,512/2,081,751,040bytes(약1.93/1.94GiB)로2GiB에 미달했다. 따라서 **v2.5 HTTP 부하는 아직0회이며 preflight 자원도 생성하지 않았다**. 이 점검 실패는 서비스 부하 실패나 처리량 관측이 아니다. [v2.5 검증 기록](../load-test/results/flash-sale-baseline-v25/validation.json)·validation ZIP의21파일에 RED/GREEN·전체 검사·측정 실행 스크립트·시각/bytes를 보존했다. 새 accepted tuple/IDs는 없고 P2 및 #12/#17은 재검증 대기다.
+
+동일 별도 최종 reviewer가 전달5파일까지 검토하고 No findings를 반환했다.21개 ZIP 항목·artifact/archive/supplemental 해시, staged JSON/ZIP 바이트, 구현 커밋의4개 코드 해시, 기존44파일 불변, 검증 메타데이터 및2개 메모리 점검값을 독립 확인했다. 실행/수용 IDs가 비어 있는 상태와 문서가 일치한다.
