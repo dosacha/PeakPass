@@ -12,7 +12,7 @@ Three read-only agents investigated before main finalized this plan. No applicat
 - [x] Modify `flash-sale.js` and fixture runner; add pure `flash-sale-analysis.mjs`. Keep strict smoke exit/result while classifying evidence independently. Stream logs; canonical LF plus raw source hashes; bound sampling input. No new dependency.
 - [x] Verify relevant checks and actual small ample/limited HTTP+SQL preflights, then commit measured source. Fix any measurement bug before pilots.
 - [x] Run pilot ladder, fix formal matrix before any formal execution, run each condition three times. Never overlap tests/builds/other workloads with measurement.
-- [ ] Analyze/archive every run including failure; run unit/full feasible integration/build/typecheck/lint, branch diff review and separate final reviewer. Main resolves findings; update gate and handoff.
+- [x] Analyze/archive every run including failure; run unit/full feasible integration/build/typecheck/lint, branch diff review and separate final reviewer. Main resolves findings; update gate and handoff.
 
 ## Protocol v2 (fixed before any load)
 
@@ -166,4 +166,6 @@ P8은 이 A 조건과 원본을 부분 입력으로 소비하되 P3/P6/P7 산출
 
 새 테스트 자원은 owner label과 정확한 ID로 정리했고 cleanupErrors는0이다. 기존 중지된 Redis는 원래 ID/이름/중지 상태로 복원했다. 검증 스크립트의 실패 중 정리/복원 누락과 실패 없는 반복의0건 통계 누락은 읽기 전용 검토 후 main이 수정했다. 단위·통합 검증을 mock 기반 하네스 경계 검사와 혼동하지 않으며, 실제 HTTP/PG/Redis 부하 증거는 별도23개 run ZIP이다.
 
-전체 branch diff와 별도 최종 reviewer 결과는 마지막 검토 후 확정한다. P1 입력 origin/main `8f645395bc54c86049a8137b1c0887c4590a2723` 및 PR19 포함 여부는 완료 시 다시 확인한다.
+main의 전체 branch diff 검토 후, 별도 fresh-context Astra 최종 reviewer는 `8f645395..d41f45312877984eb2dcd050c6a95c174f1a6201`에 **No findings**를 반환했다. 36개 변경 파일 전체(코드4·문서3·ZIP24·해시2·JSON3), skipped0; OCR preview에서 제외되거나 빠진 형식도 포함했다. reviewer가23개 run/506 artifact hashes·검증 ZIP·정식12회 raw-point 재계산·source provenance·12개 이미지 metadata를 독립 확인하고 하네스19/19 및 whitespace 검사를 재실행했다. 전체 integration/build는 앞서 보존한 실행 증거를 검토했으며 별도로 재실행하지 않았다.
+
+완료 시 fetch한 origin/main은 여전히 `8f645395bc54c86049a8137b1c0887c4590a2723`이고 PR19는 head `09b94fe11b4557097cf0c65ca7969def02c9b414`가 해당 SHA로 merged인 것을 다시 확인했다. P1 입력 valid를 유지한다. [PR #20](https://github.com/dosacha/PeakPass/pull/20)은 검토용 draft이며 병합하지 않았다. #9/#11은 이 P2 tuple을 valid로, #12는 이를 소비하는 ready로, #17은 A 부분 수용/blocked로 인계한다. 실험·분석 수정의 이력과 제외 사유는 위 기록을 보존한다.
