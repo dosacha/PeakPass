@@ -171,3 +171,5 @@ main의 전체 branch diff 검토 후, 별도 fresh-context Astra 최종 reviewe
 완료 시 fetch한 origin/main은 여전히 `8f645395bc54c86049a8137b1c0887c4590a2723`이고 PR19는 head `09b94fe11b4557097cf0c65ca7969def02c9b414`가 해당 SHA로 merged인 것을 다시 확인했다. P1 입력 valid를 유지한다. [PR #20](https://github.com/dosacha/PeakPass/pull/20)은 검토용 draft이며 병합하지 않았다. #9/#11은 이 P2 tuple을 valid로, #12는 이를 소비하는 ready로, #17은 A 부분 수용/blocked로 인계한다. 실험·분석 수정의 이력과 제외 사유는 위 기록을 보존한다.
 
 최종 전달 바이트 검사에서 main이 JSON 인덱스3개의 Git LF 정규화와 로컬 CRLF 바이트 해시 불일치를 재현했다(원본 ZIP은 일치). `.gitattributes`로 이 증거 디렉터리의 JSON만 `-text`로 고정해 원본 바이트를 보존한다. JSON 내용·측정·분석은 그대로이며, Git blob과 로컬 파일의 SHA256 및 supplemental 해시를 다시 대조했다. 이는 실행 후 아카이브 전달 형식 수정이라 부하를 재실행하지 않는다.
+
+동일 최종 reviewer가 `a769fbc..6334b6100006e3a40fc1a828dbb23b8ef1a75e45`의 전달 수정5파일을 추가 검토하고 **No findings**를 반환했다. JSON3개의 의미·정규화 내용 동일성, Git blob/로컬/supplemental SHA256, 전체 ZIP Git blob 해시, `core.autocrlf=true/false/input`의 checkout-filter 바이트 보존, 전체 branch whitespace를 확인했다. 실제 별도 checkout이나 부하·Docker 실행은 추가하지 않았다. 최종 변경 범위는 기존36파일에 `.gitattributes`를 더한37파일이다.
