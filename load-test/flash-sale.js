@@ -60,6 +60,7 @@ function request(stage, body, user, key, kind = 'normal', expectedOrderId, expec
   responses.add(1, metricTags);
   apiDuration.add(response.timings.duration, metricTags);
   const expiredSettlement = stage === 'settlement' && kind !== 'replay' && response.status === 200 && result.paymentStatus === 'settled'
+    && typeof result.duplicate === 'boolean'
     && result.order?.id === body.orderId && result.order.status === 'expired' && result.order.userId === user.id
     && result.order.eventId === fixture.eventId && result.order.quantity === s.quantity && Array.isArray(result.tickets) && result.tickets.length === 0;
   if (response.status >= 200 && response.status < 300 && !valid && !expiredSettlement) protocolFailures.add(1, metricTags);
@@ -87,7 +88,8 @@ function ticketsMatch(tickets, user, orderId, expectedIds) {
 }
 
 function paid(result, user, orderId, expectedTicketIds) {
-  return result.paymentStatus === 'settled' && result.order?.id === orderId && result.order.status === 'paid'
+  // Same-key HTTP replays can return the cached first response (duplicate: false).
+  return typeof result.duplicate === 'boolean' && result.paymentStatus === 'settled' && result.order?.id === orderId && result.order.status === 'paid'
     && result.order.userId === user.id && result.order.eventId === fixture.eventId && result.order.quantity === s.quantity
     && ticketsMatch(result.tickets, user, orderId, expectedTicketIds);
 }

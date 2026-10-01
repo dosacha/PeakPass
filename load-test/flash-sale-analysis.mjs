@@ -7,7 +7,7 @@ import { join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { createHash } from 'node:crypto';
 
-export const ANALYSIS_REVISION = 'flash-sale-analysis-v2.4';
+export const ANALYSIS_REVISION = 'flash-sale-analysis-v2.5';
 
 export function stats(values) {
   const a = values.filter(Number.isFinite).sort((x, y) => x - y);
@@ -145,7 +145,7 @@ export async function analyzeRun(directory, suppliedManifest) {
   const observed = observations.filter(inWindow), pools = app.poolSamples.filter(inWindow), resourceWindow = resources.filter(inWindow);
   const clocks = m.clockChecks ?? [];
   const evidence = {
-    checkoutProtocol: m.revision === 'flash-sale-v2.4',
+    checkoutProtocol: m.revision === 'flash-sale-v2.5',
     checkoutAuditObserved: verification.integrityNames?.includes('checkoutPaymentIdentity') === true,
     accounting: metricAccounting(points, summary.metrics),
     observer: coverage(observations, left, right, 1000), pool: coverage(app.poolSamples, left, right, 1000), resources: coverage(resources, left, right, 6000),

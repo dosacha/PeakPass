@@ -44,7 +44,7 @@ async function runScenario(fault = null, iteration = 0) {
   const fixture = { settings, eventId: 'event', tierId: 'standard', users };
   const requests = [], metrics = [];
   const context = createContext({ __ENV: { FS_FIXTURE: 'fixture', FS_BASE_URL: 'http://local', FS_WEBHOOK_SECRET: secret, FS_MODEL: JSON.stringify({ settings, eventId: 'event', tierId: 'standard' }) }, open: () => JSON.stringify(fixture), Date, Math, JSON });
-  let faultUsed = false;
+  const faults = [fault].flat().filter(Boolean), usedFaults = new Set();
   const http = { post(url, body, options) {
     const input = JSON.parse(body), stage = options.tags.stage;
     requests.push({ url, body, input, options, stage });
@@ -53,15 +53,16 @@ async function runScenario(fault = null, iteration = 0) {
       assert.equal(options.headers.Authorization, undefined, 'provider uses HMAC, not a buyer JWT');
       assert.equal(options.headers['x-webhook-signature'], createHmac('sha256', secret).update(`${options.headers['x-webhook-timestamp']}.${body}`).digest('hex'));
     }
-    if (fault && stage === fault.stage && (!fault.kind || fault.kind === options.tags.kind) && (!fault.once || !faultUsed)) {
-      faultUsed = true;
-      return Object.freeze({ status: fault.status, error_code: fault.status === 0 ? 1050 : 0, timings: { duration: 1 }, json: () => fault.body ?? { error: { code: fault.code ?? 'INTERNAL_ERROR' } } });
+    const injected = faults.find(f => stage === f.stage && (!f.kind || f.kind === options.tags.kind) && (!f.once || !usedFaults.has(f)));
+    if (injected) {
+      usedFaults.add(injected);
+      return Object.freeze({ status: injected.status, error_code: injected.status === 0 ? 1050 : 0, timings: { duration: 1 }, json: () => injected.body ?? { error: { code: injected.code ?? 'INTERNAL_ERROR' } } });
     }
     const user = users[iteration];
     const order = { id: 'order', status: 'paid', userId: user.id, eventId: 'event', quantity: settings.quantity, tierId: 'standard', reservationId: iteration === 0 ? 'reservation' : null };
     const tickets = Array.from({ length: settings.quantity }, (_, i) => ({ id: `ticket-${i}`, orderId: 'order', userId: user.id, eventId: 'event', status: 'active' }));
     const result = stage === 'reservation' ? { id: 'reservation', userId: user.id, eventId: 'event', quantity: settings.quantity, tierId: 'standard', status: 'active' } : stage === 'checkout' ? (options.tags.kind === 'replay' ? { order, tickets } : { order: { ...order, status: 'pending' }, tickets: [] }) : {
-      order, paymentStatus: 'settled', tickets,
+      order, paymentStatus: 'settled', tickets, duplicate: false,
     };
     return Object.freeze({ status: stage === 'settlement' ? 200 : 201, timings: { duration: 1 }, json: () => result });
   } };
@@ -145,11 +146,30 @@ test('window options bound warmup, drain and observer gaps before provisioning',
 test('settlement replay cannot replace confirmed paid tickets with expiry or another set', async () => {
   const order = { id: 'order', status: 'paid', userId: 'user-0', eventId: 'event', quantity: 2, tierId: 'standard' };
   const tickets = [0, 1].map(i => ({ id: `other-${i}`, orderId: 'order', userId: 'user-0', eventId: 'event', status: 'active' }));
-  for (const body of [{ paymentStatus: 'settled', order: { ...order, status: 'expired' }, tickets: [] }, { paymentStatus: 'settled', order, tickets }]) {
+  for (const body of [{ paymentStatus: 'settled', duplicate: true, order: { ...order, status: 'expired' }, tickets: [] }, { paymentStatus: 'settled', duplicate: true, order, tickets }]) {
     const { metrics } = await runScenario({ stage: 'settlement', kind: 'replay', status: 200, body });
     assert.ok(metrics.some(m => m.name === 'protocol_failures' && m.value === 1));
     assert.ok(metrics.some(m => m.name === 'replay_failures' && m.value === 1));
     assert.equal(metrics.filter(m => m.name === 'buyers_completed').length, 1);
+  }
+});
+
+test('settlement duplicate marker is boolean, including cached false and uncached true replays', async () => {
+  const order = { id: 'order', status: 'paid', userId: 'user-0', eventId: 'event', quantity: 2, tierId: 'standard' };
+  const tickets = [0, 1].map(i => ({ id: `ticket-${i}`, orderId: 'order', userId: 'user-0', eventId: 'event', status: 'active' }));
+  for (const kind of ['normal', 'retry', 'replay']) {
+    for (const duplicate of [undefined, null, 'true', 'false', 0, false, true]) {
+      const body = { order, tickets, paymentStatus: 'settled', ...(duplicate === undefined ? {} : { duplicate }) };
+      const faults = [{ stage: 'settlement', kind, status: 200, body }];
+      if (kind === 'retry') faults.unshift({ stage: 'settlement', kind: 'normal', status: 503, once: true });
+      const { metrics, requests } = await runScenario(faults);
+      const valid = typeof duplicate === 'boolean';
+      assert.ok(requests.some(r => r.stage === 'settlement' && r.options.tags.kind === kind));
+      assert.equal(metrics.some(m => m.name === 'protocol_failures' && m.value === 1), !valid);
+      assert.equal(metrics.some(m => m.name === 'api_duration' && m.tags.stage === 'settlement' && m.tags.kind === kind && m.tags.business === 'success'), valid);
+      assert.equal(metrics.filter(m => m.name === 'buyers_completed').length, valid || kind === 'replay' ? 1 : 0);
+      assert.equal(metrics.some(m => m.name === 'replay_failures' && m.value === 1), !valid && kind === 'replay');
+    }
   }
 });
 
@@ -310,9 +330,11 @@ test('errors and settled-but-expired responses cannot count as a successful purc
   }
   const { metrics } = await runScenario({ stage: 'settlement', status: 200, body: { paymentStatus: 'settled', order: { id: 'order', status: 'expired' }, tickets: [] } });
   assert.equal(metrics.filter(m => m.name === 'buyers_completed').length, 0);
-  const expired = await runScenario({ stage: 'settlement', status: 200, body: { paymentStatus: 'settled', order: { id: 'order', status: 'expired', userId: 'user-0', eventId: 'event', quantity: 2 }, tickets: [] } });
-  assert.equal(expired.metrics.filter(m => m.name === 'buyers_completed').length, 0);
-  assert.equal(expired.metrics.filter(m => m.name === 'protocol_failures').length, 0, 'valid expired settlement is an unfinished purchase, not malformed protocol');
+  for (const duplicate of [undefined, null, 'true', false, true]) {
+    const expired = await runScenario({ stage: 'settlement', status: 200, body: { paymentStatus: 'settled', duplicate, order: { id: 'order', status: 'expired', userId: 'user-0', eventId: 'event', quantity: 2 }, tickets: [] } });
+    assert.equal(expired.metrics.filter(m => m.name === 'buyers_completed').length, 0);
+    assert.equal(expired.metrics.some(m => m.name === 'protocol_failures'), typeof duplicate !== 'boolean', 'valid expired settlement is unfinished; malformed metadata is a protocol failure');
+  }
 });
 
 test('an excess scheduled iteration fails the run instead of silently passing k6 thresholds', async () => {

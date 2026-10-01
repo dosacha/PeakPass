@@ -1,6 +1,6 @@
 # P2 A baseline — protocol and results (2026-10-01 KST)
 
-현재 gate: PR20의 `673f0c0` 오토리뷰3건을 수정했지만 **v2.4 정식 재측정은 호스트 메모리 부족으로 중단되어 P2 재수용 미완료**다. 아래 v2.3 수용은 이전 revision의 이력이며, #12의 consumed 입력과 #17의 A는 강화된 계약에 대해 stale/blocked다. HTTP 응답 티켓 배열은 원본에 없어 새 검사를 소급 통과시킬 수 없다. 아래 수치·원본은 삭제하거나 새 revision으로 재표기하지 않는다. 최신 중단 원본은 [v2.4 인덱스](../load-test/results/flash-sale-baseline-v24/index.json)에 있다.
+현재 gate: **v2.5 정산 응답 검증을 추가했으며 전체12회 재측정 전이므로 P2 재수용 미완료**다. v2.4는 호스트 메모리 부족으로 중단됐고, 아래 남은7회 재개 계획도 새 계약으로 대체했다. v2.3 수용은 이전 revision의 이력이며, #12의 consumed 입력과 #17의 A는 stale/blocked다. v2.3/v2.4 raw에 HTTP 응답 본문이 없어 새 boolean 검사를 소급 통과시킬 수 없다. 아래 수치·원본은 삭제하거나 새 revision으로 재표기하지 않는다. 최신 중단 원본은 [v2.4 인덱스](../load-test/results/flash-sale-baseline-v24/index.json)에 있다.
 
 ## Input gate and scope
 
@@ -8,7 +8,7 @@ Base `8f645395bc54c86049a8137b1c0887c4590a2723` contains PR #19 head `09b94fe11b
 
 Three read-only agents investigated before main finalized this plan. No application transaction, schema, pool, logging, authentication or limiter failure policy changes. Main implements and fixes findings; final review is independent. No merge is authorized.
 
-## Implementation plan
+## Implementation plan — v2.3 당시 완료 기록
 
 - [x] Add failing regression cases for phase boundaries, pending/expired settlement facts, malformed business success, SQL identity reconciliation, failed-run coverage and missing evidence.
 - [x] Modify `flash-sale.js` and fixture runner; add pure `flash-sale-analysis.mjs`. Keep strict smoke exit/result while classifying evidence independently. Stream logs; canonical LF plus raw source hashes; bound sampling input. No new dependency.
@@ -215,8 +215,20 @@ v2.4 preflight 변경 기록(정식 실행 전): `p2-v24-preflight-ample-01`은1
 
 별도 최종 reviewer가 이 중단 시점의22파일 delta와9개 실행의207파일/198 artifact hashes, validation hashes 및 staged Git 바이트를 확인하고 No findings를 보고했다.9회 오프라인 재분석은 저장 index와 일치했고23개 하네스 검사도 독립 통과했다. 기존v2.3 원본 불변과9개 이미지 metadata도 확인했다. 이는 코드·중단 기록의 검토이며 P2 전체 행렬을 수용했다는 뜻이 아니다.
 
-### 메모리 확보 후 재개 계획 — 실행 전 고정
+### 메모리 확보 후 v2.4 재개 계획 — 미실행, 아래 v2.5 계획으로 대체
 
 사용자는 메모리를 확보한 뒤 재측정을 계속하도록 선택했다. 기존 분석 유효성 기준과 조건은 그대로 두고, 재개 전 각 실행의 안전 여유로 호스트 가용 메모리2GiB 이상을5초 간격3회 확인한다. 이는 provisioning 전 점검이며 측정창의1GiB/연속3표본 invalid 기준을 완화하지 않는다. 다른 작업의 앱·컨테이너는 임의로 종료하지 않는다.
 
 첫5개 유효 관측은 그대로 보존한다. 사전 host-pressure 기준으로 무효인 `p2-v24-ample-r2-02`는 수용하지 않고 원본 그대로 둔다. 재개 순서는 **`p2-v24-ample-r2-02r`, `p2-v24-ample-r2-03`, `p2-v24-ample-r10-03`, `p2-v24-ample-r25-03`, `p2-v24-limited-01..03`**의7회다. 무효 슬롯을 별도ID로 다시 측정한 이력을 숨기지 않으며 새 invalid/integrity/중단 조건이면 다시 중단한다. 코드·시간창·분모·자원·100VU·재고·실험 임계값은 바꾸지 않는다. 조건별3개 유효 반복이 모두 끝나기 전 새 P2 tuple을 만들지 않는다.
+
+## v2.5 응답 계약·전체 재측정 계획 — 실행 전 고정
+
+PR20 `e6bc7ed`의 오토리뷰4151721322를 읽기 전용3개 agent와 main이 실제 요청 경로·기존 테스트로 검토했다. `payments.ts`는 최초 `duplicate:false` 결과를 캐시에 저장하고, middleware는 동일 key/body replay에 그 응답을 그대로 반환한다. `route-contract.test.ts` T06과 `order-expiration-http.test.ts`도 cached false/uncached true를 명시한다. 따라서 bot의 replay `duplicate===true` 제안은 채택하지 않는다. 확인된 공백인 **boolean 필드 누락/잘못된 타입**만 공통 paid 검사와 expired ACK 예외에서 거절한다. 앱 계약·실행 경로는 바꾸지 않는다.
+
+하네스 `flash-sale-v2.5`, 분석 `flash-sale-analysis-v2.5`. VM의 정상 응답에 cached false를 반영하며 normal/retry/replay 각각의 누락/null/문자열/숫자 거절 및 false/true 허용을 검사한다. retry는 실제 첫503 뒤 재시도로 진입시킨다. expired ACK는 boolean이어도 구매 미완료이며 paid replay의 expired는 계속 protocol failure다. 기존 티켓 오류 fixture에도 boolean을 넣어 별도 티켓 검증이 실제로 실행되게 한다.
+
+원본 응답 본문이 없는 v2.3/v2.4를 새 계약의 증거로 소급 승인하지 않는다. 기존23개/9개 run ZIP·인덱스·해시는 변경하지 않으며 v2.4의5개 유효 정식 관측도 새 반복으로 대체 계산하지 않는다. 새 산출물 위치는 `load-test/results/flash-sale-baseline-v25/`다. 현재 새 accepted tuple/IDs는 없다. #12의 consumed v2.3 및 #17의 A v2.3은 stale/blocked 유지, v2.4는 미수용 후보 이력이다.
+
+깨끗한 커밋 후 preflight는 **24명/2s^-1=12초, warmup0/drain30, 10/20VU**의 ample과 limited6석 각1회(`p2-v25-preflight-ample-01`, `p2-v25-preflight-limited-01`), 정식에서 제외한다. 정식 ample은 **2/10/25;25/10/2;2/10/25** 순서의9회(`p2-v25-ample-r<rate>-01..03`), 이후 limited10/s·300명·60석3회(`p2-v25-limited-01..03`)다. ample10초 warmup+30초 측정, limited0+30초 측정, drain최대30초, pre/max100VU 및 위 분모·자원·pool·로그·retry/replay·250ms표본·limiter·안정/중단 기준을 그대로 적용한다.50/s 이상·VU 증가·임계값 완화는 없다.
+
+모든 preflight/정식 실행은 provisioning 전에 **호스트 가용 메모리2GiB 이상을5초 간격3회** 확인하고 시각/bytes를 남긴다. 미달이면 자원을 만들지 않는다. 측정창의1GiB 미만 연속3표본 중단 기준은 유지한다. 기존과 같이 invalid/integrity 또는 ample nonpaid>=20%/paid p99>5초면 중단·원본 보존한다. 테스트/build는 측정과 겹치지 않으며 다른 작업의 앱/컨테이너를 임의 종료하지 않는다. 전체 반복 완료·최종 검토 전 P2 valid/후행 ready를 선언하지 않는다.
