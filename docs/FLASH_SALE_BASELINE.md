@@ -50,6 +50,8 @@ Branch reviewer found incomplete custom-metric accounting could be accepted and 
 
 Instrumentation correction before formal measurement: v2 pilots observed the Chocolatey k6 launcher (0 CPU seconds, ~14MiB), not its child load process. **All `p2-pilot-*-01` runs are excluded from capacity acceptance**, including any in-flight run during the correction. Original verdicts remain in original archives; this exclusion supersedes their validity label. v2.1 aggregates the owned k6 PID tree and requires observed CPU progression; rerun pilots as `p2-pilot-*-02` with identical experimental criteria. This also invalidates v2 preflights for generator-capacity claims, though their HTTP/SQL correctness evidence is retained. #12/#17 have no consumed P2 tuple; affected comparison assumptions remain stale until v2.1 acceptance.
 
+Ruling before v2.1 pilots: repeat2,10,25/s only. The excluded50/s trial hit the fixed100-VU limit (312 dropped, maximum lag6173ms); it cannot establish a50/s delivered load and stops escalation under the original rule. Do not repeat that known invalid condition or raise VUs silently. The corrected pilot search is capped25/s; use2/s, highest stable, first unstable among2/10/25 (if all stable use all three). This reduces the searchable range and forbids a maximum-capacity conclusion. Preserve50/s raw as a generator/VU limitation. Any future higher-load experiment needs a new preregistered VU condition and new repetitions.
+
 ## Formal matrix and results
 
 Not executed yet. Append pilot decision before formal execution.
