@@ -6,7 +6,7 @@ v2.5는 모든 성공 정산 응답(normal/retry/replay 및 expired ACK)의 `dup
 
 v2.6은 최초 `normal` 정산(만료 ACK 포함)에 `duplicate:false`를 요구하며 retry/replay의 boolean 양쪽은 유지한다. paid 응답은 fixture tier와 일치해야 하고, SQL provider 정산 fact의 `reconciliation_required`는 paid일 때 false, expired일 때 true여야 한다. `buyers_completed`에 최초 정산의 `order_id`와 정렬한 티켓 ID 배열 JSON인 `ticket_ids`를 보존한다. 분석은 fixture buyer→paid SQL 주문→그 주문의 정확한 티켓 집합을 모두 대조한 완료만 분자에 포함한다. 태그 누락/파싱 불가/중복 ID는 관측 불완전으로 invalid, 정상 형식이지만 SQL identity와 다르면 integrity-defect다.
 
-분석 `flash-sale-analysis-v2.6`는 현재 revision과 위 관측을 요구한다. v2.3/v2.4 raw에 최초 HTTP 티켓 ID가 없어 소급 수용하지 않는다. v2.5는 메모리 시작 조건에 미달해 부하0회였으며 v2.6 전체12회 계획으로 대체했다. 새 accepted tuple은 아직 없고 후행은 stale/blocked다. 현재 상태·고정 행렬·원본은 [FLASH_SALE_BASELINE.md](FLASH_SALE_BASELINE.md)를 따른다.
+분석 `flash-sale-analysis-v2.6`는 현재 revision과 위 관측을 요구한다. v2.3/v2.4 raw에 최초 HTTP 티켓 ID가 없어 소급 수용하지 않는다. v2.5는 메모리 시작 조건에 미달해 부하0회였으며 v2.6 전체12회 계획으로 대체했다. v2.6은 ample9회·limited1회와 preflight2회를 완료했으나 limited2회는 시작 메모리 조건 미달로 미실행이다. 새 accepted tuple은 아직 없고 후행은 stale/blocked다. 현재 상태·고정 행렬·원본은 [FLASH_SALE_BASELINE.md](FLASH_SALE_BASELINE.md)를 따른다.
 
 ## v2 변경 계약
 

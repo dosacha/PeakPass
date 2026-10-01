@@ -1,6 +1,6 @@
 # P2 A baseline — protocol and results (2026-10-01 KST)
 
-현재 gate: **v2.6 정산 응답·SQL 티켓 identity 대조를 추가하고 전체12회 재측정을 준비 중이며 P2 재수용 미완료**다. v2.5는 메모리 시작 조건에 미달해 부하0회였고, 아래 계획은 새 v2.6 계획으로 대체한다. v2.3의 수용과 v2.4의 중단은 당시 revision의 이력이다. #12의 consumed 입력과 #17의 A는 stale/blocked이며 기존 원본·판정은 보존한다.
+현재 gate: **v2.6 ample9회와 limited1회(정식10회), preflight2회를 완료했으나 limited02/03은 시작 메모리 조건 미달로 미실행이어서 P2 재수용 미완료**다. ample2·10/s는 각3회 안정,25/s는 과부하2회·안정1회였다. 새 accepted tuple/IDs는 없고 #12/#17 consumed v2.3은 stale/blocked다. [새 원본 인덱스](../load-test/results/flash-sale-baseline-v26/index.json)에 당시 판정·실패 원본을 보존했다. 아래 이전 revision의 계획·수용·중단 기록은 역사로 남긴다.
 
 ## Input gate and scope
 
@@ -251,3 +251,51 @@ PR20 c65a1b3의 오토리뷰4151818757/4151818761/4151818765/4151818770을 explo
 하네스 flash-sale-v2.6 / 분석 flash-sale-analysis-v2.6. 실행 source를 깨끗한 커밋으로 고정한다. **preflight24명/2s^-1=12초, warmup0/drain30,10/20VU**의 ample 및 limited6석 각1회(`p2-v26-preflight-{ample,limited}-01`) 뒤, 정식 ample **2/10/25;25/10/2;2/10/25**의9회(`p2-v26-ample-r<rate>-01..03`), limited10/s·300명·60석3회(`p2-v26-limited-01..03`)를 실행한다. ample warmup10초/측정30초, limited0/30초, 최대drain30초, 정식100/100VU, 자원·pool·로그·250ms표본·혼합·think/retry/replay·limiter·분모·반복·안정/중단 기준은 앞서 고정한 그대로다. 각 실행 전2GiB 이상5초 간격3표본, 창 내1GiB 미만 연속3표본 중단 기준도 유지한다. invalid/integrity 또는 ample nonpaid>=20%/paid p99>5초면 중단하고 실패 원본을 보존한다. 테스트/build와 측정은 겹치지 않는다.
 
 새 raw/ZIP 위치는 flash-sale-baseline-v26이며 v2.3/v2.4 원본과 v2.5 검증 ZIP은 변경하지 않는다. 기존 raw에는 최초 반환 티켓 identity가 없어 새 계약으로 소급 수용하지 않는다. v2.5 계획은 부하 미실행 이력으로 남긴다. 새 전체 행렬과 검토 완료 전 accepted tuple/IDs는 없고 #12/#17은 stale/blocked다. 최초 확인한 메모리는 약4.99GiB였으며 실제 실행마다 다시 시작 조건을 확인한다.
+
+
+## v2.6 실제 결과 — ample9회 완료, limited1회·전체 수용 미완료
+
+실행 소스는 모두 `33a74de24cef2493bf4f8e473a695910fc404c42` / `flash-sale-v2.6`, 분석은 같은 SHA의 `flash-sale-analysis-v2.6`이며 clean source다. preflight2회와 정식10회를 완료했다. ample2·10·25/s는 각각3회 완료했지만 limited는1회뿐이다. **새 accepted tuple/IDs는 아직 없으며 #12/#17 consumed v2.3은 stale/blocked 유지**다. 실행한12회에는 invalid/integrity-defect가 없지만 strict smoke 실패3회는 그대로 보존했다.
+
+아래 ample 값은3회 중앙값 [최소–최대]다. percentile을 합쳐 계산하지 않는다. 구매/s는30초 창 안 HTTP 완료와 SQL 주문·티켓 identity가 일치한 고유 구매/30초, cohort 완료율 분모는 예정 유입 전체, 요청 실패율은 창 안 non-replay429/5xx/전송실패 시도/전체 non-replay 시도다. latency는 성공자 조건부다.
+
+| 조건 | 판정3회 | paid/s | cohort 완료율% | 요청 실패율% | paid p95 ms | paid p99 ms |
+|---|---|---:|---:|---:|---:|---:|
+| ample-2 | valid-stable, valid-stable, valid-stable | 2.00 [2.00–2.00] | 100.00 [100.00–100.00] | 0.00 [0.00–0.00] | 85.25 [84.20–93.55] | 113.41 [98.38–410.34] |
+| ample-10 | valid-stable, valid-stable, valid-stable | 10.00 [10.00–10.00] | 100.00 [100.00–100.00] | 0.00 [0.00–0.13] | 91.05 [79.05–98.15] | 119.02 [116.05–129.06] |
+| ample-25 | valid-overload, valid-overload, valid-stable | 24.60 [21.03–24.90] | 98.53 [83.73–99.73] | 2.67 [0.90–18.54] | 244.30 [116.30–489.05] | 455.50 [359.18–722.90] |
+
+**이 환경에서2·10명/초는3회 모두 안정 기준을 만족했고,25명/초는 과부하2회·안정1회여서 안정 구간으로 수용할 수 없다.** 포화 경계의 정확한 위치나 최대 처리량을 찾은 결과가 아니다.25/s의 큰 반복 편차와 shared host 자원 변화를 원인 하나로 단정하지 않는다. 기존v2.3/v2.4와 숫자 차이를 개선·회귀 효과로 주장하지 않는다.
+
+| 정식 Run (`p2-v26-` 생략) | 전체 시작 | cohort paid/예정 | 창 paid/30s | 실패/non-replay | SQL paid | pending | hold좌석 | strict smoke |
+|---|---:|---:|---:|---:|---:|---:|---:|---|
+| ample-r2-01 | 80 | 60/60 | 60/30 | 0/150 | 80 | 0 | 0 | True |
+| ample-r10-01 | 400 | 300/300 | 300/30 | 0/750 | 400 | 0 | 0 | True |
+| ample-r25-01 | 1000 | 739/750 | 738/30 | 51/1910 | 986 | 9 | 10 | False |
+| ample-r25-02 | 1000 | 628/750 | 631/30 | 390/2104 | 688 | 165 | 196 | False |
+| ample-r10-02 | 400 | 300/300 | 300/30 | 1/751 | 400 | 0 | 0 | True |
+| ample-r2-02 | 80 | 60/60 | 60/30 | 0/150 | 80 | 0 | 0 | True |
+| ample-r2-03 | 80 | 60/60 | 60/30 | 0/150 | 80 | 0 | 0 | True |
+| ample-r10-03 | 400 | 300/300 | 300/30 | 0/750 | 400 | 0 | 0 | True |
+| ample-r25-03 | 1000 | 748/750 | 747/30 | 17/1889 | 943 | 45 | 16 | False |
+| limited-01 | 300 | 30/300 | 30/30 | 0/345 | 30 | 0 | 0 | True |
+
+25/s의 전체 미결제는14/312/57명이며, 이 중 warmup cohort의 미결제는3/190/55명이다. 마지막 실행은 측정창 안정 기준을 통과했어도 전체57명 미완료·pending45·hold16석이 남아 strict smoke는 실패했다. 이를 전체 구매 성공으로 요약하지 않는다. 창 paid와 cohort paid는 완료 시각 때문에 다르며 warmup spillover·창 이후 완료도 raw에 보존했다.
+
+제한 재고는 **아직1회**다.300명 시작,30 paid/60tickets/270품절 거절, 잔여0·pending0·active hold0이며 strict smoke와 관측/정합성이 통과했다. 공급량 제한 결과인1 paid/s·10% 완료율은 ample 용량과 비교하지 않는다. `p2-v26-limited-02`, `p2-v26-limited-03`은 미실행이며 마지막 재확인도 provisioning 전 시작 조건에서 멈췄다.
+
+| 25/s 반복 | 창 내부 transaction retry 예약 | 최대 pool waiting | 최대 lock waiter | app CPU 중앙값% | PG CPU 중앙값% | 창 host free 최소 GiB |
+|---|---:|---:|---:|---:|---:|---:|
+| 01 | 278 | 2 | 4 | 36.06 | 19.45 | 2.59 |
+| 02 | 1224 | 10 | 7 | 59.90 | 34.55 | 1.16 |
+| 03 | 101 | 0 | 1 | 34.33 | 17.25 | 1.90 |
+
+창 내부25/s retry 코드 집계: {"p2-v26-ample-r25-01": {"40001": 278}, "p2-v26-ample-r25-02": {"40001": 1224}, "p2-v26-ample-r25-03": {"40001": 101}}. pool waiting·lock waiter와 transaction conflict/retry는 병목의 진단 단서다. 짧은 대기를 놓칠 수 있는 표본이며 DB 단독 포화·CPU 한계나 큐 도입 효과의 증명이 아니다.2/10/s의 최대 pool waiting과 lock waiter는 모두0이었다.
+
+시작 메모리가2GiB 부근에서 변동해 정식7/8번째 및 limited 진입 전에 provisioning을 보류했다. 완료한 ID는 재실행하지 않고 원래 남은 순서를 유지했다. 남은 실행은30초 간격 최대10번 점검하되 매번2GiB 이상5초 간격3회를 요구했다. 마지막 limited02 점검10회가 실패해 중단했으며 측정창1GiB/연속3표본 및 모든 통계 임계값은 그대로다. 시작 점검 실패는 부하 실패나 서비스 용량 데이터가 아니다. 시각·bytes·대기 규칙은 검증 ZIP에 있다. 마지막2회도 같은 조건으로 완료해야 전체 수용을 판단할 수 있다.
+
+검증은 RED6→GREEN26, unit159/integration250(skipped0, destructive opt-in15 포함), production-image/callback/build/typecheck 통과, lint0errors/기존9warnings다. 전체 검사는 부하 전에 종료했고 최종 하네스 재검사도 통과했다. 테스트 자원 정리·기존 Redis 복원 및 부하12회의 cleanup/teardown은 모두 확인했다.
+
+[v2.6 인덱스](../load-test/results/flash-sale-baseline-v26/index.json)와 [ZIP 해시](../load-test/results/flash-sale-baseline-v26/archives.sha256)에12run ZIP,276파일/264 artifact hashes를 보존했다.12회 재분석은 저장 판정과 일치한다. 앱 이미지12개의 소유권 라벨을 제외한 runtime hash는 서로 및 이전v2.3과 동일하다. 기존47개 증거파일은 변경하지 않았다. 새 validation ZIP은25개 파일의 검사·RED/GREEN·코드 해시·시작 점검/실행 스크립트를 포함한다. 최초 반환 주문/티켓 identity의 누락·SQL 불일치는 실행12회 모두0이었다.
+
+별도 최종 reviewer는 최종20개 staged 파일에 No findings를 반환했다.12run/276파일/264artifact hashes,9개 source hashes,12회 동일 재분석,4,114건의 HTTP paid 주문·티켓 ID와 SQL,12개 실제 이미지 metadata,25개 검증 ZIP 항목 및 기존47파일 불변·staged 바이트를 독립 확인했다. 보고서의 반복 통계·warmup 실패·40001 retry 수와 각 실제 실행의2GiB/5초간격3표본도 대조했다. 마지막 limited02의10차례 시작 점검 실패 및 limited02/03 미생성, accepted 빈 배열·matrix 미완료 상태를 확인했다. 이 검토는 전체 행렬을 수용했다는 뜻이 아니다.
