@@ -194,6 +194,14 @@ test('raw accounting requires paired attempt latency and terminal journey eviden
   assert.equal(metricAccounting(raw.filter(p => !p.metric.startsWith('api_')), summary).complete, false);
 });
 
+test('generator evidence rejects a idle launcher masquerading as the load process', async () => {
+  const { generatorObserved } = await import('./flash-sale-analysis.mjs');
+  assert.equal(typeof generatorObserved, 'function');
+  assert.equal(generatorObserved([{ generator: { cpuSeconds: 0 } }, { generator: { cpuSeconds: 0 } }]), false);
+  assert.equal(generatorObserved([{ generator: { cpuSeconds: 1 } }, { generator: { cpuSeconds: 1.2 } }]), true);
+  assert.equal(generatorObserved([{ generator: null }, { generator: { cpuSeconds: 1 } }]), false);
+});
+
 test('reservation timeout is never replayed; transient checkout retry preserves the logical request', async () => {
   const reservation = await runScenario({ stage: 'reservation', status: 0 });
   assert.equal(reservation.requests.length, 1);

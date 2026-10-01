@@ -48,6 +48,8 @@ Preflight development: `p2-preflight-ample-01` failed with12 script exceptions b
 
 Branch reviewer found incomplete custom-metric accounting could be accepted and replay HTTP errors were wrongly invalidated. Main added response/latency, terminal/journey, arrival/summary accounting and separated replay HTTP from malformed responses. Added artifact hash validation for offline analysis. All new regression checks were observed failing before correction. No production path changed.
 
+Instrumentation correction before formal measurement: v2 pilots observed the Chocolatey k6 launcher (0 CPU seconds, ~14MiB), not its child load process. **All `p2-pilot-*-01` runs are excluded from capacity acceptance**, including any in-flight run during the correction. Original verdicts remain in original archives; this exclusion supersedes their validity label. v2.1 aggregates the owned k6 PID tree and requires observed CPU progression; rerun pilots as `p2-pilot-*-02` with identical experimental criteria. This also invalidates v2 preflights for generator-capacity claims, though their HTTP/SQL correctness evidence is retained. #12/#17 have no consumed P2 tuple; affected comparison assumptions remain stale until v2.1 acceptance.
+
 ## Formal matrix and results
 
 Not executed yet. Append pilot decision before formal execution.

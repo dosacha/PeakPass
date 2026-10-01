@@ -17,7 +17,7 @@ import { createClient } from 'redis';
 import { analyzeRun } from './flash-sale-analysis.mjs';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
-export const REVISION = 'flash-sale-v2';
+export const REVISION = 'flash-sale-v2.1';
 const defaults = { users: 12, rate: 2, 'think-ms': 20, retries: 1, 'retry-delay-ms': 100, 'replay-every': 3, quantity: 2, 'pre-vus': 10, 'max-vus': 20, 'pool-max': 10, 'sample-ms': 250, 'warmup-seconds': 0, 'drain-seconds': 30, 'limiter-max': 1000000 };
 
 export function parseOptions(args) {
@@ -330,7 +330,7 @@ export async function main(args = process.argv.slice(2)) {
           let generator = null;
           if (k6Pid) {
             if (platform() === 'win32') {
-              const r = await command('powershell.exe', ['-NoProfile', '-Command', `Get-Process -Id ${k6Pid} -ErrorAction SilentlyContinue | Select-Object @{n='cpuSeconds';e={$_.CPU}},@{n='memoryBytes';e={$_.WorkingSet64}} | ConvertTo-Json -Compress`]);
+              const r = await command('powershell.exe', ['-NoProfile', '-Command', `$all = @(Get-CimInstance Win32_Process -Filter "Name='k6.exe'"); $ids = @(${k6Pid}); do { $next = @($all | Where-Object { $_.ParentProcessId -in $ids -and $_.ProcessId -notin $ids } | Select-Object -ExpandProperty ProcessId); $ids += $next } while ($next.Count); $p = @(Get-Process -Id $ids -ErrorAction SilentlyContinue); if ($p.Count) { [pscustomobject]@{ cpuSeconds=($p | Measure-Object CPU -Sum).Sum; memoryBytes=($p | Measure-Object WorkingSet64 -Sum).Sum; pids=@($p.Id) } | ConvertTo-Json -Compress }`]);
               if (r.stdout.trim()) generator = JSON.parse(r.stdout);
             } else {
               const r = await command('ps', ['-p', String(k6Pid), '-o', 'cputime=', '-o', 'rss='], undefined, true);

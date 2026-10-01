@@ -29,6 +29,11 @@ export function classify({ integrity, valid, stable, stock }) {
   return !integrity ? 'integrity-defect' : !valid ? 'invalid-measurement' : stock === 'limited' ? 'valid-limited' : stable ? 'valid-stable' : 'valid-overload';
 }
 
+export function generatorObserved(samples) {
+  return samples.length >= 2 && samples.every(o => Number.isFinite(o.generator?.cpuSeconds))
+    && samples.some((o, i) => i > 0 && o.generator.cpuSeconds > samples[i - 1].generator.cpuSeconds);
+}
+
 export function metricAccounting(points, summary) {
   const select = metric => points.filter(p => p.metric === metric);
   const sum = metric => select(metric).reduce((n, p) => n + p.data.value, 0);
@@ -135,7 +140,7 @@ export async function analyzeRun(directory, suppliedManifest) {
     accounting: metricAccounting(points, summary.metrics),
     observer: coverage(observations, left, right, 1000), pool: coverage(app.poolSamples, left, right, 1000), resources: coverage(resources, left, right, 6000),
     clockAligned: clocks.length === 2 && clocks.every(o => Math.abs(o.offsetMs) + o.roundTripMs / 2 <= 100),
-    generatorObserved: resourceWindow.length > 0 && resourceWindow.every(o => o.generator && Number.isFinite(o.generator.cpuSeconds)),
+    generatorObserved: generatorObserved(resourceWindow),
     containersObserved: resourceWindow.length > 0 && resourceWindow.every(o => ['app', 'postgres', 'redis'].every(service => o.containers?.some(c => c.service === service && Number.isFinite(c.cpuPercent) && Number.isFinite(c.memoryPercent)))),
     clean: cleanup.passed === true && !m.cleanupError && !m.teardownError,
     auth: negatives.dataUnchanged === true && negatives.checks.length === 3 && negatives.checks.every(o => o.status === o.expected),
