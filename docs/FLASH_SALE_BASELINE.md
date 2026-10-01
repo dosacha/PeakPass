@@ -1,6 +1,6 @@
 # P2 A baseline — protocol and results (2026-10-01 KST)
 
-현재 gate: PR20의 `673f0c0` 오토리뷰3건을 재현하여 아래 v2.3 수용은 **이전 revision의 이력**으로 전환한다. v2.4 재측정 전에는 #12의 ready/consumed 입력과 #17의 A 수용을 stale로 본다. HTTP 응답 티켓 배열은 원본에 없어 새 검사를 소급 통과시킬 수 없다. 아래 수치·원본은 삭제하거나 새 revision으로 재표기하지 않는다.
+현재 gate: PR20의 `673f0c0` 오토리뷰3건을 수정했지만 **v2.4 정식 재측정은 호스트 메모리 부족으로 중단되어 P2 재수용 미완료**다. 아래 v2.3 수용은 이전 revision의 이력이며, #12의 consumed 입력과 #17의 A는 강화된 계약에 대해 stale/blocked다. HTTP 응답 티켓 배열은 원본에 없어 새 검사를 소급 통과시킬 수 없다. 아래 수치·원본은 삭제하거나 새 revision으로 재표기하지 않는다. 최신 중단 원본은 [v2.4 인덱스](../load-test/results/flash-sale-baseline-v24/index.json)에 있다.
 
 ## Input gate and scope
 
@@ -187,3 +187,36 @@ main의 전체 branch diff 검토 후, 별도 fresh-context Astra 최종 reviewe
 분모·반복·중단·stable 기준은 기존 사전 규칙 그대로다. invalid/integrity 또는 ample nonpaid>=20%/paid p99>5s 발생 시 중단하고 원본을 보존한 채 원인을 검토한다. 자동 재시도로 불리한 run을 대체하지 않는다. 구현 오류로 revision을 바꾸면 이력과 후행 gate를 먼저 갱신한다. 테스트/build와 측정은 겹치지 않는다. 새 원본은 별도 `flash-sale-baseline-v24/`에 보존하여 v2.3 ZIP과 인덱스 바이트를 유지한다.
 
 v2.4 preflight 변경 기록(정식 실행 전): `p2-v24-preflight-ample-01`은12 complete/0 interrupted, paid12·모든 새 계약 검사·SQL·cleanup 통과이나6초 창에서 실제 engine 표본1개뿐이라 `generatorObserved=false`로 invalid였다. 첫 자원 조회는 k6 시작 전, 마지막은 종료 경계에 걸렸고 중간 실제 엔진은1회였다. 이 원본/판정을 보존하고 계획된 limited-01은 실행하지 않았다. 관측 기준을 완화하지 않고 **preflight만24명/2s^-1=12초,10/20VU**, ample 및 limited6석을 각각 `p2-v24-preflight-{ample,limited}-02`로 실행한다. 같은 코드 revision이며 정식40/30초 창·행렬·분모·중단 기준은 변경하지 않는다.
+
+## v2.4 실행 결과 — 메모리 gate 중단, 수용 미완료
+
+구현 `ddb5c97f1f0f61c36a6fd2c902440196bb222a64`, 정식 측정 SHA `0d835a8eb0efbf509004aea1394b3e41434fd64f`(차이는 위 preflight 문서뿐), 분석 `flash-sale-analysis-v2.4` / `ddb5c97f1f0f61c36a6fd2c902440196bb222a64`. 모든 실행은 clean source였다. 이후 실제12초 preflight는 ample24/24 paid, limited24명 중3 paid/6tickets/21품절 거절로 새 응답·SQL·관측 검사를 통과했다.
+
+정식 순서2/10/25/25/10/2 중6번째 `p2-v24-ample-r2-02`에서 host free memory가 측정창 내 약0.56–0.94GB였다.1GiB 미만이3개 연속 표본인 기존 `host-pressure` 기준으로 invalid 판정되어 즉시 중단했다. CPU는 해당 창에서 약2.5–15.4%라 이번 중단 원인은 CPU 포화가 아니다.80명 모두 결제됐지만 용량 수용에서 제외한다. 중단 후에도 가용 메모리가 약0.95–1.00GB였으며 다른 작업의 앱/컨테이너를 종료하거나 임계값을 완화하지 않았다.
+
+| 정식 실행 (`p2-v24-` 생략) | 판정 | cohort paid/예정 | 창 paid/30초 | 실패/non-replay 시도 | 전체 SQL paid | hold좌석 | strict smoke |
+|---|---|---:|---:|---:|---:|---:|---|
+| ample-r2-01 | valid-stable | 60/60 | 60/30 | 0/150 | 80 | 0 | true |
+| ample-r10-01 | valid-stable | 300/300 | 300/30 | 0/750 | 400 | 0 | true |
+| ample-r25-01 | valid-stable | 749/750 | 749/30 | 4/1877 | 999 | 2 | false |
+| ample-r25-02 | valid-stable | 750/750 | 750/30 | 2/1877 | 1000 | 0 | true |
+| ample-r10-02 | valid-stable | 300/300 | 300/30 | 0/750 | 400 | 0 | true |
+| ample-r2-02 | invalid: host-pressure | 60/60 | 수용 제외 | 0/150 | 80 | 0 | true |
+
+이 표는 개별 관측이며 조건별3회 완료 결과가 아니다. 유효 정식 관측은2/s1회·10/s2회·25/s2회, 정식 limited0회다. **accepted run IDs는 빈 배열이며 새 P2 tuple은 없다.** 미완료 반복의 중앙값·범위를 정식 결과로 발표하지 않는다.25/s 첫 실행의 실패 여정과2 held seats를 숨기지 않으며, 두 번째의재시도 오류2건도 모두 성공으로 요약하지 않는다. 이전v2.3 결과를 부족한 반복 대신 넣지 않는다.
+
+[새 인덱스](../load-test/results/flash-sale-baseline-v24/index.json)와 [ZIP 해시](../load-test/results/flash-sale-baseline-v24/archives.sha256)에9개 실행(정식 시도6, preflight3),207개 파일/198개 artifact 해시를 보존했다.6초 발생기 관측 부족과 정식 호스트 메모리 부족 원본도 포함한다. 기존23개 ZIP/인덱스 바이트는 유지한다.9개 앱 이미지의 소유권 라벨을 제외한 runtime hash는 서로 같으며 이전v2.3 앱과도 동일하다. 이는 코드 동등성이지 성능 개선 증거가 아니다.
+
+오토리뷰3건의 regression은 수정 전3개 실패를 재현했고, 추가 paid→expired replay도 RED/GREEN 확인했다. 수정 후 하네스23/23, unit159, integration250(skipped0, destructive opt-in15 포함), production-image/callback 검사, build/typecheck 통과. lint0errors/기존9warnings. 새 validation.zip에는 실행 로그·회귀 RED·검증한4개 하네스 코드의 canonical hash가 있다. 전체 검사는 측정 전에 끝났고 테스트한 작업 파일이 커밋된 코드와 같음을 해시로 확인했다. 전용 테스트 자원 cleanupErrors0, 기존 Redis의 ID/이름/중지 상태 복원. 부하9회도 cleanup/teardown 오류가 없다.
+
+일반 reviewer와 별도 최종 reviewer의 수정 코드·문서 검토는 No findings였다. 실제원본/최종 diff의 검토 결과는 PR20에 기록한다. 이전 No findings 뒤 오토리뷰가 발견한 검증 공백도 이력에 남긴다. 구현 커밋의 GitHub CI도 통과했다.
+
+최종 재확인한 origin/main은8f645395, PR19는09b94fe head가 해당 main으로 merged 상태다. P1의 제한된 저부하 수용은 valid 유지한다. #9/#11은 v2.4 재검증 대기, #12/#17 consumed v2.3은 stale/blocked 유지다. 메모리 여유를 확보한 뒤 재개 범위·순서·IDs를 실행 전에 다시 기록하고 부족한 정식 반복을 완료해야 한다. 호스트 메모리 조건을 바꾸면 그 차이를 남긴다. 최대 처리량·운영 성능·대기열 필요성/효과·R/C/TTL은 미입증/미확정이다. 병합하지 않는다.
+
+별도 최종 reviewer가 이 중단 시점의22파일 delta와9개 실행의207파일/198 artifact hashes, validation hashes 및 staged Git 바이트를 확인하고 No findings를 보고했다.9회 오프라인 재분석은 저장 index와 일치했고23개 하네스 검사도 독립 통과했다. 기존v2.3 원본 불변과9개 이미지 metadata도 확인했다. 이는 코드·중단 기록의 검토이며 P2 전체 행렬을 수용했다는 뜻이 아니다.
+
+### 메모리 확보 후 재개 계획 — 실행 전 고정
+
+사용자는 메모리를 확보한 뒤 재측정을 계속하도록 선택했다. 기존 분석 유효성 기준과 조건은 그대로 두고, 재개 전 각 실행의 안전 여유로 호스트 가용 메모리2GiB 이상을5초 간격3회 확인한다. 이는 provisioning 전 점검이며 측정창의1GiB/연속3표본 invalid 기준을 완화하지 않는다. 다른 작업의 앱·컨테이너는 임의로 종료하지 않는다.
+
+첫5개 유효 관측은 그대로 보존한다. 사전 host-pressure 기준으로 무효인 `p2-v24-ample-r2-02`는 수용하지 않고 원본 그대로 둔다. 재개 순서는 **`p2-v24-ample-r2-02r`, `p2-v24-ample-r2-03`, `p2-v24-ample-r10-03`, `p2-v24-ample-r25-03`, `p2-v24-limited-01..03`**의7회다. 무효 슬롯을 별도ID로 다시 측정한 이력을 숨기지 않으며 새 invalid/integrity/중단 조건이면 다시 중단한다. 코드·시간창·분모·자원·100VU·재고·실험 임계값은 바꾸지 않는다. 조건별3개 유효 반복이 모두 끝나기 전 새 P2 tuple을 만들지 않는다.

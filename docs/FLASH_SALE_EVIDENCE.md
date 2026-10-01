@@ -2,7 +2,7 @@
 
 v2.4는 PR20 오토리뷰를 반영한다. 전체 started buyer와 terminal journey를 buyer별로 대조하고 terminal 수=완료 iterations를 함께 요구해 drain 중단을 배제한다. 각 주문의 null-provider pending payment audit는 해당 buyer checkout key로 정확히1개여야 한다. checkout 응답은 pending일 때 빈 tickets 배열, 정산 후 replay일 때 paid와 최초 정산의 동일한 유효 티켓 ID 집합을 요구한다. 이미 paid인 replay에 expired 응답 예외는 허용하지 않는다.
 
-분석 `flash-sale-analysis-v2.4`는 이 revision과 새 audit 검사의 존재를 확인한다. 이전 v2.3 원본은 응답 배열을 소급 검증할 수 없어 강화된 계약에 대한 수용 입력으로 stale다. 재측정 전에는 후행 ready/수용을 선언하지 않는다. 현재 수용 상태·고정 행렬·원본은 [FLASH_SALE_BASELINE.md](FLASH_SALE_BASELINE.md)를 따른다.
+분석 `flash-sale-analysis-v2.4`는 이 revision과 새 audit 검사의 존재를 확인한다. 이전 v2.3 원본은 응답 배열을 소급 검증할 수 없어 강화된 계약에 대한 수용 입력으로 stale다. v2.4 정식6번째 시도에서 호스트 여유 메모리 gate로 중단되어 전체 반복은 미완료이며 후행 ready/수용을 선언하지 않는다. 현재 상태·고정 행렬·원본은 [FLASH_SALE_BASELINE.md](FLASH_SALE_BASELINE.md)를 따른다.
 
 ## v2 변경 계약
 
