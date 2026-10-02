@@ -9,7 +9,11 @@ import {
 import { admissionService } from './admission.service';
 import { getConfig } from '@/infra/config';
 import { getLogger } from '@/infra/logger';
-import { serializableTransactionWithRetry, transaction } from '@/infra/postgres/client';
+import {
+  isRetriableTransactionError,
+  serializableTransactionWithRetry,
+  transaction,
+} from '@/infra/postgres/client';
 import {
   AdmissionPolicy,
   isAdmissionPolicyEventRace,
@@ -281,10 +285,24 @@ const isPurchaseRace = (error: unknown) =>
   isAdmissionPolicyEventRace(error) ||
   (error instanceof AdmissionError && error.code === 'ADMISSION_ALREADY_CONSUMED');
 
+// What a retry of the same request can outlive: serialization failure and deadlock once the
+// attempts are used up, the races above, this transaction's own lock, statement and idle bounds,
+// and a lost connection. Anything else (data, integrity, programming error) is a defect.
+function isTransient(error: unknown): boolean {
+  const code = String((error as { code?: unknown } | null)?.code ?? '');
+  return (
+    isRetriableTransactionError(error) ||
+    isPurchaseRace(error) ||
+    ['55P03', '57014', '25P03'].includes(code) ||
+    /^(08|57P|E[A-Z]+$)/.test(code)
+  );
+}
+
 /**
  * Runs one purchase transaction: SERIALIZABLE with the existing three attempts and backoff.
  * `readCommitted` keeps a reservation without admission fields on its existing isolation level.
- * With an admission, an exhausted transient failure is 503 and the request keeps its identity.
+ * With an admission, a transient failure that outlasts the attempts is 503 and the request keeps
+ * its identity; a defect stays the existing 500.
  */
 export async function purchaseTransaction<T>(
   work: (client: PoolClient) => Promise<T>,
@@ -300,7 +318,7 @@ export async function purchaseTransaction<T>(
       return await transaction(work);
     }
   } catch (error) {
-    if (!options.admission || error instanceof AppError) throw error;
+    if (!options.admission || error instanceof AppError || !isTransient(error)) throw error;
     getLogger().warn(
       { err: error, admissionId: options.admission.admissionId },
       'Admission purchase failed transiently; the same request may be retried',

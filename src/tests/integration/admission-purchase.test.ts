@@ -307,7 +307,14 @@ describe('admission purchase gate on owned PostgreSQL, Redis and loopback HTTP',
       const claimed = await inspect(fx.eventId, admission.admissionEpoch, admission.admissionId);
       expect(claimed).toMatchObject({ state: 'admitted', phase: 'processing' });
       expect(await slots(redis, fx.eventId, admission.admissionEpoch)).toBe(1);
-      // An application 5xx is not a business rejection either: nothing is stored for it.
+      // A statement timeout is transient as well. A constraint violation and an application 5xx
+      // are defects: they stay 500 instead of inviting retries, and none of them is stored.
+      adjust.mockRejectedValueOnce(pgError('57014'));
+      expect((await reserve(second, admission)).status).toBe(503);
+      adjust.mockRejectedValueOnce(pgError('23514'));
+      const defect = await reserve(second, admission);
+      expect(defect.status).toBe(500);
+      expect(defect.body.error.code).toBe('INTERNAL_ERROR');
       adjust.mockRejectedValueOnce(new InternalServerError('injected failure'));
       const failed = await reserve(second, admission);
       expect(failed.status).toBe(500);
