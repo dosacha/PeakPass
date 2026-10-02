@@ -7,7 +7,7 @@ import { join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { createHash } from 'node:crypto';
 
-export const ANALYSIS_REVISION = 'flash-sale-analysis-v2.6';
+export const ANALYSIS_REVISION = 'flash-sale-analysis-v2.6.1';
 
 export function stats(values) {
   const a = values.filter(Number.isFinite).sort((x, y) => x - y);
@@ -40,13 +40,15 @@ export function generatorObserved(samples, start, end, loadEndedAt) {
     && coverage(samples.filter(healthy), start, end, 6000).complete;
 }
 
-export function metricAccounting(points, summary) {
+export function metricAccounting(points, summary, offered) {
   const select = metric => points.filter(p => p.metric === metric);
   const sum = metric => select(metric).reduce((n, p) => n + p.data.value, 0);
   const key = p => Object.entries(p.data.tags).sort(([a], [b]) => a.localeCompare(b)).map(([k, v]) => `${k}=${v}`).join('/');
   const bag = metric => { const b = {}; for (const p of select(metric)) b[key(p)] = (b[key(p)] ?? 0) + 1; return Object.entries(b).sort().map(JSON.stringify).join('\n'); };
   const buyers = metric => JSON.stringify(select(metric).map(p => p.data.tags.buyer).sort());
+  const expectedBuyers = JSON.stringify(Array.from({ length: offered }, (_, i) => String(i)).sort());
   const checks = {
+    offeredBuyers: Number.isSafeInteger(offered) && offered > 0 && buyers('buyers_started') === expectedBuyers && buyers('journey_outcomes') === expectedBuyers,
     attempts: bag('api_responses') === bag('api_duration') && sum('api_responses') === (summary.http_reqs?.count ?? 0),
     journeys: bag('journey_outcomes') === bag('journey_duration') && select('journey_outcomes').length === (summary.iterations?.count ?? 0)
       && select('journey_outcomes').length === sum('buyers_started') && buyers('journey_outcomes') === buyers('buyers_started'),
@@ -166,10 +168,11 @@ export async function analyzeRun(directory, suppliedManifest) {
   const observed = observations.filter(inWindow), pools = app.poolSamples.filter(inWindow), resourceWindow = resources.filter(inWindow);
   const clocks = m.clockChecks ?? [];
   const evidence = {
+    sourceClean: m.workingTree === '',
     checkoutProtocol: m.revision === 'flash-sale-v2.6',
     paidIdentityObserved: a.missingPaidIdentity === 0,
     checkoutAuditObserved: verification.integrityNames?.includes('checkoutPaymentIdentity') === true,
-    accounting: metricAccounting(points, summary.metrics),
+    accounting: metricAccounting(points, summary.metrics, m.settings.users),
     observer: coverage(observations, left, right, 1000), pool: coverage(app.poolSamples, left, right, 1000), resources: coverage(resources, left, right, 6000),
     clockAligned: clocks.length === 2 && clocks.every(o => Math.abs(o.offsetMs) + o.roundTripMs / 2 <= 100),
     generatorObserved: generatorObserved(resources, left, right, m.loadEndedAt),

@@ -324,11 +324,11 @@ test('raw accounting requires paired attempt latency and terminal journey eviden
   const raw = [p('buyers_started', { buyer: '0' }), p('buyers_completed', { buyer: '0' }), p('journey_outcomes', { buyer: '0', outcome: 'paid' }),
     p('journey_duration', { buyer: '0', outcome: 'paid' }), p('api_responses', { buyer: '0', stage: 'checkout' }), p('api_duration', { buyer: '0', stage: 'checkout' }), p('active_vus_at_arrival'), p('arrival_lag_ms')];
   const summary = { buyers_started: { count: 1 }, buyers_completed: { count: 1 }, iterations: { count: 1 }, http_reqs: { count: 1 } };
-  assert.equal(metricAccounting(raw, summary).complete, true);
+  assert.equal(metricAccounting(raw, summary, 1).complete, true);
   for (const missing of ['api_duration', 'journey_outcomes', 'journey_duration', 'active_vus_at_arrival', 'arrival_lag_ms']) {
-    assert.equal(metricAccounting(raw.filter(p => p.metric !== missing), summary).complete, false, missing);
+    assert.equal(metricAccounting(raw.filter(p => p.metric !== missing), summary, 1).complete, false, missing);
   }
-  assert.equal(metricAccounting(raw.filter(p => !p.metric.startsWith('api_')), summary).complete, false);
+  assert.equal(metricAccounting(raw.filter(p => !p.metric.startsWith('api_')), summary, 1).complete, false);
 });
 
 test('raw accounting rejects interrupted buyers before finish and during replay', async () => {
@@ -340,12 +340,12 @@ test('raw accounting rejects interrupted buyers before finish and during replay'
     if (i < 99) raw.push(p('buyers_completed', i), p('journey_outcomes', i, 'paid'), p('journey_duration', i, 'paid'));
   }
   const summary = { buyers_started: { count: 100 }, buyers_completed: { count: 99 }, iterations: { count: 99 } };
-  assert.equal(metricAccounting(raw, summary).complete, false, '99% paid must not hide one interrupted buyer');
+  assert.equal(metricAccounting(raw, summary, 100).complete, false, '99% paid must not hide one interrupted buyer');
   raw.push(p('journey_outcomes', 99, 'http_500'), p('journey_duration', 99, 'http_500'));
-  assert.equal(metricAccounting(raw, { ...summary, iterations: { count: 100 } }).complete, true, 'fully observed failure is valid accounting');
-  assert.equal(metricAccounting(raw, summary).complete, false, 'post-finish replay interruption is invalid');
+  assert.equal(metricAccounting(raw, { ...summary, iterations: { count: 100 } }, 100).complete, true, 'fully observed failure is valid accounting');
+  assert.equal(metricAccounting(raw, summary, 100).complete, false, 'post-finish replay interruption is invalid');
   const duplicate = raw.map(point => point.metric.startsWith('journey_') && point.data.tags.buyer === '99' ? { ...point, data: { ...point.data, tags: { ...point.data.tags, buyer: '98' } } } : point);
-  assert.equal(metricAccounting(duplicate, { ...summary, iterations: { count: 100 } }).complete, false, 'duplicate terminal cannot replace a missing buyer');
+  assert.equal(metricAccounting(duplicate, { ...summary, iterations: { count: 100 } }, 100).complete, false, 'duplicate terminal cannot replace a missing buyer');
 });
 
 test('generator evidence identifies the engine even when low-load CPU counters stay constant', async () => {
@@ -413,4 +413,89 @@ test('raw evidence normalizes offset timestamps and keeps replay/status denomina
     assert.equal(result.responses['checkout/normal/direct/429/0'], 1);
     assert.equal(result.responses['checkout/replay/direct/201/0'], 1);
   } finally { await rm(directory, { recursive: true, force: true }); }
+});
+
+async function analysisFixture(check) {
+  const directory = await mkdtemp(join(tmpdir(), 'peakpass-analysis-check-'));
+  const start = Date.parse('2026-10-01T00:00:00Z');
+  const point = (metric, buyer, seconds, value = 1, extra = {}) => ({ type: 'Point', metric, data: {
+    time: new Date(start + seconds * 1000).toISOString(), value, tags: { buyer: String(buyer), ...extra },
+  } });
+  const points = [point('scenario_start_ms', 0, 0, start)];
+  for (let i = 0; i < 2; i++) {
+    points.push(point('buyers_started', i, i), point('active_vus_at_arrival', i, i), point('arrival_lag_ms', i, i, 0),
+      point('buyers_completed', i, i + .5, 1, { order_id: `o${i}`, ticket_ids: JSON.stringify([`t${i}`]) }),
+      point('journey_outcomes', i, i + .5, 1, { outcome: 'paid' }), point('journey_duration', i, i + .5, 500, { outcome: 'paid' }),
+      point('api_responses', i, i + .5, 1, { kind: 'normal', status: '200' }), point('api_duration', i, i + .5, 10, { kind: 'normal', status: '200' }));
+  }
+  const manifest = { revision: 'flash-sale-v2.6', runId: 'synthetic-analysis', workingTree: '', passed: true, smokePassed: true,
+    settings: parseOptions(['--users', '2', '--rate', '1']), fixture: { userIds: ['u0', 'u1'] }, k6ExitCode: 0,
+    loadEndedAt: new Date(start + 2000).toISOString(), clockChecks: [0, 1].map(() => ({ offsetMs: 0, roundTripMs: 0 })) };
+  const samples = [0, 1000, 2000].map(t => ({ at: new Date(start + t).toISOString(), waiting: 0, checkedOut: 1,
+    hostCpuPercent: 1, hostFreeBytes: 4 * 1073741824, generator: { cpuSeconds: 1, processes: [{ path: 'k6', isShim: false, cpuSeconds: 1, memoryBytes: 1 }] },
+    containers: ['app', 'postgres', 'redis'].map(service => ({ service, cpuPercent: 1, memoryPercent: 1 })) }));
+  const save = (name, value) => writeFile(join(directory, name), JSON.stringify(value));
+  try {
+    await writeFile(join(directory, 'k6-raw.jsonl'), points.map(JSON.stringify).join('\n'));
+    for (const file of ['observations.jsonl', 'resources.jsonl']) await writeFile(join(directory, file), samples.map(JSON.stringify).join('\n'));
+    await save('sql-snapshot.json', { orders: [0, 1].map(i => ({ id: `o${i}`, user_id: `u${i}`, status: 'paid' })), tickets: [0, 1].map(i => ({ id: `t${i}`, order_id: `o${i}` })) });
+    await save('verification.json', { integrityPassed: true, integrityNames: ['checkoutPaymentIdentity'], counts: {}, checks: {} });
+    await save('app-metrics.json', { poolSamples: samples, retrySamples: [] });
+    await save('cleanup.json', { passed: true });
+    await save('negative-checks.json', { dataUnchanged: true, checks: [0, 1, 2].map(() => ({ status: 401, expected: 401 })) });
+    await save('k6-summary.json', { metrics: { buyers_started: { count: 2 }, buyers_completed: { count: 2 }, iterations: { count: 2 }, http_reqs: { count: 2 } } });
+    await check({ directory, manifest, save });
+  } finally { await rm(directory, { recursive: true, force: true }); }
+}
+
+test('analysis requires an explicitly clean working tree for source attribution', async () => {
+  const { analyzeRun } = await import('./flash-sale-analysis.mjs');
+  await analysisFixture(async ({ directory, manifest }) => {
+    assert.equal((await analyzeRun(directory, manifest)).classification, 'valid-stable');
+    for (const workingTree of [' M src/core/services/checkout.service.ts', undefined, null, false, ' ']) {
+      const result = await analyzeRun(directory, { ...manifest, workingTree });
+      assert.equal(result.classification, 'invalid-measurement', String(workingTree));
+      assert.ok(result.invalidReasons.includes('sourceClean'));
+    }
+  });
+});
+
+test('analysis failures preserve strict smoke while still returning a failure', async () => {
+  await analysisFixture(async ({ directory, manifest, save }) => {
+    const clean = value => redact(value, ['private-secret']);
+    for (const passed of [true, false]) {
+      for (const failure of ['invalid', 'exception']) {
+        const current = { ...manifest, passed, smokePassed: passed, evidenceErrors: [{ step: 'observation', error: 'lost' }] };
+        if (failure === 'exception') current.settings = null;
+        const error = await harness.finalizeAnalysis(directory, current, save, clean);
+        assert.ok(error instanceof Error);
+        assert.equal(current.passed, passed, failure);
+        assert.equal(current.smokePassed, passed, failure);
+        assert.ok(current.analysisError);
+        assert.equal(JSON.parse(await readFile(join(directory, 'analysis.json'), 'utf8')).classification, 'invalid-measurement');
+      }
+      const current = { ...manifest, passed, smokePassed: passed };
+      assert.equal(await harness.finalizeAnalysis(directory, current, save, clean), undefined);
+      assert.equal(current.passed, passed);
+      assert.equal(current.smokePassed, passed);
+    }
+  });
+});
+
+test('accounting requires every offered buyer exactly once including nonpaid journeys', async () => {
+  const { metricAccounting } = await import('./flash-sale-analysis.mjs');
+  const p = (metric, buyer, outcome) => ({ metric, data: { value: 1, tags: { buyer: String(buyer), ...(outcome ? { outcome } : {}) } } });
+  const raw = [];
+  for (let i = 0; i < 100; i++) {
+    raw.push(p('buyers_started', i), p('active_vus_at_arrival', i), p('arrival_lag_ms', i),
+      p('journey_outcomes', i, i === 99 ? 'http_500' : 'paid'), p('journey_duration', i, i === 99 ? 'http_500' : 'paid'));
+    if (i < 99) raw.push(p('buyers_completed', i));
+  }
+  const summary = { buyers_started: { count: 100 }, buyers_completed: { count: 99 }, iterations: { count: 100 } };
+  assert.equal(metricAccounting(raw, summary, 100).complete, true);
+  for (const buyer of ['100', '99.5', '-1', 'NaN', undefined, '', null, '099', 99]) {
+    const changed = raw.map(p => p.data.tags.buyer === '99' ? { ...p, data: { ...p.data, tags: { ...p.data.tags, buyer } } } : p);
+    assert.equal(metricAccounting(changed, summary, 100).complete, false, String(buyer));
+  }
+  assert.equal(metricAccounting(raw, summary, 101).complete, false, 'expected count comes from settings');
 });

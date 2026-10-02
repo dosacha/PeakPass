@@ -136,6 +136,21 @@ export function verifySnapshot(data, users, settings, metrics, exitCode) {
       inventory: { available: e.available_seats, activeHolds, allocated, total: e.total_seats } };
 }
 
+export async function finalizeAnalysis(output, manifest, save, clean) {
+  try {
+    const analysis = await analyzeRun(output, manifest);
+    await save('analysis.json', analysis);
+    if (['invalid-measurement', 'integrity-defect'].includes(analysis.classification)) {
+      manifest.analysisError = analysis.classification + ': ' + analysis.invalidReasons.join(',');
+      return new Error(manifest.analysisError);
+    }
+  } catch (err) {
+    manifest.analysisError = clean(err.message);
+    await save('analysis.json', { revision: REVISION, runId: manifest.runId, classification: 'invalid-measurement', error: clean(err.message) });
+    return err;
+  }
+}
+
 export async function main(args = process.argv.slice(2)) {
   assert.equal(Object.keys(process.env).filter(k => k.startsWith('K6_')).length, 0, 'Inherited K6_* overrides must be removed before measuring');
   const settings = parseOptions(args);
@@ -422,17 +437,8 @@ export async function main(args = process.argv.slice(2)) {
     // mkdtemp returned this exact directory, not a user-supplied/computed cleanup target.
     await rm(privateDir, { recursive: true, force: true });
     manifest.finishedAt = new Date().toISOString(); manifest.passed = !failed; manifest.smokePassed = !failed;
-    try {
-      const analysis = await analyzeRun(output, manifest);
-      await save('analysis.json', analysis);
-      if (['invalid-measurement', 'integrity-defect'].includes(analysis.classification)) {
-        manifest.analysisError = analysis.classification + ': ' + analysis.invalidReasons.join(',');
-        failed ??= new Error(manifest.analysisError); manifest.passed = false;
-      }
-    } catch (err) {
-      manifest.analysisError = clean(err.message); manifest.passed = false; failed ??= err;
-      await save('analysis.json', { revision: REVISION, runId: settings.runId, classification: 'invalid-measurement', error: clean(err.message) });
-    }
+    const analysisFailure = await finalizeAnalysis(output, manifest, save, clean);
+    failed ??= analysisFailure;
     manifest.artifactHashes = {};
     for (const file of await readdir(output)) manifest.artifactHashes[file] = await fileHash(join(output, file));
     await save('manifest.json', manifest);
