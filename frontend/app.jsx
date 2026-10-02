@@ -171,28 +171,28 @@ function initialPollMode() {
 
 // What this page did, for the measurements of admission-v1 §7. `runId` comes from `?run=`,
 // `tabId` only labels this page load; neither is sent to the server.
-const admissionRunId = pageParams.get("run") || "local";
 const admissionTrace = window.PeakPassAdmission.createTrace({
   limit: 5000,
   meta: {
-    runId: admissionRunId,
+    runId: pageParams.get("run") || "local",
     tabId: window.uuid(),
     startedAt: new Date().toISOString(),
   },
 });
 window.PeakPassAdmissionTrace = { snapshot: () => admissionTrace.snapshot() };
 
-// Marks an admission whose first recognition was recorded, per (runId, epoch, admissionId) as
-// §7 counts samples. The tabs of this browser profile share it, so a reload or a second tab
-// does not count the admission again in the same run. It decides nothing else.
+// Marks an admission whose first recognition was recorded, shared by the tabs of this browser
+// profile so that a reload or a second tab does not count it again. It decides nothing else.
+// The key is (epoch, admissionId) without the run: an admission id is unique, the sample
+// belongs to the run of the page that recorded it, and a key with the run made the next run
+// record an admission that had been recognized as missed.
 const seenAdmissions = {
   read() {
     try { return JSON.parse(localStorage.getItem("pp_admission_seen")) || []; } catch { return []; }
   },
-  has(key) { return this.read().includes(`${admissionRunId}:${key}`); },
+  has(key) { return this.read().includes(key); },
   add(key) {
-    localStorage.setItem("pp_admission_seen",
-      JSON.stringify([...this.read(), `${admissionRunId}:${key}`].slice(-50)));
+    localStorage.setItem("pp_admission_seen", JSON.stringify([...this.read(), key].slice(-50)));
   },
 };
 
