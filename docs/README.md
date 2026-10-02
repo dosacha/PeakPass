@@ -5,8 +5,9 @@
 
 ## 진행 중인 Issue 인수인계
 
+- [P4 / Issue #13 새 세션 인수인계](ISSUE_13_HANDOFF.md) — 병합된 admission-v1, 첫 설계 설명, Redis·PG policy 경계와 P4/P5/P6 검증·인계 기준.
 - [입장 제어 계약 admission-v1](ADMISSION_CONTRACT.md) — P4~P8의 상태/API·단일 소비·실패 복구·실험 profile과 검증 경계. 제품 구현·실측 결과와 구분한다.
-- [P3 / Issue #12 새 세션 인수인계](ISSUE_12_HANDOFF.md) — 수용된 P2 증거, 착수 gate, 첫 설계 설명의 범위와 계약 완료 기준.
+- [P3 / Issue #12 이전 인수인계](ISSUE_12_HANDOFF.md) — P3 착수 당시의 수용 P2 증거와 설계 과제. 현재 계약·P4 착수는 위 문서를 따른다.
 - [P2 쓰기 기준선과 실제 증거](FLASH_SALE_BASELINE.md) · [측정 계약](FLASH_SALE_EVIDENCE.md)
 
 ## 먼저 읽을 문서
