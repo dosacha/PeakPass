@@ -1,9 +1,11 @@
 {
   "runId": "peakpass-pr24-review-20261002",
   "baseSha": "e6583fb70c14d0a99a19c530eeda1b178b64274d",
-  "codeSha": "e408fd246d7467af3b555d6a96707fafe10afde3",
+  "fixSha": "e408fd246d7467af3b555d6a96707fafe10afde3",
+  "codeSha": "14dd4979ab17506b2aaac11a3f6e9eb7d3148812",
+  "codeShaNote": "Test-only commit on top of fixSha; every check except the baseline ran at codeSha.",
   "archive": "p4-review-20261002.zip",
-  "archiveSha256": "aed9f94a9c41b85cb2539d1e5993ce2884ec0bd7a9e6f7d3ad79b46fdeaf5b51",
+  "archiveSha256": "9d936dd4d6e0ae799e53b4bf40df185199d09c9812e2a35b19f31a06990a482d",
   "review": {
     "source": "GitHub chatgpt-codex-connector review 5388546072 on PR #24",
     "reviewedCommit": "e6583fb70c14d0a99a19c530eeda1b178b64274d",
@@ -31,22 +33,22 @@
   },
   "environment": {
     "host": "Windows, Node 24.15.0",
-    "postgres": "16.12 on 127.0.0.1:64369",
-    "redis": "7.4.8 on 127.0.0.1:64370 (appendonly no, save empty, maxmemory-policy noeviction, maxmemory 256mb)",
+    "postgres": "16.12; 127.0.0.1:64369 for the baseline, 127.0.0.1:53334 for the runs at codeSha",
+    "redis": "7.4.8; 127.0.0.1:64370 for the baseline, 127.0.0.1:53335 for the runs at codeSha (appendonly no, save empty, maxmemory-policy noeviction, maxmemory 256mb)",
     "containerLabel": "peakpass.task=peakpass-pr24-review-20261002"
   },
   "results": {
     "baselineAdmissionPassedAtBase": 36,
-    "redFailed": 6,
+    "redFailed": 7,
     "redPassed": 23,
     "redSuitesFailedToCompile": 1,
-    "greenPassed": 34,
+    "greenPassed": 35,
     "build": "pass",
     "typecheck": "pass",
     "lintErrors": 0,
     "lintWarnings": 10,
     "unitPassed": 160,
-    "integrationPassed": 279,
+    "integrationPassed": 280,
     "integrationSkipped": 15,
     "integrationSuitesPassed": 27,
     "integrationSuitesSkipped": 2,
@@ -65,7 +67,7 @@
     "afterRelease": {
       "finalStatus": 404,
       "code": "ADMISSION_NOT_ENABLED",
-      "elapsedMs": 258,
+      "elapsedMs": 261,
       "statusesSeen": {
         "200": 8,
         "404": 1
@@ -112,13 +114,13 @@
     },
     {
       "name": "review-red.log",
-      "bytes": 30692,
-      "sha256": "7300c1cad323635f8808d1e3034791d2dece3b6d64ae881561d787c6c06dcd09"
+      "bytes": 32129,
+      "sha256": "edb3d13063e1ecd7fc5054b20d6e4b6c52e1d42dc163dd54590d3e79beae4ddc"
     },
     {
       "name": "review-green.log",
-      "bytes": 25435,
-      "sha256": "5977e7bd22c4c13711f9e81f0d8f6843aa851ba0b448477407003a7d39faee37"
+      "bytes": 25441,
+      "sha256": "306af6a0505e8bb553d2ef3f55e25fdde61ce847a1d9fac837c6b60753c2fadf"
     },
     {
       "name": "review-build.log",
@@ -137,33 +139,33 @@
     },
     {
       "name": "review-unit.log",
-      "bytes": 16732,
-      "sha256": "72e1d679a32ca073a17ef3ea4e6fc9bc79e60f1ea08f56199a0903f208339f23"
+      "bytes": 16753,
+      "sha256": "c0340a60624379fbc4dc4b85b9c6ebbe761bcb82ab03bac3a64d698761b94191"
     },
     {
       "name": "review-integration.log",
-      "bytes": 534740,
-      "sha256": "a9d3ead728c71b56ff4dd621cc3303153834ffa595f34930e2a3d0d223b58e55"
+      "bytes": 535147,
+      "sha256": "3bdaa25cc2dae0cd9c783504415a43bee0b7e88a040919e0906150e66e219b7c"
     },
     {
       "name": "review-harness.log",
-      "bytes": 3066,
-      "sha256": "c5c1e7bc308d417a56402f77451fab87ef98043e282992f4f45154057cf2eea9"
+      "bytes": 3065,
+      "sha256": "753d0fc270964607586faab476230b36ddc14defcfc75920684657841b3fabbd"
     },
     {
       "name": "review-callback-harness.log",
       "bytes": 264,
-      "sha256": "435535c00099f9403ec49778bd1ac4886559c8666185bfa55c045f6c47b9f42c"
+      "sha256": "3b7bc197f7b9e63548596bc673e0bbfe6d8a2b9b349ca9e6bde0d3200a044c19"
     },
     {
       "name": "review-smoke-app.log",
-      "bytes": 15626,
-      "sha256": "8a577c698a5e6f1ece2ac4ed9beeaffe36ea658e2501c9218098020fa4c5a613"
+      "bytes": 17188,
+      "sha256": "5f25f9b04040c4b9b2721176161d0105afc98091160a1aedcdd5a443408938a1"
     },
     {
       "name": "review-smoke-client.log",
       "bytes": 858,
-      "sha256": "c979ecc4c283a4085897b792bbe36b6e390addafe512a0611af88aae80371c05"
+      "sha256": "af75ec8b219bcd736ba975de5bc5c9fd01a81e007d6ee7d2234690a0d17f844a"
     },
     {
       "name": "review-smoke-fixture.ts",

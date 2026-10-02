@@ -4,7 +4,7 @@ Run: `peakpass-p4-20261002`. This is a local implementation candidate, **not an 
 
 Final code: `c51ebd6dc8219e000d9f35afefc49dbf849c284b`, branch `codex/issue-13-admission`. Read-only final reviewer: actual `gpt-6-astra/high`, **No findings** at that code SHA. The initial whole-branch review of `55a97fd` covered 27/27 changed files and found one P2 stale-observation reset race. Root reproduced both epoch/phase variants RED→GREEN, fixed the shared normal/retry decision, and reran the complete suites. The same reviewer checked the three-file fix delta. This is static review plus root-executed local validation, not independently rerun tests or product activation approval.
 
-**PR #24 review follow-up.** GitHub's automated Codex review of PR head `e6583fb70c14d0a99a19c530eeda1b178b64274d` raised three P2 findings that the static verdict above did not cover. Each was reproduced RED and fixed in `e408fd246d7467af3b555d6a96707fafe10afde3`, which is the current code. Text marked *(follow-up)* describes that commit. Everything else, including the reviewer verdict, the 276/10 run and the image checks, still describes `c51ebd6` and was not rerun in the same shape; see [PR #24 review follow-up](#pr-24-review-follow-up).
+**PR #24 review follow-up.** GitHub's automated Codex review of PR head `e6583fb70c14d0a99a19c530eeda1b178b64274d` raised three P2 findings that the static verdict above did not cover. Each was reproduced RED and fixed in `e408fd246d7467af3b555d6a96707fafe10afde3`; `14dd4979ab17506b2aaac11a3f6e9eb7d3148812` adds one more regression test and is the current code. Text marked *(follow-up)* describes that state. Everything else, including the reviewer verdict, the 276/10 run and the image checks, still describes `c51ebd6` and was not rerun in the same shape; see [PR #24 review follow-up](#pr-24-review-follow-up).
 
 ## Consumed input
 
@@ -90,7 +90,7 @@ P5/P6 consume this implementation only after its accepted SHA is present in thei
 
 ## PR #24 review follow-up
 
-Run: `peakpass-pr24-review-20261002`. Input: GitHub Codex review 5388546072 of PR head `e6583fb70c14d0a99a19c530eeda1b178b64274d`, three P2 inline comments. Fix: `e408fd246d7467af3b555d6a96707fafe10afde3` on the same branch, five files (service, Redis commands, three integration test files), written in a separate worktree so the original checkout stayed untouched. No migration, route, response schema, profile value or contract text changed; the contract blob hash `e22be4df9910811eba552f630b43170ba0cf0c8d953a54dc5a3cea34c0dcf3d1` was rechecked at the fix commit. This remains a local candidate, not P4 acceptance.
+Run: `peakpass-pr24-review-20261002`. Input: GitHub Codex review 5388546072 of PR head `e6583fb70c14d0a99a19c530eeda1b178b64274d`, three P2 inline comments. Fix: `e408fd246d7467af3b555d6a96707fafe10afde3` on the same branch, five files (service, Redis commands, three integration test files), written in a separate worktree so the original checkout stayed untouched. A test-only commit `14dd4979ab17506b2aaac11a3f6e9eb7d3148812` then added a service-level regression; every check below except the baseline ran at that commit. No migration, route, response schema, profile value or contract text changed; the contract blob hash `e22be4df9910811eba552f630b43170ba0cf0c8d953a54dc5a3cea34c0dcf3d1` was rechecked at the fix commit. This remains a local candidate, not P4 acceptance.
 
 | Finding (review comment) | Defect reproduced at `e6583fb` | Change in `e408fd2` |
 | --- | --- | --- |
@@ -103,13 +103,13 @@ Ruling: a present control stays authoritative on the request path, because ready
 | Check | Result / evidence boundary |
 | --- | --- |
 | Baseline | Five admission suites at `e6583fb` on the owned resources before any change: 36/36. |
-| RED | Tests of `e408fd2` against the two source files of `e6583fb`: 6 failed / 23 passed, and the Redis protocol file did not compile because `retireAdmission` did not exist. |
-| GREEN | The same three files at `e408fd2`: 34/34. |
+| RED | Tests of `14dd497` against the two source files of `e6583fb`: 7 failed / 23 passed, and the Redis protocol file did not compile because `retireAdmission` did not exist. |
+| GREEN | The same three files at `14dd497`: 35/35. |
 | Build / typecheck / lint | `npm run build` and `npx --no-install tsc --noEmit` passed. Lint: zero errors, the same 10 warnings. |
 | Unit | 160/160. |
-| Full integration | **279 passed / 15 skipped**, 27 suites passed and 2 suites skipped (294 tests). Eight tests are new. |
+| Full integration | **280 passed / 15 skipped**, 27 suites passed and 2 suites skipped (295 tests). Nine tests are new. |
 | Harness regression | `npm run test:flash-sale`: 29/29; callback run-isolation check passed. Harness checks, not load runs. |
-| Two-process smoke | `node dist/main.js` built at `e408fd2` with `ENABLE_ADMISSION=true` and its real scheduler. A second process protected and opened an event, then released it under the exclusive gate and made no further lifecycle call. Loopback HTTP: 200/201 while protected, the app's scheduler promoted the entry, then404 `ADMISSION_NOT_ENABLED`; control and epoch keys were gone and the policy was `recovering` at generation+1. One observation took 258ms with eight 200 answers before the first404; it is not a latency bound. |
+| Two-process smoke | `node dist/main.js` built at `14dd497` with `ENABLE_ADMISSION=true` and its real scheduler. A second process protected and opened an event, then released it under the exclusive gate and made no further lifecycle call. Loopback HTTP: 200/201 while protected, the app's scheduler promoted the entry, then404 `ADMISSION_NOT_ENABLED`; control and epoch keys were gone and the policy was `recovering` at generation+1. One observation took 261ms with eight 200 answers before the first404; it is not a latency bound. |
 | Fixture disclosure | The lost reply is one injected `EVAL` rejection, not a network partition. The session deadline and the overdue claim are written fields followed by real Lua calls. The in-flight release interleavings wrap `pool.connect` to commit the release between two real recovery transactions. PG gates/transactions, Redis commands and loopback HTTP are real. |
 | Not rerun | Production image build and off/on empty-DB checks, the five Docker lifecycle cases (they are among the 15 skips here; they passed at `c51ebd6`), the existing-011 upgrade check, and an independent static review of this change. The ten legacy Redis-outage cases stay skipped for the reason recorded above. |
 
@@ -121,8 +121,8 @@ Remaining limits of the follow-up:
 - The maintenance query now reads `protected OR phase='open'`, which the partial protected index cannot serve. Its cost was not measured; P8 remeasures at the integrated SHA.
 - A token-matched finalization that arrives after the freeze is still rejected with503/410. That is the existing fence, and the durable result remains the authority.
 
-Owned environment: Windows host Node24.15.0; PostgreSQL16.12 on127.0.0.1:64369 and Redis7.4.8 on127.0.0.1:64370 (AOF/RDB off, noeviction,256MiB). Both containers carried `peakpass.task=peakpass-pr24-review-20261002` and were stopped and removed after the runs above; no other container, checkout or database was changed. Commands are the ones listed in the verification record, without the Docker opt-in and the image checks.
+Owned environment: Windows host Node24.15.0; PostgreSQL16.12 and Redis7.4.8 (AOF/RDB off, noeviction,256MiB) on127.0.0.1:64369/64370 for the baseline and on127.0.0.1:53334/53335 for the runs at `14dd497`. Both container pairs carried `peakpass.task=peakpass-pr24-review-20261002` and were stopped and removed after their runs; no other container, checkout or database was changed. Commands are the ones listed in the verification record, without the Docker opt-in and the image checks.
 
 Raw outputs: [follow-up manifest](../test-results/admission-v1/p4-review-20261002.json) / [follow-up ZIP](../test-results/admission-v1/p4-review-20261002.zip). The manifest records the ZIP and file SHA256 values, the smoke observation and the skipped suites. The archive also holds the disposable smoke fixture, which is not part of the source tree. No credentials or `.env` are archived.
 
-Source refresh at the follow-up: origin/main remains `f2a4674133cbeb50a65590f75bd9140efc32ff1d` and the PR head before this push was `e6583fb70c14d0a99a19c530eeda1b178b64274d`. The P2 index hash matches the consumed value. The PR description still names `c51ebd6` as final code and was not edited. Remote CI for the new head, review-thread replies, a new automated review and the gates in #9 are outside this record.
+Source refresh at the follow-up: origin/main remains `f2a4674133cbeb50a65590f75bd9140efc32ff1d` and the PR head before this push was `e6583fb70c14d0a99a19c530eeda1b178b64274d`. The P2 index hash matches the consumed value. The PR description still names `c51ebd6` as final code and was not edited. GitHub Actions `install-lint-test` passed on `2d138e940035443750506087da525073df9a728e`, the head that carried the fix and the first version of this record; that run includes the image build and the enabled image check. CI for later heads, review-thread replies, a new automated review and the gates in #9 are outside this record.
