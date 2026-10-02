@@ -313,6 +313,38 @@ describe('admission actual authenticated HTTP and epoch lifecycle', () => {
     expect(BigInt(after.generation)).toBe(BigInt(before.generation) + 1n);
     expect(after.epoch).not.toBe(before.epoch);
   });
+  it('finalizes an approved claim after the session deadline, then rolls the ended epoch over', async () => {
+    const { admissionKeys } = await import('@/infra/redis/admission');
+    const before = (await service.control(eventId))!,
+      owner = randomUUID();
+    const admissionId = (await service.join(eventId, owner, before.epoch, randomUUID())).body
+      .admission!.admissionId;
+    expect((await service.promote(eventId)).promoted).toEqual([admissionId]);
+    const claim = await service.claim({
+      eventId,
+      userId: owner,
+      admissionId,
+      epoch: before.epoch,
+      fingerprint: 'canonical',
+    });
+    // Synthetic deadline: the session ends after the claim was approved, before its result is reflected.
+    await redis.hSet(admissionKeys(eventId, before.epoch)[1], 'endAt', '1');
+    const outcome = { kind: 'reservation' as const, resourceId: randomUUID(), code: null };
+    expect((await service.complete(claim, outcome)).entry).toMatchObject({
+      state: 'consumed',
+      outcome,
+    });
+    expect(service.isReady()).toBe(true);
+    // For the next tick the ended session is an established loss, not a lost reply.
+    await service.maintain();
+    const after = (await service.control(eventId))!;
+    expect(after.mode).toBe('ready');
+    expect(BigInt(after.generation)).toBe(BigInt(before.generation) + 1n);
+    await expect(service.complete(claim, outcome)).rejects.toMatchObject({
+      code: 'ADMISSION_RESET',
+      statusCode: 410,
+    });
+  });
   // P4 has no release route. The fixture performs the contract's explicit transition under the exclusive gate.
   const setProtected = (value: boolean) =>
     serializableTransactionWithRetry(async (c) => {
