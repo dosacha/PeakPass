@@ -127,13 +127,23 @@ describe('admission Redis atomic protocol', () => {
     expect(await api.unlinkRetiredAdmission(eventId, observed!, [newKey])).toBe(0);
     expect(await redis.exists(newKey)).toBe(1);
   });
-  it('retires the control with its own epoch keys, including an unreadable control', async () => {
+  it('retires the control with its own epoch, scanned leftovers of the same event and an unreadable control', async () => {
     const current = (await api.getAdmissionControl(eventId))!,
-      keys = api.admissionKeys(eventId, current.epoch);
+      keys = api.admissionKeys(eventId, current.epoch),
+      earlier = api.admissionKeys(eventId, epoch)[2],
+      foreign = api.admissionKeys(randomUUID(), randomUUID())[2];
     await api.retireAdmission(eventId);
     expect(await redis.exists(keys.slice(0, 12))).toBe(0);
-    // An earlier epoch is not this control's namespace; bounded cleanup owns it after re-protection.
-    expect(await redis.exists(api.admissionKeys(eventId, epoch)[2])).toBe(1);
+    // An earlier epoch is not the control's namespace; it goes only as a leftover of this event.
+    expect(await redis.exists(earlier)).toBe(1);
+    await redis.hSet(foreign, '__', 'another-event');
+    try {
+      await api.retireAdmission(eventId, [earlier, foreign]);
+      expect(await redis.exists(earlier)).toBe(0);
+      expect(await redis.exists(foreign)).toBe(1);
+    } finally {
+      await redis.del(foreign);
+    }
     await redis.set(keys[0], 'not-a-hash');
     await api.retireAdmission(eventId);
     expect(await redis.exists(keys[0])).toBe(0);

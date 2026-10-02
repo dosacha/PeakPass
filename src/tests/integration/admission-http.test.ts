@@ -461,13 +461,13 @@ describe('admission actual authenticated HTTP and epoch lifecycle', () => {
     },
   );
   it.each(['a deleted event', 'a policy released while recovering'])(
-    'retires the orphaned control of %s through the bounded sweep',
+    'retires every orphaned namespace of %s through the bounded sweep',
     async (kind) => {
-      const { initializeAdmission, publishAdmission, freezeAdmission, getAdmissionControl } =
+      const { initializeAdmission, publishAdmission, freezeAdmission } =
         await import('@/infra/redis/admission');
       const guarded = (await service.control(eventId))!,
         orphan = randomUUID(),
-        orphanEpoch = randomUUID(),
+        epochs = [randomUUID(), randomUUID()],
         url = `/events/${orphan}/admissions/me`;
       expect(guarded.mode).toBe('ready');
       await pool.query(
@@ -475,21 +475,26 @@ describe('admission actual authenticated HTTP and epoch lifecycle', () => {
         VALUES($1,'p4 orphan',NOW(),NOW()+interval '1 day',10,10)`,
         [orphan],
       );
+      // Limiter keys expire on their own; everything else under the event prefix is a namespace.
+      const namespaces = async () =>
+        (await redis.keys(`peakpass:admission:${orphan}:*`)).filter((k) => !k.includes(':limit:'));
       try {
-        // Fixture: a namespace published before its policy row disappeared or its release went unseen.
-        await initializeAdmission(
-          { eventId: orphan, epoch: orphanEpoch, generation: '1' },
-          guarded.runId,
-        );
-        await publishAdmission(orphan, orphanEpoch, '1');
+        // Fixture: two published generations, the earlier one still awaiting bounded cleanup, left
+        // behind when the policy row disappeared or its release went unseen.
+        for (const [index, epoch] of epochs.entries()) {
+          const generation = String(index + 1);
+          await initializeAdmission({ eventId: orphan, epoch, generation }, guarded.runId);
+          await publishAdmission(orphan, epoch, generation);
+        }
+        expect(await namespaces()).toHaveLength(23);
         if (kind === 'a deleted event')
           await pool.query('DELETE FROM events WHERE id=$1', [orphan]);
-        else await freezeAdmission(orphan, orphanEpoch, '1');
+        else await freezeAdmission(orphan, epochs[1], '2');
         // No policy row selects this control, so until the sweep reaches it Redis still answers.
         expect((await request(url)).status).toBe(kind === 'a deleted event' ? 200 : 503);
-        for (let tick = 0; tick < 50 && (await getAdmissionControl(orphan)); tick++)
+        for (let tick = 0; tick < 50 && (await namespaces()).length; tick++)
           await service.maintain();
-        expect(await getAdmissionControl(orphan)).toBeNull();
+        expect(await namespaces()).toEqual([]);
         const response = await request(url);
         expect(response.status).toBe(404);
         expect(response.body.error.code).toBe('ADMISSION_NOT_ENABLED');

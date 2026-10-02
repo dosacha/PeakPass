@@ -344,13 +344,20 @@ export const publishAdmission = (eventId: string, epoch: string, generation: str
 export const freezeAdmission = (eventId: string, epoch: string, generation: string) =>
   runAdmission(eventId, epoch, 'freeze', { generation });
 
-/** Caller holds the event's exclusive PG gate with protection released, so nothing can publish here. */
-export async function retireAdmission(eventId: string): Promise<void> {
-  const control = admissionKeys(eventId, '_')[0];
+/**
+ * Caller holds the event's exclusive PG gate with protection released, so nothing can publish here.
+ * `leftovers` are keys of this event's earlier epochs that a bounded scan found.
+ */
+export async function retireAdmission(eventId: string, leftovers: string[] = []): Promise<void> {
+  const prefix = `peakpass:admission:${eventId}:`;
   await withRedis(async (r) => {
     // A control of another type is stale as well; only its epoch keys are then unknown.
-    const epoch = (await r.type(control)) === 'hash' ? await r.hGet(control, 'epoch') : null;
-    await r.unlink(epoch ? admissionKeys(eventId, epoch).slice(0, 12) : control);
+    const epoch =
+      (await r.type(prefix + 'control')) === 'hash'
+        ? await r.hGet(prefix + 'control', 'epoch')
+        : null;
+    const own = epoch ? admissionKeys(eventId, epoch).slice(0, 12) : [prefix + 'control'];
+    await r.unlink([...new Set([...own, ...leftovers.filter((key) => key.startsWith(prefix))])]);
   });
 }
 

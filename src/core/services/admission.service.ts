@@ -233,13 +233,17 @@ export class AdmissionService {
   // The exclusive barrier's view of the policy: null once protection was released or the event
   // is gone. Nothing can publish under this gate then, so Redis stops being authoritative here
   // and an open policy leaves its published epoch for good.
-  private async barrier(c: PoolClient, eventId: string): Promise<AdmissionPolicy | null> {
+  private async barrier(
+    c: PoolClient,
+    eventId: string,
+    leftovers: string[] = [],
+  ): Promise<AdmissionPolicy | null> {
     const current = await readAdmissionPolicy(c, eventId, 'exclusive').catch((error) => {
       if (error instanceof NotFoundError) return null;
       throw error;
     });
     if (current?.protected) return current;
-    await retireAdmission(eventId);
+    await retireAdmission(eventId, leftovers);
     if (current?.phase === 'open') await advanceEpoch(c, eventId);
     return null;
   }
@@ -357,18 +361,27 @@ export class AdmissionService {
         if (!stopped()) throw error;
       });
   }
-  // A control whose event was deleted, or whose policy was released while recovering, has no row
-  // in the selection above. One bounded SCAN page per tick finds it; the barrier decides. v1
-  // dedicates this Redis to one PostgreSQL database, so a control without an event here is orphaned.
+  // A control or epoch namespace that no protected policy owns (event deleted, policy released)
+  // has no row in the selection above. One bounded SCAN page per tick finds such keys; the
+  // barrier decides and unlinks them, so no epoch outlives its event's protection. v1 dedicates
+  // this Redis to one PostgreSQL database, so keys of an event absent here are orphaned.
   private async retireOrphans(guarded: Set<string>, stopped: () => boolean) {
     const page = await withRedis((r) =>
-      r.scan(this.orphanCursor, { MATCH: 'peakpass:admission:*:control', COUNT: 100 }),
+      r.scan(this.orphanCursor, { MATCH: 'peakpass:admission:*', COUNT: 100 }),
     );
     this.orphanCursor = page.cursor;
+    const orphans = new Map<string, string[]>();
     for (const key of page.keys) {
-      const eventId = /^peakpass:admission:([0-9a-f-]{36}):control$/.exec(key)?.[1];
+      // Limiter keys expire on their own and are not part of a published namespace.
+      const eventId = /^peakpass:admission:([0-9a-f-]{36}):(control|[0-9a-f-]{36}:\w+)$/.exec(
+        key,
+      )?.[1];
+      if (eventId && !guarded.has(eventId))
+        orphans.set(eventId, [...(orphans.get(eventId) ?? []), key]);
+    }
+    for (const [eventId, keys] of orphans) {
       if (stopped()) return;
-      if (eventId && !guarded.has(eventId)) await this.recover(eventId, null);
+      await serializableTransactionWithRetry((c) => this.barrier(c, eventId, keys));
     }
   }
   private async cleanRetired(eventId: string) {
