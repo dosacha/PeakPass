@@ -513,6 +513,60 @@ describe('polling controller', () => {
     expect(t.controller.view().admission?.admissionId).toBe(ADMISSION_A);
   });
 
+  it('retries a failed hidden poll no sooner than 15 s while the tab stays hidden', async () => {
+    const t = tab(api);
+    t.onRequest(() => (t.calls.length === 2 ? { status: 0 } : t.ok(entry('waiting'), 5000)));
+    t.controller.start();
+    await t.advance(500);
+    t.setHidden(true);
+    await t.advance(29499);
+    expect(t.times()).toEqual([0, 15000]);
+    await t.advance(1);
+    expect(t.times()).toEqual([0, 15000, 30000]);
+  });
+
+  it('sends the one request on return after a hidden poll failed, once the wait of that failure is over', async () => {
+    const t = tab(api);
+    t.onRequest(() => (t.calls.length === 2 ? { status: 0 } : t.ok(entry('waiting'), 5000)));
+    t.controller.start();
+    await t.advance(500);
+    t.setHidden(true);
+    // The hidden poll at 15000 fails. Its own wait is the first backoff step and ends at 16000;
+    // the hidden interval only moves the retry of a tab that stays hidden.
+    await t.advance(16500);
+    expect(t.times()).toEqual([0, 15000]);
+    t.setHidden(false);
+    await t.advance(0);
+    expect(t.times()).toEqual([0, 15000, 17000]);
+    expect(t.traced('poll')[2]).toMatchObject({ reason: 'return', status: 200 });
+    expect(t.maxActive()).toBe(1);
+  });
+
+  it('retries at the end of the wait, not after the hidden interval, when the tab returns inside the wait of a hidden failure', async () => {
+    const t = tab(api);
+    t.onRequest(() =>
+      t.calls.length === 2
+        ? failure(429, 'ADMISSION_RATE_LIMITED', 3000)
+        : t.ok(entry('waiting'), 5000),
+    );
+    t.controller.start();
+    await t.advance(500);
+    t.setHidden(true);
+    await t.advance(15500);
+    t.setHidden(false);
+    await t.advance(1999);
+    expect(t.times()).toEqual([0, 15000]);
+    expect(t.controller.view().problem).toMatchObject({ kind: 'rate-limited', retryAt: 18000 });
+    await t.advance(1);
+    expect(t.times()).toEqual([0, 15000, 18000]);
+    expect(t.traced('poll')[2]).toMatchObject({
+      reason: 'retry',
+      plannedDelayMs: 3000,
+      actualDelayMs: 3000,
+    });
+    expect(t.maxActive()).toBe(1);
+  });
+
   it('waits at least Retry-After on 429', async () => {
     const t = tab(api);
     t.onRequest(() =>
@@ -1033,6 +1087,24 @@ describe('join, cancel and purchase', () => {
     expect(t.controller.view().purchase).toBeNull();
     expect(t.pending.size()).toBe(0);
     expect(t.maxActive()).toBe(1);
+  });
+
+  it('sends and reports nothing more once it is disposed between two attempts of a purchase', async () => {
+    const t = tab(api);
+    t.onRequest(() => t.ok(admittedEntry(t), 1000));
+    t.onPurchase(() => ({ status: 0 }));
+    t.controller.start();
+    await t.flush();
+    t.controller.purchase({ ...PURCHASE });
+    await t.advance(500);
+    expect(t.controller.view().purchase).toMatchObject({ status: 'retrying', attempts: 1 });
+    t.controller.dispose();
+    await t.advance(60000);
+    expect(t.purchases).toHaveLength(1);
+    expect(t.results).toEqual([]);
+    expect(t.methods()).toEqual(['GET']);
+    // The request stays open for this user and event: the next page restores it.
+    expect(t.pending.size()).toBe(1);
   });
 
   it('retries only what a later attempt can outlive and reports every other answer at once', async () => {

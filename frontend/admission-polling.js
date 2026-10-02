@@ -386,18 +386,22 @@
       phase = "not-enabled";
     }
 
-    // Keeps every identity and reads the state again after the wait.
+    // Keeps every identity and reads the state again after the wait. The wait is what the
+    // failure itself asks for: the backoff and a server minimum. A tab that stays hidden
+    // retries no sooner than its interval, but that interval is not part of the wait, so it
+    // does not hold back the request on return.
     function fail(response) {
       failures += 1;
       const u = draw();
-      const delay = failureDelay({
+      const asked = {
         failures,
-        hidden: visibility.hidden(),
         serverMinMs: response.data && response.data.nextPollAfterMs,
         retryAfterMs: response.retryAfterMs,
         u,
-      });
-      notBefore = now() + delay;
+      };
+      const wait = failureDelay(Object.assign({ hidden: false }, asked));
+      const delay = failureDelay(Object.assign({ hidden: visibility.hidden() }, asked));
+      notBefore = now() + wait;
       problem = {
         kind: response.status === 429 ? "rate-limited" : response.status === 0 ? "network" : "unavailable",
         code: response.status === 200 ? "PROTOCOL" : codeOf(response),
@@ -617,9 +621,17 @@
         }
         return;
       }
-      // One request on return. An error wait keeps its time, and an event without a queue is
-      // not probed again.
-      if (flight || purchasing() || phase === "not-enabled" || notBefore > now()) return;
+      // One request on return. A wait after a failure keeps its time: the retry comes at its
+      // end, also when the hidden interval had moved it further out. An event without a queue
+      // is not probed again.
+      if (flight || purchasing() || phase === "not-enabled") return;
+      if (notBefore > now()) {
+        if (pollTimer !== null && pollDue > notBefore) {
+          const plan = pollPlan && Object.assign({}, pollPlan, { delayMs: Math.round(notBefore - lastDone) });
+          schedule(notBefore - now(), pollReason, plan);
+        }
+        return;
+      }
       schedule(0, "return");
     }
 

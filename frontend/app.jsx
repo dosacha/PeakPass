@@ -448,8 +448,15 @@ const App = () => {
       onChange: setAdmission,
       onTrace(event) {
         admissionTrace.push(event);
-        // The request log lists a status poll only when it changed what the card shows.
-        if (event.type === "poll" && event.changed && lastPollRef.current) logReq(lastPollRef.current);
+        // The request log lists a status poll only when it changed what the card shows. A poll
+        // without an answer has nothing on record but the answer of an earlier poll, so its
+        // line is written from the event.
+        if (event.type !== "poll" || !event.changed) return;
+        if (event.status === 0) {
+          logReq({ method: "GET", url: `/events/${selectedEventId}/admissions/me`, status: 0,
+                   elapsed: Math.round(event.tRecv - event.tSend), request: null,
+                   response: { error: event.timedOut ? "No answer within the timeout" : "No answer" } });
+        } else if (lastPollRef.current) logReq(lastPollRef.current);
       },
       onPurchaseResult({ status, data }) {
         if (status >= 200 && status < 300) {
@@ -468,6 +475,9 @@ const App = () => {
       controller.dispose();
       admissionRef.current = null;
       setAdmission(null);
+      // A purchase this controller still had open ends with it, so step 3 is not running any
+      // more. The request stays restorable for the same user and event.
+      setStepStatus(prev => prev.s3 === "running" ? { ...prev, s3: "idle" } : prev);
     };
   }, [mode, apiBase, selectedEventId, queueUserId, queueNonce, ensureLiveDemoSession]);
 

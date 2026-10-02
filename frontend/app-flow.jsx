@@ -60,11 +60,11 @@ const QUEUE_PHASES = {
   "not-joined":  { pill: "idle", label: "미등록",        tone: "",        mark: "+" },
   waiting:       { pill: "info", label: "대기 중",       tone: "waiting", mark: "Q" },
   admitted:      { pill: "ok",   label: "입장",          tone: "ok",      mark: "✓" },
-  processing:    { pill: "warn", label: "구매 처리 중",  tone: "waiting", mark: "…" },
+  processing:    { pill: "info", label: "구매 처리 중",  tone: "waiting", mark: "…" },
   consumed:      { pill: "idle", label: "사용됨",        tone: "",        mark: "✓" },
   cancelled:     { pill: "idle", label: "취소됨",        tone: "",        mark: "×" },
   expired:       { pill: "err",  label: "만료",          tone: "err",     mark: "!" },
-  reset:         { pill: "warn", label: "초기화됨",      tone: "err",     mark: "!" },
+  reset:         { pill: "err",  label: "초기화됨",      tone: "err",     mark: "!" },
 };
 
 const QUEUE_NOTICES = {
@@ -224,7 +224,7 @@ const QueueCard = ({ state, actions }) => {
         <>
           <div className="queue-hint" style={{marginTop:10}}>
             Live demo는 <b>고정 사용자 1명</b>(<code style={{fontFamily:"var(--font-mono)"}}>{fmtShort(queueUserId, 8)}</code>)으로 동작합니다.
-            같은 사용자로 열린 다른 탭이나 다른 사람의 등록·취소·구매가 이 화면에도 그대로 반영됩니다.
+            같은 사용자로 열린 다른 탭이나 다른 사람의 등록·취소·구매는 다음 상태 확인 때 이 화면에도 나타납니다.
           </div>
 
           <div className="queue-mode" role="group" aria-label="상태 확인 주기">
@@ -361,6 +361,8 @@ const DemoFlow = ({ state, actions }) => {
   const queueEnabled = !!state.queueEnabled;
   const queueOpen = !queueEnabled || queue?.phase === "not-enabled" || queue?.phase === "admitted";
   const purchaseOpen = !!queue?.purchase;
+  // A purchase whose outcome is unknown is neither running nor failed.
+  const purchaseUnconfirmed = queue?.purchase?.status === "unconfirmed";
   const purchaseError = state.purchaseError || null;
   const admissionFields = queueEnabled && queue?.phase === "admitted" && queue.admission
     ? { admissionId: queue.admission.admissionId, admissionEpoch: queue.admission.epoch }
@@ -538,7 +540,10 @@ const DemoFlow = ({ state, actions }) => {
           <StepCard
             n="3" title="Reservation Hold 생성"
             endpoint="/reservations" method="POST"
-            status={stepStatus.s3}
+            status={purchaseUnconfirmed ? "idle" : stepStatus.s3}
+            statusLabel={purchaseUnconfirmed
+              ? <span className="status-pill info"><span className="dot"/>결과 미확인</span>
+              : undefined}
             active={activeStep === 3}
             expanded={expandedSteps.s3}
             onToggle={() => actions.toggleStep("s3")}
