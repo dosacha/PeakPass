@@ -1,5 +1,6 @@
 import { randomUUID } from 'crypto';
 import { PoolClient } from 'pg';
+import { NotFoundError } from '@/core/errors';
 import { getConfig } from '@/infra/config';
 import { getPostgresPool, serializableTransactionWithRetry } from '@/infra/postgres/client';
 import {
@@ -74,6 +75,7 @@ export class AdmissionService {
   private healthy = false;
   private stopping = false;
   private cleanupCursor = 0;
+  private orphanCursor = 0;
   constructor(private enabled = getConfig().ENABLE_ADMISSION) {}
   isReady(): boolean {
     return this.healthy && this.version === getRedisConnectionVersion();
@@ -140,7 +142,8 @@ export class AdmissionService {
     epoch?: string,
   ) {
     try {
-      // A present control is authoritative here; a released policy is fenced by retiring it.
+      // A present control is authoritative here. The coordinator retires it once its policy is
+      // released or its event is gone; this path never reads PG for a published namespace.
       const control = await this.control(eventId);
       if (!control) return await this.unavailableEvent(eventId);
       if (!this.enabled || !this.isReady() || control.runId !== this.runId)
@@ -227,11 +230,17 @@ export class AdmissionService {
       runId: this.runId,
     });
   }
-  // Protection was released under this same exclusive barrier, so nothing can publish concurrently.
-  // Redis stops being authoritative first; an open policy then leaves its published epoch for good.
-  private async retire(c: PoolClient, current: AdmissionPolicy): Promise<null> {
-    await retireAdmission(current.eventId);
-    if (current.phase === 'open') await advanceEpoch(c, current.eventId);
+  // The exclusive barrier's view of the policy: null once protection was released or the event
+  // is gone. Nothing can publish under this gate then, so Redis stops being authoritative here
+  // and an open policy leaves its published epoch for good.
+  private async barrier(c: PoolClient, eventId: string): Promise<AdmissionPolicy | null> {
+    const current = await readAdmissionPolicy(c, eventId, 'exclusive').catch((error) => {
+      if (error instanceof NotFoundError) return null;
+      throw error;
+    });
+    if (current?.protected) return current;
+    await retireAdmission(eventId);
+    if (current?.phase === 'open') await advanceEpoch(c, eventId);
     return null;
   }
 
@@ -242,8 +251,8 @@ export class AdmissionService {
     // A healthy initializing namespace is an interrupted publication, not a new reset.
     if (old && old.mode !== 'initializing') await this.freeze(eventId, old).catch(() => undefined);
     const policy = await serializableTransactionWithRetry(async (c) => {
-      const current = await readAdmissionPolicy(c, eventId, 'exclusive');
-      if (!current.protected) return this.retire(c, current);
+      const current = await this.barrier(c, eventId);
+      if (!current) return null;
       // An observer of an older loss follows the current recovery instead of incrementing again.
       const advanced =
         old && (current.generation !== old.generation || current.epoch !== old.epoch);
@@ -260,24 +269,18 @@ export class AdmissionService {
     });
     if (!policy) return;
     await serializableTransactionWithRetry(async (c) => {
-      const current = await readAdmissionPolicy(c, eventId, 'exclusive');
-      if (!current.protected) {
-        await this.retire(c, current);
+      const current = await this.barrier(c, eventId);
+      if (!current || current.generation !== policy.generation || current.epoch !== policy.epoch)
         return;
-      }
-      if (current.generation !== policy.generation || current.epoch !== policy.epoch) return;
       accepted(await initializeAdmission(current, this.runId));
       if (current.phase === 'recovering')
         await c.query("UPDATE admission_events SET phase='open' WHERE event_id=$1", [eventId]);
     });
     // Deliberately a new transaction. Holding the exclusive gate through CAS fences late publishers.
     await serializableTransactionWithRetry(async (c) => {
-      const current = await readAdmissionPolicy(c, eventId, 'exclusive');
-      if (!current.protected) {
-        await this.retire(c, current);
-        return;
-      }
+      const current = await this.barrier(c, eventId);
       if (
+        !current ||
         current.phase !== 'open' ||
         current.generation !== policy.generation ||
         current.epoch !== policy.epoch
@@ -347,6 +350,25 @@ export class AdmissionService {
         }
       }
       if (!stopped()) await this.cleanRetired(policy.eventId);
+    }
+    const guarded = new Set(policies.filter((p) => p.protected).map((p) => p.eventId));
+    if (!stopped())
+      await this.retireOrphans(guarded, stopped).catch((error) => {
+        if (!stopped()) throw error;
+      });
+  }
+  // A control whose event was deleted, or whose policy was released while recovering, has no row
+  // in the selection above. One bounded SCAN page per tick finds it; the barrier decides. v1
+  // dedicates this Redis to one PostgreSQL database, so a control without an event here is orphaned.
+  private async retireOrphans(guarded: Set<string>, stopped: () => boolean) {
+    const page = await withRedis((r) =>
+      r.scan(this.orphanCursor, { MATCH: 'peakpass:admission:*:control', COUNT: 100 }),
+    );
+    this.orphanCursor = page.cursor;
+    for (const key of page.keys) {
+      const eventId = /^peakpass:admission:([0-9a-f-]{36}):control$/.exec(key)?.[1];
+      if (stopped()) return;
+      if (eventId && !guarded.has(eventId)) await this.recover(eventId, null);
     }
   }
   private async cleanRetired(eventId: string) {
