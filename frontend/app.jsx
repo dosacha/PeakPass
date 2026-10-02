@@ -171,25 +171,28 @@ function initialPollMode() {
 
 // What this page did, for the measurements of admission-v1 §7. `runId` comes from `?run=`,
 // `tabId` only labels this page load; neither is sent to the server.
+const admissionRunId = pageParams.get("run") || "local";
 const admissionTrace = window.PeakPassAdmission.createTrace({
   limit: 5000,
   meta: {
-    runId: pageParams.get("run") || "local",
+    runId: admissionRunId,
     tabId: window.uuid(),
     startedAt: new Date().toISOString(),
   },
 });
 window.PeakPassAdmissionTrace = { snapshot: () => admissionTrace.snapshot() };
 
-// Marks an admission whose first recognition was recorded, shared by the tabs of this browser
-// profile so that a reload or a second tab does not count it again. It decides nothing else.
+// Marks an admission whose first recognition was recorded, per (runId, epoch, admissionId) as
+// §7 counts samples. The tabs of this browser profile share it, so a reload or a second tab
+// does not count the admission again in the same run. It decides nothing else.
 const seenAdmissions = {
   read() {
     try { return JSON.parse(localStorage.getItem("pp_admission_seen")) || []; } catch { return []; }
   },
-  has(key) { return this.read().includes(key); },
+  has(key) { return this.read().includes(`${admissionRunId}:${key}`); },
   add(key) {
-    localStorage.setItem("pp_admission_seen", JSON.stringify([...this.read(), key].slice(-50)));
+    localStorage.setItem("pp_admission_seen",
+      JSON.stringify([...this.read(), `${admissionRunId}:${key}`].slice(-50)));
   },
 };
 
@@ -261,12 +264,17 @@ const App = () => {
   const [pollMode, setPollMode] = useS(initialPollMode);
   const [admission, setAdmission] = useS(null);
   const [purchaseError, setPurchaseError] = useS(null);
-  const [queueUserId, setQueueUserId] = useS("");
+  const [queueUser, setQueueUser] = useS({ apiBase: "", mode: "", userId: "" });
   const [queueNonce, setQueueNonce] = useS(0);
   const admissionRef = useR(null);
   const pollModeRef = useR(pollMode);
   const lastPollRef = useR(null);
+  const sessionGenRef = useR(0);
   pollModeRef.current = pollMode;
+  // The queue context follows the last user a live session was issued for on this API base.
+  // A session that expired or was cleared keeps it; another API base or mode has none until
+  // its own session exists, and that holds from the very render in which the base changed.
+  const queueUserId = queueUser.apiBase === apiBase && queueUser.mode === mode ? queueUser.userId : "";
 
   // [FIX] Per-button in-flight indicator for Step 6 (Duplicate / Retry).
   // A and B each track their own busy state so one button's pending request
@@ -274,6 +282,8 @@ const App = () => {
   const [dupBusy, setDupBusy] = useS({ A: false, B: false });
 
   const clearLiveDemoSession = useC(() => {
+    // A session that is still being issued belongs to what was cleared; see below.
+    sessionGenRef.current += 1;
     liveSessionRef.current = null;
     liveSessionInFlightRef.current = null;
     setLiveSession(null);
@@ -298,9 +308,13 @@ const App = () => {
     setLiveSessionStatus("loading");
     setLiveSessionError("");
 
+    // A session answered after the API base, the mode or the session itself was reset is the
+    // answer of an earlier context and must not become the current one.
+    const gen = sessionGenRef.current;
     const request = (async () => {
       try {
         const response = await callLive(apiBase, "POST", "/demo/session");
+        if (sessionGenRef.current !== gen) throw new Error("Live demo session was reset while it was being issued");
         const session = response.data;
         const isValidSession = response.ok &&
           session &&
@@ -325,13 +339,15 @@ const App = () => {
         setLiveSessionStatus("active");
         return nextSession;
       } catch (error) {
-        liveSessionRef.current = null;
-        setLiveSession(null);
-        setLiveSessionStatus("error");
-        setLiveSessionError("Unable to start live demo session");
+        if (sessionGenRef.current === gen) {
+          liveSessionRef.current = null;
+          setLiveSession(null);
+          setLiveSessionStatus("error");
+          setLiveSessionError("Unable to start live demo session");
+        }
         throw error;
       } finally {
-        liveSessionInFlightRef.current = null;
+        if (liveSessionInFlightRef.current === request) liveSessionInFlightRef.current = null;
       }
     })();
 
@@ -364,10 +380,9 @@ const App = () => {
   // and a request in flight stay as they are.
   useE(() => { admissionRef.current?.setMode(pollMode); }, [pollMode]);
 
-  // The queue context follows the last user a live session was issued for. A session that
-  // expired or was cleared keeps it; another user, API base or mode replaces it.
-  useE(() => { if (liveSession?.userId) setQueueUserId(liveSession.userId); }, [liveSession]);
-  useE(() => { setQueueUserId(""); }, [apiBase, mode]);
+  useE(() => {
+    if (liveSession?.userId) setQueueUser({ apiBase, mode, userId: liveSession.userId });
+  }, [liveSession]);
 
   // One controller per context (API base, user, event). It is disposed before the next one
   // starts, so a response of an earlier context has nowhere to land, and the new one always
@@ -928,6 +943,12 @@ const App = () => {
       }
     }
   };
+
+  // After a reload the page still knows which event was selected but not its tiers, and step 3
+  // needs them. An entry recovered as admitted has 30 s, so the events are read without a click.
+  useE(() => {
+    if (mode === "live" && isUuid(selectedEventId) && !events) actions.step1();
+  }, [mode, selectedEventId]);
 
   // connection panel handlers
   const onCheckHealth = async () => {

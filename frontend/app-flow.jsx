@@ -117,7 +117,7 @@ const QueueCard = ({ state, actions }) => {
 
   const [confirming, setConfirming] = useStateF(false);
   const [, setTick] = useStateF(0);
-  const [spoken, setSpoken] = useStateF({ status: "", alert: "" });
+  const [heard, setHeard] = useStateF(null);
 
   // The countdowns read the local monotonic clock twice a second. They send nothing.
   const ticking = view?.deadlineAt != null || problem?.retryAt != null;
@@ -132,21 +132,18 @@ const QueueCard = ({ state, actions }) => {
 
   useEffectF(() => { setConfirming(false); }, [phase]);
 
-  // Screen readers hear the position at a few marks, not on every poll.
+  // Screen readers hear the position at a few marks, not on every poll: `heard` is the
+  // position at the last mark, read again when a problem ends. Both texts follow the state,
+  // so none outlives what it describes.
   const mark = phase === "waiting" && entry?.position ? (QUEUE_MARKS.find(m => entry.position <= m) || 0) : null;
-  useEffectF(() => {
-    if (mark !== null) setSpoken(s => ({ ...s, status: `대기 ${entry.position}번째입니다.` }));
-  }, [mark]);
-  useEffectF(() => {
-    if (QUEUE_ALERTS[phase]) setSpoken(s => ({ ...s, alert: QUEUE_ALERTS[phase] }));
-  }, [phase]);
-  useEffectF(() => {
-    if (purchase?.status === "unconfirmed")
-      setSpoken(s => ({ ...s, alert: "구매 결과를 확인하지 못했습니다. 새로 등록하지 말고 같은 요청으로 다시 확인하세요." }));
-  }, [purchase?.status]);
-  useEffectF(() => {
-    if (problem) setSpoken(s => ({ ...s, status: QUEUE_PROBLEMS[problem.kind] || QUEUE_PROBLEMS.invalid }));
-  }, [problem?.kind]);
+  useEffectF(() => { setHeard(mark === null ? null : entry.position); }, [mark, !problem]);
+  const spokenStatus = problem ? (QUEUE_PROBLEMS[problem.kind] || QUEUE_PROBLEMS.invalid)
+    : phase === "waiting" && heard != null ? `대기 ${heard}번째입니다.`
+    : phase === "cancelled" ? "대기를 취소했습니다."
+    : "";
+  const spokenAlert = purchase?.status === "unconfirmed"
+    ? "구매 결과를 확인하지 못했습니다. 새로 등록하지 말고 같은 요청으로 다시 확인하세요."
+    : QUEUE_ALERTS[phase] || "";
 
   // A user who is looking at another tab sees the admission in the tab title, and the
   // reservation step opens so that the 30 s are not spent finding it.
@@ -295,19 +292,20 @@ const QueueCard = ({ state, actions }) => {
                 {view.busy === "join" ? "등록 중…" : phase === "not-joined" ? "대기열 등록" : "다시 등록"}
               </button>
             )}
-            {cancellable && !confirming && (
-              <button type="button" className="btn btn-secondary" onClick={() => setConfirming(true)} disabled={held}>
-                {view.busy === "cancel" ? "취소 중…" : "대기 취소"}
+            {/* One button opens and closes the confirmation, so the keyboard focus stays on it. */}
+            {cancellable && (
+              <button type="button" className="btn btn-secondary" aria-expanded={confirming}
+                      onClick={() => setConfirming(open => !open)} disabled={held && !confirming}>
+                {view.busy === "cancel" ? "취소 중…" : confirming ? "돌아가기" : "대기 취소"}
               </button>
             )}
             {cancellable && confirming && (
               <>
-                <span className="queue-confirm">취소하면 순번을 잃습니다. 취소할까요?</span>
-                <button type="button" className="btn btn-danger" disabled={held}
+                <span className="queue-confirm" id="queue-cancel-confirm">취소하면 순번을 잃습니다. 취소할까요?</span>
+                <button type="button" className="btn btn-danger" aria-describedby="queue-cancel-confirm" disabled={held}
                         onClick={() => { setConfirming(false); actions.cancelQueue(); }}>
                   취소 확정
                 </button>
-                <button type="button" className="btn btn-ghost" onClick={() => setConfirming(false)}>돌아가기</button>
               </>
             )}
             {phase === "consumed" && outcome?.kind === "reservation" && !reservation && (
@@ -317,8 +315,8 @@ const QueueCard = ({ state, actions }) => {
         </>
       )}
 
-      <div className="sr-only" role="status" aria-live="polite">{spoken.status}</div>
-      <div className="sr-only" role="alert">{spoken.alert}</div>
+      <div className="sr-only" role="status" aria-live="polite">{spokenStatus}</div>
+      <div className="sr-only" role="alert">{spokenAlert}</div>
     </StepCard>
   );
 };

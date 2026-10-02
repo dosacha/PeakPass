@@ -254,6 +254,10 @@
             position: entry ? entry.position : null,
             serverTime: body ? body.serverTime : null,
             nextPollAfterMs: body ? body.nextPollAfterMs : null,
+            // What the server asked for with a failure: the body's wait and, when the page
+            // can read it, Retry-After.
+            serverMinMs: body || !response.data ? null : positive(response.data.nextPollAfterMs) || null,
+            retryAfterMs: positive(response.retryAfterMs) || null,
             plannedDelayMs: plan ? plan.delayMs : null,
             actualDelayMs: sent.since === null ? null : timing.tSend - sent.since,
             baseMs: plan ? plan.baseMs : null,

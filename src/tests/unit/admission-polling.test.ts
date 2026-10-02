@@ -524,6 +524,11 @@ describe('polling controller', () => {
     await t.advance(2999);
     expect(t.times()).toEqual([0]);
     expect(t.controller.view().problem?.kind).toBe('rate-limited');
+    expect(t.traced('poll')[0]).toMatchObject({
+      status: 429,
+      serverMinMs: 2500,
+      retryAfterMs: 3000,
+    });
     await t.advance(1);
     expect(t.times()).toEqual([0, 3000]);
   });
@@ -1404,6 +1409,8 @@ describe('instrumentation', () => {
       state: 'waiting',
       position: 21,
       nextPollAfterMs: 5000,
+      serverMinMs: null,
+      retryAfterMs: null,
       plannedDelayMs: null,
       actualDelayMs: null,
       baseMs: null,
@@ -1424,6 +1431,8 @@ describe('instrumentation', () => {
       status: 503,
       code: 'ADMISSION_RECOVERING',
       state: null,
+      serverMinMs: 1000,
+      retryAfterMs: null,
       changed: true,
     });
     expect(polls[3]).toMatchObject({
