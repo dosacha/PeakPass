@@ -3,13 +3,14 @@ import { ReservationService } from '@/core/services/reservation.service';
 import { CreateReservationSchema } from '@/core/models/reservation';
 import { getConfig } from '@/infra/config';
 import { getLogger } from '@/infra/logger';
-import { assertBodyUserMatchesAuth } from '@/api/middleware/auth';
+import { assertBodyUserMatchesAuth, purchaseAdmission } from '@/api/middleware/auth';
 
 /**
  * 정책 (현재 코드 기준):
  *   - POST /reservations: body.userId는 ENFORCE_AUTH_USER_MATCH=true (production default)
  *     일 때 JWT subject와 일치 검증. ENFORCE_AUTH_USER_MATCH=false (demo override)일
  *     때만 body userId를 그대로 신뢰하며 production에서는 fail-fast로 거부됨.
+ *     보호 이벤트는 본문의 admissionId/admissionEpoch로 입장 자격을 소비해야 한다.
  *   - GET /reservations/:id: 본인 reservation만 조회. 미인증/소유자 mismatch는
  *     모두 404로 응답해 reservation 존재 여부가 누설되지 않도록 한다.
  */
@@ -21,7 +22,10 @@ export async function registerReservationRoutes(app: FastifyInstance) {
   app.post<{ Body: unknown }>('/reservations', async (request, reply) => {
     const input = CreateReservationSchema.parse(request.body);
     assertBodyUserMatchesAuth(request, input.userId);
-    const reservation = await reservationService.createReservation(input);
+    const reservation = await reservationService.createReservation(
+      input,
+      purchaseAdmission(request),
+    );
 
     logger.info({ reservationId: reservation.id, eventId: input.eventId }, 'Reservation created');
     return reply.code(201).send(reservation);

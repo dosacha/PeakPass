@@ -1,3 +1,4 @@
+import { z } from 'zod';
 import { AppError } from '@/core/errors';
 
 export const admissionProfile = Object.freeze({
@@ -60,4 +61,24 @@ export class AdmissionError extends AppError {
   ) {
     super(code, status, code);
   }
+}
+
+/** The admission a purchase request submits: `{admissionId, admissionEpoch}` of contract §3. */
+export interface AdmissionRef {
+  admissionId: string;
+  epoch: string;
+}
+const lowerUuid = z
+  .string()
+  .uuid()
+  .transform((v) => v.toLowerCase());
+const PurchaseAdmissionSchema = z.object({ admissionId: lowerUuid, admissionEpoch: lowerUuid });
+
+/** Both fields or neither. One alone or a malformed value is 400 before any purchase work. */
+export function parsePurchaseAdmission(body: unknown): AdmissionRef | undefined {
+  const { admissionId, admissionEpoch } = (body ?? {}) as Record<string, unknown>;
+  if (admissionId === undefined && admissionEpoch === undefined) return undefined;
+  const parsed = PurchaseAdmissionSchema.safeParse({ admissionId, admissionEpoch });
+  if (!parsed.success) throw new AdmissionError('ADMISSION_INVALID_INPUT', 400);
+  return { admissionId: parsed.data.admissionId, epoch: parsed.data.admissionEpoch };
 }

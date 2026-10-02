@@ -11,6 +11,16 @@ import {
 } from '@/infra/redis/commands';
 import { getLogger } from '@/infra/logger';
 import { getPostgresPool } from '@/infra/postgres/client';
+import { AdmissionRef } from '../models/admission';
+import {
+  Occupation,
+  occupyThroughAdmission,
+  openAdmissionGate,
+  purchaseCommand,
+  purchaseTransaction,
+  settleAdmission,
+  storedRejection,
+} from './admission-consumption';
 
 const RESERVATION_TTL_SECONDS = REDIS_TTL.RESERVATION_HOLD;
 
@@ -36,22 +46,39 @@ export class ReservationService {
   private logger = getLogger();
   private inventory = new InventoryService();
 
-  async createReservation(input: CreateReservationInput): Promise<Reservation> {
-    const pool = getPostgresPool();
-    const client = await pool.connect();
-
-    try {
-      await client.query('BEGIN');
-      const reservation = await this.createReservationWithClient(input, client);
-      await client.query('COMMIT');
-      await this.cacheReservationHold(reservation);
-      return reservation;
-    } catch (err) {
-      await client.query('ROLLBACK');
-      throw err;
-    } finally {
-      client.release();
-    }
+  /**
+   * 신규 좌석 점유 경로 (admission-v1 §5).
+   *
+   * - admission 필드가 없으면 기존 READ COMMITTED 트랜잭션 그대로이고, 같은 트랜잭션에서
+   *   event gate와 보호 정책만 확인한다. 보호 이벤트면 여기서 거절된다.
+   * - admission 필드가 있으면 SERIALIZABLE + 재시도로 실행한다. admission ID가 retry key라서
+   *   같은 요청의 재시도는 원장의 결과(같은 reservation 또는 같은 업무 거절)를 돌려받는다.
+   */
+  async createReservation(
+    input: CreateReservationInput,
+    admission?: AdmissionRef,
+  ): Promise<Reservation> {
+    const command = purchaseCommand('reservation', input, null, admission);
+    const outcome = await purchaseTransaction(
+      async (client): Promise<Occupation<Reservation> & { replayed?: true }> => {
+        const gate = await openAdmissionGate(client, command);
+        if (gate.prior?.outcome === 'rejected') return { rejected: storedRejection(gate.prior) };
+        if (gate.prior) {
+          // Replay answers with the current DB state; the Redis hold is only a read cache.
+          const reservation = await this.findReservation(gate.prior.reservationId!, client);
+          return { value: reservation!, replayed: true };
+        }
+        return occupyThroughAdmission(client, gate, command, async () => {
+          const reservation = await this.createReservationWithClient(input, client);
+          return { value: reservation, targetId: reservation.id };
+        });
+      },
+      { admission, readCommitted: !admission },
+    );
+    await settleAdmission(outcome.settlement);
+    if ('rejected' in outcome) throw outcome.rejected;
+    if (!outcome.replayed) await this.cacheReservationHold(outcome.value);
+    return outcome.value;
   }
 
   /**
@@ -165,6 +192,13 @@ export class ReservationService {
       return redisData as Reservation;
     }
 
+    return this.findReservation(reservationId, client);
+  }
+
+  private async findReservation(
+    reservationId: string,
+    client: PoolClient,
+  ): Promise<Reservation | null> {
     const result = await client.query<Reservation>(
       `
       SELECT

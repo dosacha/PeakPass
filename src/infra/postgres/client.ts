@@ -133,7 +133,8 @@ export function isRetriableTransactionError(err: unknown): boolean {
 
 export async function serializableTransactionWithRetry<T>(
   callback: (client: PoolClient) => Promise<T>,
-  options: { maxAttempts?: number; baseDelayMs?: number } = {},
+  // retryIf names further errors that a fresh transaction (new snapshot) resolves.
+  options: { maxAttempts?: number; baseDelayMs?: number; retryIf?: (err: unknown) => boolean } = {},
 ): Promise<T> {
   const maxAttempts = options.maxAttempts ?? 3;
   const baseDelayMs = options.baseDelayMs ?? 20;
@@ -146,7 +147,10 @@ export async function serializableTransactionWithRetry<T>(
     } catch (err) {
       lastError = err;
 
-      if (!isRetriableTransactionError(err) || attempt === maxAttempts) {
+      if (
+        !(isRetriableTransactionError(err) || options.retryIf?.(err)) ||
+        attempt === maxAttempts
+      ) {
         throw err;
       }
 

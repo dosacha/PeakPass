@@ -140,12 +140,18 @@ export class AdmissionService {
     operation: Parameters<typeof runAdmission>[2],
     input: Record<string, unknown>,
     epoch?: string,
+    // P5's claim runs inside the purchase transaction, whose client already holds the event gate
+    // and has read the policy. Internal operations must not classify on a second connection.
+    classify = true,
   ) {
     try {
       // A present control is authoritative here. The coordinator retires it once its policy is
       // released or its event is gone; this path never reads PG for a published namespace.
       const control = await this.control(eventId);
-      if (!control) return await this.unavailableEvent(eventId);
+      if (!control) {
+        if (!classify) throw new AdmissionError('ADMISSION_RECOVERING', 503, 1000);
+        return await this.unavailableEvent(eventId);
+      }
       if (!this.enabled || !this.isReady() || control.runId !== this.runId)
         throw new AdmissionError('ADMISSION_RECOVERING', 503, 1000);
       const result = await runAdmission(eventId, epoch ?? control.epoch, operation, input);
@@ -209,19 +215,20 @@ export class AdmissionService {
       'claim',
       { ...input, claimToken: randomUUID() },
       input.epoch,
+      false,
     );
     return { ...input, claimToken: result.entry!.claimToken!, deadline: result.entry!.deadline! };
   }
   /** Only after P5 has committed/verified a matching immutable durable result. */
   async complete(claim: AdmissionClaim, outcome: AdmissionOutcome) {
-    return this.execute(claim.eventId, 'complete', { ...claim, outcome }, claim.epoch);
+    return this.execute(claim.eventId, 'complete', { ...claim, outcome }, claim.epoch, false);
   }
   /** Only after P5's closed commit, never from a timeout/finally callback. */
   async close(claim: AdmissionClaim) {
-    return this.execute(claim.eventId, 'close', { ...claim }, claim.epoch);
+    return this.execute(claim.eventId, 'close', { ...claim }, claim.epoch, false);
   }
   async reconcile(eventId: string) {
-    return this.execute(eventId, 'reconcile', {});
+    return this.execute(eventId, 'reconcile', {}, undefined, false);
   }
 
   private probe(policy: AdmissionPolicy) {

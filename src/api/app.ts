@@ -4,11 +4,13 @@ import helmetPlugin from '@fastify/helmet';
 import { randomUUID } from 'crypto';
 import { getLogger } from '@/infra/logger';
 import { AppError } from '@/core/errors';
+import { AdmissionError } from '@/core/models/admission';
 import { ZodError } from 'zod';
 import {
   handleAppError,
   handleUnexpectedError,
   handleValidationError,
+  sendAdmissionError,
   toValidationIssues,
 } from './errors';
 import { createApolloServer, registerGraphQLRoute } from './graphql/server';
@@ -91,6 +93,12 @@ export async function createApp() {
 
     if (err instanceof ZodError) {
       handleValidationError(toValidationIssues(err), reply, requestId);
+      return;
+    }
+
+    // A purchase route answers admission errors with the admission-v1 envelope.
+    if (err instanceof AdmissionError) {
+      sendAdmissionError(reply, err);
       return;
     }
 

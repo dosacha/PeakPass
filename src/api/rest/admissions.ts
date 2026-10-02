@@ -2,6 +2,7 @@ import { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { AdmissionService, admissionService } from '@/core/services/admission.service';
 import { AdmissionError } from '@/core/models/admission';
+import { sendAdmissionError } from '@/api/errors';
 
 const uuid = z
   .string()
@@ -50,15 +51,7 @@ export async function registerAdmissionRoutes(
             invalid ? 400 : 503,
             invalid ? null : 1000,
           );
-    if (mapped.statusCode === 429)
-      reply.header('Retry-After', Math.ceil((mapped.nextPollAfterMs ?? 1000) / 1000));
-    return reply
-      .code(mapped.statusCode)
-      .send({
-        error: { code: mapped.code, message: mapped.message },
-        nextPollAfterMs: mapped.nextPollAfterMs,
-        ...(mapped.admission ? { admission: mapped.admission } : {}),
-      });
+    return sendAdmissionError(reply, mapped);
   });
   const config = { admission: true };
   app.get('/events/:eventId/admissions/me', { config }, async (request) => {

@@ -1,6 +1,10 @@
 import 'dotenv/config';
 import { randomUUID } from 'crypto';
-import { initPostgresPool, closePostgresPool } from '@/infra/postgres/client';
+import {
+  initPostgresPool,
+  closePostgresPool,
+  serializableTransactionWithRetry,
+} from '@/infra/postgres/client';
 import { initLogger } from '@/infra/logger';
 
 describe('admission_results ledger constraints on owned PostgreSQL (migration 013)', () => {
@@ -135,6 +139,45 @@ describe('admission_results ledger constraints on owned PostgreSQL (migration 01
     await expect(
       insert(row({ ...consumed, operation: 'direct-checkout', orderId })),
     ).rejects.toMatchObject({ code: '23505', constraint: 'admission_results_order_id_key' });
+  });
+  it('reruns a fresh transaction for a ledger key race and for no other unique violation', async () => {
+    const { isAdmissionResultRace } = await import('@/core/services/admission-consumption');
+    const existing = row();
+    await insert(existing);
+    const transactions: string[] = [];
+    const duplicate = (c: import('pg').PoolClient, r: Row) =>
+      c.query(
+        `INSERT INTO admission_results(admission_id,user_id,event_id,epoch,operation,fingerprint,
+          outcome,reservation_id) VALUES($1,$2,$3,$4,$5,'[]','consumed',$6)`,
+        [r.admissionId, userId, eventId, epoch, r.operation, r.reservationId],
+      );
+    // Real 23505 on admission_results_pkey in the first transaction; the second reads the result.
+    const outcome = await serializableTransactionWithRetry(
+      async (c) => {
+        transactions.push((await c.query('SELECT txid_current()::text AS id')).rows[0].id);
+        if (transactions.length === 1)
+          await duplicate(c, row({ admissionId: existing.admissionId, reservationId }));
+        const found = await c.query('SELECT outcome FROM admission_results WHERE admission_id=$1', [
+          existing.admissionId,
+        ]);
+        return found.rows[0].outcome;
+      },
+      { retryIf: isAdmissionResultRace },
+    );
+    expect(outcome).toBe('rejected');
+    expect(new Set(transactions).size).toBe(2);
+    await insert(row({ ...consumed, reservationId }));
+    let attempts = 0;
+    await expect(
+      serializableTransactionWithRetry(
+        async (c) => {
+          attempts++;
+          await duplicate(c, row({ reservationId }));
+        },
+        { retryIf: isAdmissionResultRace },
+      ),
+    ).rejects.toMatchObject({ code: '23505', constraint: 'admission_results_reservation_id_key' });
+    expect(attempts).toBe(1);
   });
   it('keeps every referenced user, event, reservation and order from being deleted', async () => {
     await insert(row({ ...consumed, reservationId }));
