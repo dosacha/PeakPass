@@ -308,12 +308,10 @@ export function isAdmissionResultRace(error: unknown): boolean {
   const e = error as { code?: string; constraint?: string };
   return e?.code === '23505' && e.constraint === 'admission_results_pkey';
 }
-// A fresh transaction resolves each of these: the committed result becomes visible (also when
-// Redis reports it first, before our INSERT is reached), or the deleted event answers 404.
+// A fresh transaction resolves each of these: the committed result becomes visible, or the
+// deleted event answers 404. Redis reporting the result first is an unconfirmed refusal, above.
 const isPurchaseRace = (error: unknown) =>
-  isAdmissionResultRace(error) ||
-  isAdmissionPolicyEventRace(error) ||
-  (error instanceof AdmissionError && error.code === 'ADMISSION_ALREADY_CONSUMED');
+  isAdmissionResultRace(error) || isAdmissionPolicyEventRace(error);
 
 // Codes a retry of the same request can outlive: serialization failure and deadlock once the
 // attempts are used up, the races above, this transaction's own lock, statement and idle bounds,
