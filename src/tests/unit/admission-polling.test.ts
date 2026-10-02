@@ -922,7 +922,10 @@ describe('join, cancel and purchase', () => {
     const t = tab(api);
     t.onRequest((call) =>
       call.method === 'DELETE'
-        ? t.ok(entry('cancelled', { admissionId: ADMISSION_B, reason: 'ADMISSION_CANCELLED' }), null)
+        ? t.ok(
+            entry('cancelled', { admissionId: ADMISSION_B, reason: 'ADMISSION_CANCELLED' }),
+            null,
+          )
         : t.ok(entry('waiting'), 5000),
     );
     t.controller.start();
@@ -1438,7 +1441,9 @@ describe('instrumentation', () => {
     const t = tab(api);
     t.onRequest((call) => {
       if (call.method === 'DELETE') return t.ok(cancelled(), null);
-      return t.calls.length === 2 ? new Promise<Reply>(() => undefined) : t.ok(entry('waiting'), 5000);
+      return t.calls.length === 2
+        ? new Promise<Reply>(() => undefined)
+        : t.ok(entry('waiting'), 5000);
     });
     t.controller.start();
     await t.advance(1200);
