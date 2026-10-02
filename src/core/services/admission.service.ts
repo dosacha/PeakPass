@@ -279,15 +279,24 @@ export class AdmissionService {
     for (const policy of policies) {
       if (stopped()) return;
       const control = await this.control(policy.eventId).catch(() => null);
+      // PG was read before Redis. A mismatch may be a completed recovery, not a new loss.
+      // Let the exclusive-gate probe adopt it before freezing the newer namespace.
+      const observed =
+        control?.epoch === policy.epoch &&
+        control?.generation === policy.generation &&
+        policy.phase === 'open'
+          ? control
+          : null;
       try {
         if (
           !control ||
           control.runId !== this.runId ||
           control.epoch !== policy.epoch ||
+          control.generation !== policy.generation ||
           control.mode !== 'ready' ||
           policy.phase !== 'open'
         ) {
-          await this.recover(policy.eventId, control);
+          await this.recover(policy.eventId, observed);
         } else {
           await this.promote(policy.eventId);
           // P4 can mark overdue claims, but only P5 can decide and commit durable closure.
@@ -298,7 +307,7 @@ export class AdmissionService {
         this.healthy = false;
         await this.verifyEnvironment();
         try {
-          await this.recover(policy.eventId, control);
+          await this.recover(policy.eventId, observed);
         } catch (recoveryError) {
           this.healthy = false;
           throw recoveryError;

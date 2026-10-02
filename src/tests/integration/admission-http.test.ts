@@ -6,7 +6,7 @@ import { initRedis, closeRedis } from '@/infra/redis/client';
 import { initPostgresPool, closePostgresPool } from '@/infra/postgres/client';
 import { getConfig } from '@/infra/config';
 import { initLogger } from '@/infra/logger';
-import { readAdmissionPolicy } from '@/infra/postgres/admission-policy';
+import { readAdmissionPolicy, policyColumns } from '@/infra/postgres/admission-policy';
 import { blocked } from './order-sweeper-fixture';
 
 jest.mock('@/infra/config', () => {
@@ -252,4 +252,30 @@ describe('admission actual authenticated HTTP and epoch lifecycle', () => {
       await service.verifyEnvironment();
     }
   });
+  it.each(['epoch', 'phase'])(
+    'preserves a newly recovered registration after a stale PG %s snapshot',
+    async (field) => {
+      const stale = (
+        await pool.query(`SELECT ${policyColumns} FROM admission_events WHERE event_id=$1`, [
+          eventId,
+        ])
+      ).rows[0];
+      if (field === 'epoch') await service.recover(eventId, await service.control(eventId));
+      else stale.phase = 'recovering';
+      const current = (await service.control(eventId))!,
+        owner = randomUUID();
+      const joined = await service.join(eventId, owner, current.epoch, randomUUID());
+      // Freeze the maintenance SELECT's result at its earlier observation; all following PG/Redis calls are real.
+      const query = jest.spyOn(pool, 'query').mockResolvedValueOnce({ rows: [stale] } as never);
+      try {
+        await service.maintain();
+        expect(await service.control(eventId)).toEqual(current);
+        expect((await service.status(eventId, owner)).admission?.admissionId).toBe(
+          joined.body.admission!.admissionId,
+        );
+      } finally {
+        query.mockRestore();
+      }
+    },
+  );
 });
