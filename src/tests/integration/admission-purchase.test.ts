@@ -15,9 +15,11 @@ import { admissionKeys } from '@/infra/redis/admission';
 import { InternalServerError } from '@/core/errors';
 import { InventoryService } from '@/core/services/inventory.service';
 import { ReservationService } from '@/core/services/reservation.service';
+import { CheckoutService } from '@/core/services/checkout.service';
 import {
   admissionFingerprint,
   purchaseCommand,
+  purchaseTransaction,
   reclaimOverdueClaims,
 } from '@/core/services/admission-consumption';
 import { blocked, until } from './order-sweeper-fixture';
@@ -733,6 +735,69 @@ describe('admission purchase gate on owned PostgreSQL, Redis and loopback HTTP',
         reservations: 1,
         results: 1,
       });
+    });
+
+    it('answers the admission 401 to admission fields without a JWT, and the existing 401 without them', async () => {
+      fx = await fixture();
+      const [user] = fx.users,
+        admission = await admit(service, fx.eventId, user);
+      const purchase = { eventId: fx.eventId, userId: user, tierId: TIER, quantity: 1 };
+      for (const [path, headers] of [
+        ['/reservations', {}],
+        ['/checkouts', { 'idempotency-key': randomUUID() }],
+      ] as const) {
+        const queued = await request('POST', path, { ...purchase, ...admission }, headers);
+        expect(queued.status).toBe(401);
+        expect(queued.body).toEqual(admissionError('UNAUTHENTICATED'));
+        const legacy = await request('POST', path, purchase, headers);
+        expect(legacy.status).toBe(401);
+        expect(legacy.body.error.code).toBe('UNAUTHORIZED');
+      }
+      expect(await fx.state()).toMatchObject({ available: 20, orders: 0, results: 0 });
+    });
+
+    it('replays the winner to same-key checkouts whose snapshot predates its commit', async () => {
+      fx = await fixture(5, false);
+      const [user] = fx.users,
+        key = randomUUID();
+      const input = {
+        eventId: fx.eventId,
+        userId: user,
+        tierId: TIER,
+        quantity: 1,
+        idempotencyKey: key,
+      };
+      const run = (changes: object = {}) =>
+        purchaseTransaction((client) =>
+          new CheckoutService().checkout({ ...input, ...changes }, client),
+        );
+      const holder = await pool.connect();
+      let pending: Promise<unknown>[] = [];
+      try {
+        // Real locks: all three take their SERIALIZABLE snapshot and read no order for the key,
+        // then wait for the checkout-key lock. None of them can see the winner's commit afterwards.
+        await holder.query('BEGIN');
+        const pid = (await holder.query('SELECT pg_backend_pid() AS pid')).rows[0].pid;
+        await holder.query('SELECT pg_advisory_xact_lock(hashtextextended($1, 0))', [key]);
+        pending = [run(), run(), run({ quantity: 2 })];
+        await blocked(pool, pid, 3);
+        await holder.query('ROLLBACK');
+        const settled = await Promise.allSettled(pending);
+        const orders = settled.flatMap((r) =>
+          r.status === 'fulfilled' ? [(r.value as { order: { id: string } }).order.id] : [],
+        );
+        // Whoever wins, the same payload replays the one order and the other payload is the
+        // existing 409: never a duplicate-key failure.
+        expect(new Set(orders).size).toBe(1);
+        for (const r of settled)
+          if (r.status === 'rejected') expect(r.reason).toMatchObject({ code: 'CONFLICT' });
+        expect(orders.length + settled.filter((r) => r.status === 'rejected').length).toBe(3);
+        expect((await fx.state()).orders).toBe(1);
+      } finally {
+        await holder.query('ROLLBACK').catch(() => undefined);
+        holder.release();
+        await Promise.allSettled(pending);
+      }
     });
 
     it('keeps unprotected direct checkout and its replay unchanged', async () => {

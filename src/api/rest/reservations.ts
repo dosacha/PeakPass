@@ -21,11 +21,10 @@ export async function registerReservationRoutes(app: FastifyInstance) {
 
   app.post<{ Body: unknown }>('/reservations', async (request, reply) => {
     const input = CreateReservationSchema.parse(request.body);
+    // admission 필드가 있으면 JWT 없는 요청은 admission 계약의 401 envelope로 먼저 끝난다.
+    const admission = purchaseAdmission(request);
     assertBodyUserMatchesAuth(request, input.userId);
-    const reservation = await reservationService.createReservation(
-      input,
-      purchaseAdmission(request),
-    );
+    const reservation = await reservationService.createReservation(input, admission);
 
     logger.info({ reservationId: reservation.id, eventId: input.eventId }, 'Reservation created');
     return reply.code(201).send(reservation);

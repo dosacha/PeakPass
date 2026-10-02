@@ -44,8 +44,9 @@ export async function registerCheckoutRoutes(app: FastifyInstance) {
         idempotencyKey,
       });
 
-      assertBodyUserMatchesAuth(request, input.userId);
+      // admission 필드가 있으면 JWT 없는 요청은 admission 계약의 401 envelope로 먼저 끝난다.
       const admission = purchaseAdmission(request);
+      assertBodyUserMatchesAuth(request, input.userId);
 
       logger.info(
         {
