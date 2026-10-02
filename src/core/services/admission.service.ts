@@ -1,4 +1,5 @@
 import { randomUUID } from 'crypto';
+import { PoolClient } from 'pg';
 import { getConfig } from '@/infra/config';
 import { getPostgresPool, serializableTransactionWithRetry } from '@/infra/postgres/client';
 import {
@@ -14,6 +15,7 @@ import {
   initializeAdmission,
   publishAdmission,
   freezeAdmission,
+  retireAdmission,
   unlinkRetiredAdmission,
   AdmissionControl,
   RedisAdmissionResult,
@@ -56,6 +58,15 @@ function accepted(result: RedisAdmissionResult): RedisAdmissionResult {
     );
   return result;
 }
+// The durable barrier: under the exclusive gate the published epoch is left for good.
+const advanceEpoch = async (c: PoolClient, eventId: string) =>
+  (
+    await c.query<AdmissionPolicy>(
+      `UPDATE admission_events SET generation=generation+1,epoch=$2,
+          phase='recovering',epoch_started_at=clock_timestamp() WHERE event_id=$1 RETURNING ${policyColumns}`,
+      [eventId, randomUUID()],
+    )
+  ).rows[0];
 
 export class AdmissionService {
   private version = -1;
@@ -129,6 +140,7 @@ export class AdmissionService {
     epoch?: string,
   ) {
     try {
+      // A present control is authoritative here; a released policy is fenced by retiring it.
       const control = await this.control(eventId);
       if (!control) return await this.unavailableEvent(eventId);
       if (!this.enabled || !this.isReady() || control.runId !== this.runId)
@@ -209,6 +221,20 @@ export class AdmissionService {
     return this.execute(eventId, 'reconcile', {});
   }
 
+  private probe(policy: AdmissionPolicy) {
+    return runAdmission(policy.eventId, policy.epoch, 'probe', {
+      generation: policy.generation,
+      runId: this.runId,
+    });
+  }
+  // Protection was released under this same exclusive barrier, so nothing can publish concurrently.
+  // Redis stops being authoritative first; an open policy then leaves its published epoch for good.
+  private async retire(c: PoolClient, current: AdmissionPolicy): Promise<null> {
+    await retireAdmission(current.eventId);
+    if (current.phase === 'open') await advanceEpoch(c, current.eventId);
+    return null;
+  }
+
   /** Internal lifecycle. P4 exposes NO activation route or environment bypass. */
   async recover(eventId: string, observed?: AdmissionControl | null): Promise<void> {
     if (!this.isReady()) await this.verifyEnvironment();
@@ -217,39 +243,29 @@ export class AdmissionService {
     if (old && old.mode !== 'initializing') await this.freeze(eventId, old).catch(() => undefined);
     const policy = await serializableTransactionWithRetry(async (c) => {
       const current = await readAdmissionPolicy(c, eventId, 'exclusive');
-      if (!current.protected) return null;
+      if (!current.protected) return this.retire(c, current);
       // An observer of an older loss follows the current recovery instead of incrementing again.
       const advanced =
         old && (current.generation !== old.generation || current.epoch !== old.epoch);
       // Re-read under the barrier: another observer of missing control may have recovered already.
-      const probe = await runAdmission(eventId, current.epoch, 'probe', {
-        generation: current.generation,
-        runId: this.runId,
-      });
+      const probe = await this.probe(current);
       const resume = probe.ok && (advanced || !old || old.mode === 'initializing');
       const firstInitialization =
         current.phase === 'recovering' && probe.empty && (!old?.dirty || advanced);
       if (!resume && !firstInitialization) {
         await freezeAdmission(eventId, current.epoch, current.generation);
-        return (
-          await c.query<AdmissionPolicy>(
-            `UPDATE admission_events SET generation=generation+1,epoch=$2,
-          phase='recovering',epoch_started_at=clock_timestamp() WHERE event_id=$1 RETURNING ${policyColumns}`,
-            [eventId, randomUUID()],
-          )
-        ).rows[0];
+        return advanceEpoch(c, eventId);
       }
       return current;
     });
     if (!policy) return;
     await serializableTransactionWithRetry(async (c) => {
       const current = await readAdmissionPolicy(c, eventId, 'exclusive');
-      if (
-        !current.protected ||
-        current.generation !== policy.generation ||
-        current.epoch !== policy.epoch
-      )
+      if (!current.protected) {
+        await this.retire(c, current);
         return;
+      }
+      if (current.generation !== policy.generation || current.epoch !== policy.epoch) return;
       accepted(await initializeAdmission(current, this.runId));
       if (current.phase === 'recovering')
         await c.query("UPDATE admission_events SET phase='open' WHERE event_id=$1", [eventId]);
@@ -257,8 +273,11 @@ export class AdmissionService {
     // Deliberately a new transaction. Holding the exclusive gate through CAS fences late publishers.
     await serializableTransactionWithRetry(async (c) => {
       const current = await readAdmissionPolicy(c, eventId, 'exclusive');
+      if (!current.protected) {
+        await this.retire(c, current);
+        return;
+      }
       if (
-        !current.protected ||
         current.phase !== 'open' ||
         current.generation !== policy.generation ||
         current.epoch !== policy.epoch
@@ -273,11 +292,20 @@ export class AdmissionService {
     if (!this.isReady()) await this.verifyEnvironment();
     const policies = (
       await getPostgresPool().query<AdmissionPolicy>(
-        `SELECT ${policyColumns} FROM admission_events WHERE protected`,
+        // A released policy that is still open owns a published namespace nobody else would retire.
+        `SELECT ${policyColumns} FROM admission_events
+        WHERE protected OR phase='open' ORDER BY protected DESC`,
       )
     ).rows;
     for (const policy of policies) {
       if (stopped()) return;
+      if (!policy.protected) {
+        // No observation to freeze: the barrier re-reads the policy and retires what it published.
+        await this.recover(policy.eventId, null).catch((error) => {
+          if (!stopped()) throw error;
+        });
+        continue;
+      }
       const control = await this.control(policy.eventId).catch(() => null);
       // PG was read before Redis. A mismatch may be a completed recovery, not a new loss.
       // Let the exclusive-gate probe adopt it before freezing the newer namespace.
@@ -307,7 +335,12 @@ export class AdmissionService {
         this.healthy = false;
         await this.verifyEnvironment();
         try {
-          await this.recover(policy.eventId, observed);
+          // A failed command is not evidence of loss. Reset only when the reconnected process no
+          // longer holds this generation ready and structurally intact.
+          const current = await this.control(policy.eventId);
+          const intact =
+            current?.mode === 'ready' && policy.phase === 'open' && (await this.probe(policy)).ok;
+          if (!intact) await this.recover(policy.eventId, observed);
         } catch (recoveryError) {
           this.healthy = false;
           throw recoveryError;

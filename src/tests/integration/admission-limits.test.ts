@@ -8,6 +8,7 @@ import {
   admissionKeys,
   initializeAdmission,
   publishAdmission,
+  freezeAdmission,
   runAdmission,
   RedisAdmissionEntry,
   RedisAdmissionResult,
@@ -136,6 +137,42 @@ describe('admission limits with actual Redis and bounded synthetic fixtures', ()
     ]);
     expect(race.filter((x) => x.ok)).toHaveLength(1);
     expect(race.find((x) => !x.ok)?.code).toMatch(/ADMISSION_(IN_PROGRESS|CANCELLED)/);
+  });
+  it('keeps token-matched durable finalization open after the session deadline until the generation is frozen', async () => {
+    const a = (await join()).entry!,
+      b = (await join()).entry!,
+      c = (await join()).entry!;
+    expect((await runAdmission(eventId, epoch, 'tick')).promoted).toEqual([
+      a.admissionId,
+      b.admissionId,
+    ]);
+    const first = { fingerprint: 'first-command', claimToken: randomUUID() },
+      second = { fingerprint: 'second-command', claimToken: randomUUID() };
+    await command('claim', a, first);
+    const overdue = (await command('claim', b, second)).entry!;
+    await age(overdue, { deadline: overdue.joinedAt - 1 });
+    // Synthetic deadline: the session ends while both approved claims are unresolved and the control is still ready.
+    await redis.hSet(keys[1], 'endAt', '1');
+    for (const closed of [
+      await join(),
+      await runAdmission(eventId, epoch, 'tick'),
+      await command('status', c),
+      await command('claim', c, first),
+    ])
+      expect(closed).toMatchObject({ ok: false, code: 'ADMISSION_RECOVERING', status: 503 });
+    const outcome = { kind: 'reservation', resourceId: randomUUID(), code: null };
+    expect((await command('complete', a, { ...first, outcome })).entry).toMatchObject({
+      state: 'consumed',
+      outcome,
+    });
+    const reconciled = await runAdmission(eventId, epoch, 'reconcile');
+    expect(reconciled.claims?.map((x) => x.admissionId)).toEqual([b.admissionId]);
+    expect((await command('close', b, second)).entry?.state).toBe('expired');
+    // Only the sentinels remain: both unresolved slots were returned exactly once.
+    expect(await redis.zCard(keys[8])).toBe(1);
+    expect(await redis.zCard(keys[9])).toBe(1);
+    await freezeAdmission(eventId, epoch, '1');
+    expect((await command('complete', a, { ...first, outcome })).status).toBe(503);
   });
   it('renews waiting only on successful status/join, separates action limits and expires idle logically', async () => {
     const key = randomUUID(),

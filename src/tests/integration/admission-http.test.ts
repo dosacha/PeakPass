@@ -3,7 +3,11 @@ import { randomUUID } from 'crypto';
 import { existsSync } from 'fs';
 import jwt from 'jsonwebtoken';
 import { initRedis, closeRedis } from '@/infra/redis/client';
-import { initPostgresPool, closePostgresPool } from '@/infra/postgres/client';
+import {
+  initPostgresPool,
+  closePostgresPool,
+  serializableTransactionWithRetry,
+} from '@/infra/postgres/client';
 import { getConfig } from '@/infra/config';
 import { initLogger } from '@/infra/logger';
 import { readAdmissionPolicy, policyColumns } from '@/infra/postgres/admission-policy';
@@ -276,6 +280,152 @@ describe('admission actual authenticated HTTP and epoch lifecycle', () => {
       } finally {
         query.mockRestore();
       }
+    },
+  );
+  it('keeps the epoch and queue after a transient command failure on an intact namespace', async () => {
+    const before = (await service.control(eventId))!,
+      owner = randomUUID();
+    expect(before.mode).toBe('ready');
+    const joined = await service.join(eventId, owner, before.epoch, randomUUID());
+    // Fault injection: only this tick's first Lua command is lost; every later Redis/PG call is real.
+    const evaluate = jest
+      .spyOn(redis, 'eval')
+      .mockRejectedValueOnce(new Error('Socket closed unexpectedly'));
+    try {
+      await service.maintain();
+      expect((evaluate.mock.calls[0][1] as { arguments: string[] }).arguments[0]).toBe('tick');
+    } finally {
+      evaluate.mockRestore();
+    }
+    expect(await service.control(eventId)).toEqual(before);
+    expect((await service.status(eventId, owner)).admission?.admissionId).toBe(
+      joined.body.admission!.admissionId,
+    );
+  });
+  it('still resets through the same failure path once namespace loss is established', async () => {
+    const { admissionKeys } = await import('@/infra/redis/admission');
+    const before = (await service.control(eventId))!;
+    // The waiting index is gone: the failed tick now reports corruption rather than a lost reply.
+    await redis.del(admissionKeys(eventId, before.epoch)[6]);
+    await service.maintain();
+    const after = (await service.control(eventId))!;
+    expect(after.mode).toBe('ready');
+    expect(BigInt(after.generation)).toBe(BigInt(before.generation) + 1n);
+    expect(after.epoch).not.toBe(before.epoch);
+  });
+  // P4 has no release route. The fixture performs the contract's explicit transition under the exclusive gate.
+  const setProtected = (value: boolean) =>
+    serializableTransactionWithRetry(async (c) => {
+      await readAdmissionPolicy(c, eventId, 'exclusive');
+      await c.query('UPDATE admission_events SET protected=$2 WHERE event_id=$1', [eventId, value]);
+    });
+  const policy = async () =>
+    (await pool.query(`SELECT ${policyColumns} FROM admission_events WHERE event_id=$1`, [eventId]))
+      .rows[0];
+  it('retires a released policy namespace so the API reports ADMISSION_NOT_ENABLED', async () => {
+    const before = (await service.control(eventId))!;
+    expect(before.mode).toBe('ready');
+    await service.join(eventId, randomUUID(), before.epoch, randomUUID());
+    await setProtected(false);
+    try {
+      // Two coordinators observe the same release; the barrier retires and advances exactly once.
+      await Promise.all([service.maintain(), service.maintain()]);
+      expect(await service.control(eventId)).toBeNull();
+      expect(await redis.keys(`peakpass:admission:${eventId}:${before.epoch}:*`)).toEqual([]);
+      const retired = await policy();
+      expect(retired).toMatchObject({
+        protected: false,
+        phase: 'recovering',
+        generation: String(BigInt(before.generation) + 1n),
+      });
+      expect(retired.epoch).not.toBe(before.epoch);
+      for (const response of [
+        await request(`/events/${eventId}/admissions/me`),
+        await request(`/events/${eventId}/admissions`, 'POST', {
+          epoch: before.epoch,
+          joinRequestId: randomUUID(),
+        }),
+      ]) {
+        expect(response.status).toBe(404);
+        expect(response.body).toEqual({
+          error: { code: 'ADMISSION_NOT_ENABLED', message: expect.any(String) },
+          nextPollAfterMs: null,
+        });
+      }
+      // Nothing is left to select: a second tick neither recreates Redis state nor advances PG again.
+      await service.maintain();
+      expect(await service.control(eventId)).toBeNull();
+      expect(await policy()).toEqual(retired);
+      // Protection opens the epoch allocated at retirement; the retired epoch is never published again.
+      await setProtected(true);
+      await service.recover(eventId);
+      expect(await service.control(eventId)).toMatchObject({
+        mode: 'ready',
+        generation: retired.generation,
+        epoch: retired.epoch,
+      });
+      const stale = await request(`/events/${eventId}/admissions`, 'POST', {
+        epoch: before.epoch,
+        joinRequestId: randomUUID(),
+      });
+      expect(stale.status).toBe(410);
+      expect(stale.body.error.code).toBe('ADMISSION_RESET');
+    } finally {
+      if (!(await policy()).protected) {
+        await setProtected(true);
+        await service.recover(eventId);
+      }
+    }
+  });
+  it('retires instead of abandoning a frozen namespace when recovery finds the policy released', async () => {
+    const before = (await service.control(eventId))!;
+    expect(before.mode).toBe('ready');
+    await service.freeze(eventId, before);
+    await setProtected(false);
+    try {
+      await service.recover(eventId, before);
+      expect(await service.control(eventId)).toBeNull();
+      const response = await request(`/events/${eventId}/admissions/me`);
+      expect(response.status).toBe(404);
+      expect(response.body.error.code).toBe('ADMISSION_NOT_ENABLED');
+    } finally {
+      await setProtected(true);
+      await service.recover(eventId);
+    }
+    expect((await service.control(eventId))!.mode).toBe('ready');
+  });
+  it.each([2, 3])(
+    'retires what an in-flight recovery left when the release commits before its transaction %i',
+    async (transaction) => {
+      const before = (await service.control(eventId))!;
+      expect(before.mode).toBe('ready');
+      const connect = pool.connect.bind(pool) as unknown as () => Promise<unknown>;
+      let connections = 0;
+      // Real interleaving: the release commits under the exclusive gate between two recovery transactions.
+      const spy = jest.spyOn(pool, 'connect').mockImplementation((async () => {
+        if (++connections === transaction) {
+          spy.mockRestore();
+          await setProtected(false);
+        }
+        return connect();
+      }) as never);
+      try {
+        await service.recover(eventId, before);
+        expect(await service.control(eventId)).toBeNull();
+        const released = await policy();
+        expect(released).toMatchObject({ protected: false, phase: 'recovering' });
+        expect(await redis.keys(`peakpass:admission:${eventId}:${released.epoch}:*`)).toEqual([]);
+        const response = await request(`/events/${eventId}/admissions/me`);
+        expect(response.status).toBe(404);
+        expect(response.body.error.code).toBe('ADMISSION_NOT_ENABLED');
+      } finally {
+        spy.mockRestore();
+        if (!(await policy()).protected) {
+          await setProtected(true);
+          await service.recover(eventId);
+        }
+      }
+      expect((await service.control(eventId))!.mode).toBe('ready');
     },
   );
 });

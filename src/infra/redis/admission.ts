@@ -140,7 +140,10 @@ if op=='publish' then
 end
 if mode~='ready' then return err('ADMISSION_RECOVERING',503,1000) end
 local endAt=tonumber(redis.call('HGET',KEYS[2],'endAt'))
-if not endAt or now>=endAt then return err('ADMISSION_RECOVERING',503,1000) end
+-- The session deadline closes registration, claims and promotion. Token-matched durable
+-- finalization of already approved claims stays open until this generation is frozen.
+local finalizing=op=='complete' or op=='close' or op=='reconcile'
+if not endAt or (now>=endAt and not finalizing) then return err('ADMISSION_RECOVERING',503,1000) end
 local function read(id)
   if not id then return nil end
   local raw=redis.call('HGET',KEYS[3],id)
@@ -340,6 +343,16 @@ export const publishAdmission = (eventId: string, epoch: string, generation: str
   runAdmission(eventId, epoch, 'publish', { generation });
 export const freezeAdmission = (eventId: string, epoch: string, generation: string) =>
   runAdmission(eventId, epoch, 'freeze', { generation });
+
+/** Caller holds the event's exclusive PG gate with protection released, so nothing can publish here. */
+export async function retireAdmission(eventId: string): Promise<void> {
+  const control = admissionKeys(eventId, '_')[0];
+  await withRedis(async (r) => {
+    // A control of another type is stale as well; only its epoch keys are then unknown.
+    const epoch = (await r.type(control)) === 'hash' ? await r.hGet(control, 'epoch') : null;
+    await r.unlink(epoch ? admissionKeys(eventId, epoch).slice(0, 12) : control);
+  });
+}
 
 export async function unlinkRetiredAdmission(
   eventId: string,

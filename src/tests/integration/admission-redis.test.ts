@@ -127,4 +127,16 @@ describe('admission Redis atomic protocol', () => {
     expect(await api.unlinkRetiredAdmission(eventId, observed!, [newKey])).toBe(0);
     expect(await redis.exists(newKey)).toBe(1);
   });
+  it('retires the control with its own epoch keys, including an unreadable control', async () => {
+    const current = (await api.getAdmissionControl(eventId))!,
+      keys = api.admissionKeys(eventId, current.epoch);
+    await api.retireAdmission(eventId);
+    expect(await redis.exists(keys.slice(0, 12))).toBe(0);
+    // An earlier epoch is not this control's namespace; bounded cleanup owns it after re-protection.
+    expect(await redis.exists(api.admissionKeys(eventId, epoch)[2])).toBe(1);
+    await redis.set(keys[0], 'not-a-hash');
+    await api.retireAdmission(eventId);
+    expect(await redis.exists(keys[0])).toBe(0);
+    await api.retireAdmission(eventId);
+  });
 });
