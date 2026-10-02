@@ -72,8 +72,8 @@ describe('admission purchase gate on owned PostgreSQL, Redis and loopback HTTP',
     await closePostgresPool();
   });
 
-  async function fixture(seats = 20, isProtected = true) {
-    const created = await purchaseFixture(pool, getConfig().JWT_SECRET, seats);
+  async function fixture(seats = 20, isProtected = true, userCount = 3) {
+    const created = await purchaseFixture(pool, getConfig().JWT_SECRET, seats, userCount);
     fixtures.push(created);
     if (isProtected) {
       await setProtected(created.eventId, true);
@@ -95,6 +95,18 @@ describe('admission purchase gate on owned PostgreSQL, Redis and loopback HTTP',
       '/reservations',
       { eventId: fx.eventId, userId, tierId: TIER, quantity: 1, ...admission, ...changes },
       { authorization: fx.token(userId) },
+    );
+  const checkout = (
+    userId: string,
+    key: string,
+    admission: Partial<Admission> = {},
+    changes: object = {},
+  ) =>
+    request(
+      'POST',
+      '/checkouts',
+      { eventId: fx.eventId, userId, tierId: TIER, quantity: 1, ...admission, ...changes },
+      { authorization: fx.token(userId), 'idempotency-key': key },
     );
 
   describe('new reservation', () => {
@@ -330,6 +342,187 @@ describe('admission purchase gate on owned PostgreSQL, Redis and loopback HTTP',
         expect(response.status).toBe(404);
         expect(response.body.error.code).toBe('NOT_FOUND');
       }
+    });
+  });
+
+  describe('reservation-free checkout and existing purchases', () => {
+    it('consumes an admission for a direct checkout, replays by key and refuses another key', async () => {
+      fx = await fixture();
+      const [user] = fx.users,
+        key = randomUUID(),
+        admission = await admit(service, fx.eventId, user);
+      const missing = await checkout(user, randomUUID());
+      expect(missing.status).toBe(400);
+      expect(missing.body).toEqual(admissionError('ADMISSION_INVALID_INPUT'));
+      const created = await checkout(user, key, admission);
+      expect(created.status).toBe(201);
+      // The success body keeps the existing order schema; nothing of the claim leaks into it.
+      expect(Object.keys(created.body).sort()).toEqual(['order', 'tickets']);
+      expect(created.body).toMatchObject({ order: { userId: user, status: 'pending' }, tickets: [] });
+      expect(await fx.results()).toEqual([
+        expect.objectContaining({
+          admissionId: admission.admissionId,
+          operation: 'direct-checkout',
+          outcome: 'consumed',
+          orderId: created.body.order.id,
+          reservationId: null,
+          fingerprint: JSON.stringify([
+            user,
+            fx.eventId,
+            admission.admissionEpoch,
+            'direct-checkout',
+            TIER,
+            1,
+            key,
+          ]),
+        }),
+      ]);
+      expect(await inspect(fx.eventId, admission.admissionEpoch, admission.admissionId)).toMatchObject({
+        state: 'consumed',
+        outcome: { kind: 'direct-checkout', resourceId: created.body.order.id, code: null },
+      });
+      // The order replays by its key, with the admission fields or without them.
+      for (const fields of [admission, {}]) {
+        const replay = await checkout(user, key, fields);
+        expect(replay.status).toBe(201);
+        expect(replay.body.order.id).toBe(created.body.order.id);
+      }
+      const otherKey = await checkout(user, randomUUID(), admission);
+      expect(otherKey.status).toBe(409);
+      expect(otherKey.body).toEqual(admissionError('ADMISSION_REQUEST_MISMATCH'));
+      expect(await fx.state()).toMatchObject({ available: 19, ordered: 1, orders: 1, results: 1 });
+    });
+
+    it('lets exactly one of a reservation and a direct checkout win the same admission', async () => {
+      fx = await fixture(20, true, 5);
+      for (const user of fx.users) {
+        const admission = await admit(service, fx.eventId, user);
+        const responses = await Promise.all([
+          reserve(user, admission),
+          checkout(user, randomUUID(), admission),
+        ]);
+        expect(responses.map((r) => r.status).sort()).toEqual([201, 409]);
+        expect(responses.find((r) => r.status === 409)!.body).toEqual(
+          admissionError('ADMISSION_REQUEST_MISMATCH'),
+        );
+      }
+      const state = await fx.state();
+      expect(state.reservations + state.orders).toBe(5);
+      expect(state).toMatchObject({ available: 15, results: 5 });
+      expect(new Set((await fx.results()).map((r) => r.admissionId)).size).toBe(5);
+    });
+
+    it('stores a sold-out direct checkout as one rejection without a partial order', async () => {
+      fx = await fixture(1);
+      const [buyer, late] = fx.users;
+      expect((await checkout(buyer, randomUUID(), await admit(service, fx.eventId, buyer))).status).toBe(201);
+      const key = randomUUID(),
+        admission = await admit(service, fx.eventId, late);
+      const rejected = await checkout(late, key, admission);
+      expect(rejected.status).toBe(409);
+      expect(rejected.body.error.code).toBe('INSUFFICIENT_INVENTORY');
+      const replay = await checkout(late, key, admission);
+      expect(replay.status).toBe(409);
+      expect(replay.body.error).toEqual(rejected.body.error);
+      expect(await fx.state()).toMatchObject({ available: 0, ordered: 1, orders: 1, results: 2 });
+      expect(
+        (await pool.query('SELECT COUNT(*)::int AS n FROM orders WHERE user_id=$1', [late])).rows[0].n,
+      ).toBe(0);
+      expect(
+        (
+          await pool.query(
+            `SELECT COUNT(*)::int AS n FROM payment_records p JOIN orders o ON o.id=p.order_id
+            WHERE o.event_id=$1`,
+            [fx.eventId],
+          )
+        ).rows[0].n,
+      ).toBe(1);
+    });
+
+    it('keeps an existing reservation checkout, its order replay and its payment exempt after reset', async () => {
+      fx = await fixture();
+      const [user] = fx.users,
+        key = randomUUID(),
+        admission = await admit(service, fx.eventId, user);
+      const reservation = await reserve(user, admission);
+      expect(reservation.status).toBe(201);
+      // A real reset leaves the consumed epoch for good, then the whole namespace is removed
+      // (synthetic loss): the purchase that already exists in PostgreSQL must not queue again.
+      await service.recover(fx.eventId, (await service.control(fx.eventId))!);
+      expect((await service.control(fx.eventId))!.epoch).not.toBe(admission.admissionEpoch);
+      await redis.del(await redis.keys(`peakpass:admission:${fx.eventId}:*`));
+      const conversion = { reservationId: reservation.body.id };
+      const wrong = await checkout(user, key, { ...admission, admissionId: randomUUID() }, conversion);
+      expect(wrong.status).toBe(409);
+      expect(wrong.body).toEqual(admissionError('ADMISSION_REQUEST_MISMATCH'));
+      expect(await fx.state()).toMatchObject({ held: 1, orders: 0 });
+      const converted = await checkout(user, key, {}, conversion);
+      expect(converted.status).toBe(201);
+      expect(converted.body.order.reservationId).toBe(reservation.body.id);
+      for (const fields of [{}, admission]) {
+        const replay = await checkout(user, key, fields, conversion);
+        expect(replay.status).toBe(201);
+        expect(replay.body.order.id).toBe(converted.body.order.id);
+      }
+      const staleEpoch = await checkout(
+        user,
+        key,
+        { ...admission, admissionEpoch: randomUUID() },
+        conversion,
+      );
+      expect(staleEpoch.status).toBe(409);
+      const settled = await request(
+        'POST',
+        '/webhooks/payments/settlement',
+        { orderId: converted.body.order.id, providerTransactionId: randomUUID(), status: 'settled' },
+        { 'idempotency-key': randomUUID() },
+      );
+      expect(settled.status).toBe(200);
+      expect(settled.body).toMatchObject({ order: { status: 'paid' }, paymentStatus: 'settled' });
+      expect(settled.body.tickets).toHaveLength(1);
+      expect(await fx.state()).toMatchObject({ available: 19, held: 0, ordered: 1, results: 1 });
+    });
+
+    it('leaves a reservation and an order from before protection unbound when admission fields arrive', async () => {
+      fx = await fixture(20, false);
+      const [user] = fx.users,
+        orderKey = randomUUID();
+      const legacyReservation = await reserve(user);
+      const legacyOrder = await checkout(user, orderKey);
+      expect([legacyReservation.status, legacyOrder.status]).toEqual([201, 201]);
+      await setProtected(fx.eventId, true);
+      await service.recover(fx.eventId);
+      const admission = await admit(service, fx.eventId, user);
+      const converted = await checkout(user, randomUUID(), admission, {
+        reservationId: legacyReservation.body.id,
+      });
+      expect(converted.status).toBe(201);
+      const replay = await checkout(user, orderKey, admission);
+      expect(replay.status).toBe(201);
+      expect(replay.body.order.id).toBe(legacyOrder.body.order.id);
+      // Neither request bound or consumed the admission: it still buys one new reservation.
+      expect((await fx.state()).results).toBe(0);
+      expect(await inspect(fx.eventId, admission.admissionEpoch, admission.admissionId)).toMatchObject({
+        state: 'admitted',
+        phase: 'idle',
+      });
+      expect((await reserve(user, admission)).status).toBe(201);
+      expect(await fx.state()).toMatchObject({ available: 17, held: 1, ordered: 2, results: 1 });
+    });
+
+    it('keeps unprotected direct checkout and its replay unchanged', async () => {
+      fx = await fixture(5, false);
+      const [user] = fx.users,
+        key = randomUUID();
+      const created = await checkout(user, key);
+      expect(created.status).toBe(201);
+      expect((await checkout(user, key)).body.order.id).toBe(created.body.order.id);
+      const ignored = { admissionId: randomUUID(), admissionEpoch: randomUUID() };
+      expect((await checkout(user, randomUUID(), ignored)).status).toBe(201);
+      const missing = await checkout(user, randomUUID(), {}, { eventId: randomUUID() });
+      expect(missing.status).toBe(404);
+      expect(missing.body.error.code).toBe('NOT_FOUND');
+      expect(await fx.state()).toMatchObject({ available: 3, ordered: 2, orders: 2, results: 0 });
     });
   });
 });

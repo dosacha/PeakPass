@@ -137,6 +137,29 @@ export async function openAdmissionGate(
   return { policy, prior };
 }
 
+/**
+ * An existing reservation or order is exempt from admission, whatever its TTL or epoch became.
+ * Admission fields submitted with it must equal its durable link; a target that has no link
+ * (created before rollout or while unprotected) stays unbound and the fields are ignored.
+ */
+export async function assertAdmissionLink(
+  client: PoolClient,
+  admission: AdmissionRef | undefined,
+  orderId: string | null,
+  reservationId: string | null,
+): Promise<void> {
+  if (!admission) return;
+  const link = (
+    await client.query<{ admissionId: string; epoch: string }>(
+      `SELECT admission_id AS "admissionId", epoch::text FROM admission_results
+      WHERE order_id = $1 OR reservation_id = $2`,
+      [orderId, reservationId],
+    )
+  ).rows[0];
+  if (link && (link.admissionId !== admission.admissionId || link.epoch !== admission.epoch))
+    throw new AdmissionError('ADMISSION_REQUEST_MISMATCH', 409);
+}
+
 /** What the transaction owner tells Redis after COMMIT. */
 export interface AdmissionSettlement {
   claim: AdmissionClaim;

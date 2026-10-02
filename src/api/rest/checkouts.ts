@@ -1,6 +1,7 @@
 import { FastifyInstance } from 'fastify';
-import { getPostgresPool, serializableTransactionWithRetry } from '@/infra/postgres/client';
+import { getPostgresPool } from '@/infra/postgres/client';
 import { CheckoutService } from '@/core/services/checkout.service';
+import { purchaseTransaction, settleAdmission } from '@/core/services/admission-consumption';
 import { OrderService } from '@/core/services/order.service';
 import { TicketService } from '@/core/services/ticket.service';
 import { CreateOrderSchema } from '@/core/models/order';
@@ -12,13 +13,15 @@ import {
   invalidateEventCache,
   releaseIdempotencyLock,
 } from '@/infra/redis/commands';
-import { assertBodyUserMatchesAuth } from '@/api/middleware/auth';
+import { assertBodyUserMatchesAuth, purchaseAdmission } from '@/api/middleware/auth';
 
 /**
  * 정책 (현재 코드 기준):
  *   - POST /checkouts: body.userId는 ENFORCE_AUTH_USER_MATCH=true (production default)
  *     일 때 JWT subject와 일치 검증. ENFORCE_AUTH_USER_MATCH=false (demo override)일
  *     때만 body userId를 그대로 신뢰하며 production에서는 fail-fast로 거부됨.
+ *     보호 이벤트에서 reservation 없는 신규 주문은 본문의 admissionId/admissionEpoch로
+ *     입장 자격을 소비해야 한다. 기존 주문 replay와 기존 reservation 전환은 면제된다.
  *   - GET /checkouts/:orderId: 본인 order만 조회. 미인증/소유자 mismatch는
  *     모두 404로 응답해 order 존재 여부가 누설되지 않도록 한다.
  */
@@ -42,6 +45,7 @@ export async function registerCheckoutRoutes(app: FastifyInstance) {
       });
 
       assertBodyUserMatchesAuth(request, input.userId);
+      const admission = purchaseAdmission(request);
 
       logger.info(
         {
@@ -53,16 +57,25 @@ export async function registerCheckoutRoutes(app: FastifyInstance) {
         'Checkout request',
       );
 
-      const orderResult = await serializableTransactionWithRetry(async (client) => {
-        const checkoutService = new CheckoutService();
-        return checkoutService.checkout(input, client);
-      });
+      const { settlement, ...orderResult } = await purchaseTransaction(
+        async (client) => {
+          const checkoutService = new CheckoutService();
+          return checkoutService.checkout(input, client, admission);
+        },
+        { admission },
+      );
+      // The result is committed. Redis is told now; a failure here never changes the response.
+      await settleAdmission(settlement);
 
       if (input.reservationId) {
         await deleteReservationHold(input.reservationId);
       }
 
       await invalidateEventCache(input.eventId);
+
+      if ('rejected' in orderResult) {
+        throw orderResult.rejected;
+      }
 
       if ('reservationExpired' in orderResult) {
         throw new ConflictError('Reservation has expired or is no longer valid');
