@@ -1,4 +1,5 @@
 import { admissionService, AdmissionService } from '@/core/services/admission.service';
+import { reclaimOverdueClaims } from '@/core/services/admission-consumption';
 import { admissionProfile } from '@/core/models/admission';
 import { getLogger } from '@/infra/logger';
 
@@ -11,7 +12,7 @@ export function startAdmissionScheduler(
   let inflight: Promise<void>;
   async function run() {
     try {
-      await service.maintain(() => stopped);
+      await service.maintain(() => stopped, reclaimOverdueClaims);
     } catch (error) {
       getLogger().error({ err: error }, 'Admission iteration failed; new admission remains closed');
     } finally {

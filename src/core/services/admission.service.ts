@@ -301,7 +301,11 @@ export class AdmissionService {
     });
   }
 
-  async maintain(stopped = () => false): Promise<void> {
+  async maintain(
+    stopped = () => false,
+    // P5's reclaimer: decides overdue claims through the durable ledger. It must not throw.
+    reclaim?: (eventId: string, claims: RedisAdmissionEntry[]) => Promise<void>,
+  ): Promise<void> {
     if (!this.enabled || stopped()) return;
     if (!this.isReady()) await this.verifyEnvironment();
     const policies = (
@@ -342,7 +346,10 @@ export class AdmissionService {
         } else {
           await this.promote(policy.eventId);
           // P4 can mark overdue claims, but only P5 can decide and commit durable closure.
-          if (!stopped()) await this.reconcile(policy.eventId);
+          if (!stopped()) {
+            const overdue = (await this.reconcile(policy.eventId)).claims ?? [];
+            if (reclaim && overdue.length) await reclaim(policy.eventId, overdue);
+          }
         }
       } catch (error) {
         if (stopped()) return;

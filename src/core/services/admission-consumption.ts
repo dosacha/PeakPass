@@ -16,6 +16,7 @@ import {
   lockAdmission,
   readAdmissionPolicy,
 } from '@/infra/postgres/admission-policy';
+import { RedisAdmissionEntry } from '@/infra/redis/admission';
 
 /**
  * admission-v1 §5: durable consumption shared by the two new seat-acquisition paths.
@@ -318,5 +319,79 @@ export async function settleAdmission(settlement?: AdmissionSettlement): Promise
       { err, admissionId: settlement.claim.admissionId },
       'Admission result is committed; Redis finalization is left to the reclaimer',
     );
+  }
+}
+
+/**
+ * Claims past their deadline (contract §5), as `reconcile` returned them to the scheduler tick.
+ * Per claim: shared event gate → admission try-lock → ledger read after the lock. A committed
+ * result is reflected to Redis. With no result, `closed` commits first and only then is the slot
+ * returned, so a consumer that resumes later reads `closed` under the same lock.
+ *
+ * A held lock, a newer epoch or any error leaves the slot in use for the next tick: a missing
+ * row, an expired deadline or a finally block is never authority to return it.
+ */
+export async function reclaimOverdueClaims(
+  eventId: string,
+  claims: RedisAdmissionEntry[],
+): Promise<void> {
+  for (const entry of claims) {
+    try {
+      // READ COMMITTED on purpose: the ledger is read after the lock, not from an older snapshot.
+      const result = await transaction(async (client) => {
+        await client.query(TIMEOUTS);
+        const policy = await readAdmissionPolicy(client, eventId);
+        // Under another epoch the barrier already keeps this claim from committing anything.
+        if (!policy.protected || policy.epoch !== entry.epoch) return null;
+        if (!(await lockAdmission(client, entry.admissionId, true))) return null;
+        const committed = await readResult(client, entry.admissionId);
+        if (committed) return committed;
+        const closed = await client.query<AdmissionResult>(
+          `INSERT INTO admission_results
+            (admission_id, user_id, event_id, epoch, operation, fingerprint, outcome,
+             error_code, http_status, error_message)
+          VALUES ($1, $2, $3, $4, $5, $6, 'closed', 'ADMISSION_EXPIRED', 410, 'ADMISSION_EXPIRED')
+          RETURNING ${resultColumns}`,
+          [
+            entry.admissionId,
+            entry.userId,
+            eventId,
+            entry.epoch,
+            // The claim's fingerprint is the canonical array; its fourth element is the operation.
+            JSON.parse(entry.fingerprint!)[3],
+            entry.fingerprint,
+          ],
+        );
+        return closed.rows[0];
+      });
+      if (!result) continue;
+      const claim: AdmissionClaim = {
+        eventId,
+        userId: entry.userId,
+        admissionId: entry.admissionId,
+        epoch: entry.epoch,
+        fingerprint: entry.fingerprint!,
+        claimToken: entry.claimToken!,
+        deadline: entry.deadline!,
+      };
+      if (result.outcome === 'closed') await admissionService.close(claim);
+      else if (result.outcome === 'rejected')
+        await admissionService.complete(claim, {
+          kind: 'rejected',
+          resourceId: null,
+          code: result.errorCode,
+        });
+      else
+        await admissionService.complete(claim, {
+          kind: result.operation,
+          resourceId: result.reservationId ?? result.orderId,
+          code: null,
+        });
+    } catch (err) {
+      getLogger().warn(
+        { err, eventId, admissionId: entry.admissionId },
+        'Admission claim was not reclaimed; its slot stays in use until the next tick',
+      );
+    }
   }
 }

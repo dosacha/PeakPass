@@ -11,6 +11,9 @@ it('stops scheduling immediately and drains the one in-flight admission tick', a
   const { startAdmissionScheduler } = await import(modulePath);
   const worker = startAdmissionScheduler(service, 1);
   expect(service.maintain).toHaveBeenCalledTimes(1);
+  // The tick hands overdue claims to P5's ledger-backed reclaimer.
+  const { reclaimOverdueClaims } = await import('@/core/services/admission-consumption');
+  expect(service.maintain).toHaveBeenCalledWith(expect.any(Function), reclaimOverdueClaims);
   let stopped = false;
   const drain = worker.stop().then(() => {
     stopped = true;

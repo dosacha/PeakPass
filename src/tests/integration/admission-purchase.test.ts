@@ -1,12 +1,23 @@
 import 'dotenv/config';
 import { randomUUID } from 'crypto';
+import { spawn } from 'child_process';
+import { once } from 'events';
+import http from 'http';
+import type { PoolClient } from 'pg';
 import { initRedis, closeRedis } from '@/infra/redis/client';
 import { initPostgresPool, closePostgresPool } from '@/infra/postgres/client';
+import { readAdmissionPolicy, lockAdmission } from '@/infra/postgres/admission-policy';
 import { getConfig } from '@/infra/config';
 import { initLogger } from '@/infra/logger';
 import { admissionKeys } from '@/infra/redis/admission';
 import { InventoryService } from '@/core/services/inventory.service';
 import { ReservationService } from '@/core/services/reservation.service';
+import {
+  admissionFingerprint,
+  purchaseCommand,
+  reclaimOverdueClaims,
+} from '@/core/services/admission-consumption';
+import { blocked, until } from './order-sweeper-fixture';
 import {
   purchaseFixture,
   PurchaseFixture,
@@ -510,6 +521,38 @@ describe('admission purchase gate on owned PostgreSQL, Redis and loopback HTTP',
       expect(await fx.state()).toMatchObject({ available: 17, held: 1, ordered: 2, results: 1 });
     });
 
+    it('replays the committed reservation after the client connection is lost before the response', async () => {
+      fx = await fixture();
+      const [user] = fx.users,
+        admission = await admit(service, fx.eventId, user);
+      // The request reaches the occupation, then the client destroys its socket: the first
+      // response is never delivered. A real TCP close on loopback, not a network partition.
+      const create = ReservationService.prototype.createReservationWithClient;
+      const occupying = new Promise<void>((resolve) => {
+        jest
+          .spyOn(ReservationService.prototype, 'createReservationWithClient')
+          .mockImplementationOnce(function (this: ReservationService, ...args) {
+            resolve();
+            return create.apply(this, args);
+          });
+      });
+      const lost = http.request(`${base}/reservations`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', authorization: fx.token(user) },
+      });
+      lost.on('error', () => undefined);
+      lost.end(
+        JSON.stringify({ eventId: fx.eventId, userId: user, tierId: TIER, quantity: 1, ...admission }),
+      );
+      await occupying;
+      lost.destroy();
+      expect(await until(async () => (await fx.state()).results === 1)).toBe(true);
+      const replay = await reserve(user, admission);
+      expect(replay.status).toBe(201);
+      expect((await fx.results())[0].reservationId).toBe(replay.body.id);
+      expect(await fx.state()).toMatchObject({ available: 19, held: 1, reservations: 1, results: 1 });
+    });
+
     it('keeps unprotected direct checkout and its replay unchanged', async () => {
       fx = await fixture(5, false);
       const [user] = fx.users,
@@ -523,6 +566,243 @@ describe('admission purchase gate on owned PostgreSQL, Redis and loopback HTTP',
       expect(missing.status).toBe(404);
       expect(missing.body.error.code).toBe('NOT_FOUND');
       expect(await fx.state()).toMatchObject({ available: 3, ordered: 2, orders: 2, results: 0 });
+    });
+  });
+
+  describe('Redis finalization and claim reclamation', () => {
+    const fingerprintOf = (userId: string, admission: Admission) =>
+      admissionFingerprint(
+        purchaseCommand(
+          'reservation',
+          { userId, eventId: fx.eventId, tierId: TIER, quantity: 1 },
+          null,
+          { admissionId: admission.admissionId, epoch: admission.admissionEpoch },
+        ),
+      );
+    const claimOf = (userId: string, admission: Admission) => ({
+      eventId: fx.eventId,
+      userId,
+      admissionId: admission.admissionId,
+      epoch: admission.admissionEpoch,
+      fingerprint: fingerprintOf(userId, admission),
+    });
+    const overdue = async () => (await service.reconcile(fx.eventId)).claims ?? [];
+    const pastDeadline = (admission: Admission) =>
+      age(redis, fx.eventId, admission.admissionEpoch, admission.admissionId, { deadline: 1 });
+    const closedResult = (userId: string, admission: Admission) => ({
+      admissionId: admission.admissionId,
+      userId,
+      epoch: admission.admissionEpoch,
+      operation: 'reservation',
+      fingerprint: fingerprintOf(userId, admission),
+      outcome: 'closed',
+      reservationId: null,
+      orderId: null,
+      errorCode: 'ADMISSION_EXPIRED',
+      httpStatus: 410,
+      errorMessage: 'ADMISSION_EXPIRED',
+    });
+
+    it.each(['consumed', 'rejected'] as const)(
+      'keeps the slot when Redis finalization of a %s result fails and returns it once through the reclaimer',
+      async (kind) => {
+        fx = await fixture(kind === 'rejected' ? 1 : 20);
+        const [buyer, user] = fx.users;
+        if (kind === 'rejected')
+          expect((await reserve(buyer, await admit(service, fx.eventId, buyer))).status).toBe(201);
+        const admission = await admit(service, fx.eventId, user);
+        const { admissionEpoch: epoch, admissionId } = admission;
+        // Fault injection: the first `complete` of this admission is lost. Every other command,
+        // PostgreSQL transaction and HTTP exchange is real.
+        const evaluate = redis.eval.bind(redis) as (...args: unknown[]) => Promise<unknown>;
+        let lost = 0;
+        jest.spyOn(redis, 'eval').mockImplementation(((
+          script: string,
+          options: { arguments: string[] },
+        ) => {
+          const [operation, , input] = options.arguments;
+          if (operation === 'complete' && JSON.parse(input).admissionId === admissionId && !lost++)
+            return Promise.reject(new Error('Socket closed unexpectedly'));
+          return evaluate(script, options);
+        }) as never);
+        const response = await reserve(user, admission);
+        expect(response.status).toBe(kind === 'consumed' ? 201 : 409);
+        expect(lost).toBe(1);
+        // The committed result is the answer. Redis still shows the claim, which keeps its slot.
+        expect(await inspect(fx.eventId, epoch, admissionId)).toMatchObject({
+          state: 'admitted',
+          phase: 'processing',
+          outcome: null,
+        });
+        expect(await slots(redis, fx.eventId, epoch)).toBe(1);
+        const replay = await reserve(user, admission);
+        expect(replay.status).toBe(response.status);
+        expect(replay.body.id).toBe(response.body.id);
+        expect(await slots(redis, fx.eventId, epoch)).toBe(1);
+        // Synthetic deadline passage, then the real maintenance tick with the reclaimer.
+        await pastDeadline(admission);
+        await service.maintain(() => false, reclaimOverdueClaims);
+        expect(await inspect(fx.eventId, epoch, admissionId)).toMatchObject({
+          state: 'consumed',
+          outcome:
+            kind === 'consumed'
+              ? { kind: 'reservation', resourceId: response.body.id, code: null }
+              : { kind: 'rejected', resourceId: null, code: 'INSUFFICIENT_INVENTORY' },
+        });
+        expect(await slots(redis, fx.eventId, epoch)).toBe(0);
+        await service.maintain(() => false, reclaimOverdueClaims);
+        expect(await slots(redis, fx.eventId, epoch)).toBe(0);
+        expect((await fx.state()).results).toBe(kind === 'consumed' ? 1 : 2);
+      },
+    );
+
+    it('does not reclaim while a consumer holds the admission lock, closes after its rollback and fences the late writer', async () => {
+      fx = await fixture();
+      const [user] = fx.users,
+        admission = await admit(service, fx.eventId, user),
+        { admissionEpoch: epoch, admissionId } = admission;
+      // A consumer that stalls after its claim, inside its transaction: real gate and lock.
+      const consumer = await pool.connect();
+      try {
+        await consumer.query('BEGIN ISOLATION LEVEL SERIALIZABLE');
+        await readAdmissionPolicy(consumer, fx.eventId);
+        await lockAdmission(consumer, admissionId);
+        await service.claim(claimOf(user, admission));
+        await pastDeadline(admission);
+        const claims = await overdue();
+        expect(claims.map((c) => c.admissionId)).toEqual([admissionId]);
+        await reclaimOverdueClaims(fx.eventId, claims);
+        // No PostgreSQL lock, no reclamation: neither a closed row nor a returned slot.
+        expect((await fx.state()).results).toBe(0);
+        expect(await inspect(fx.eventId, epoch, admissionId)).toMatchObject({
+          state: 'admitted',
+          phase: 'reconciling',
+        });
+        expect(await slots(redis, fx.eventId, epoch)).toBe(1);
+        await consumer.query('ROLLBACK');
+      } finally {
+        await consumer.query('ROLLBACK').catch(() => undefined);
+        consumer.release();
+      }
+      const claims = await overdue();
+      await reclaimOverdueClaims(fx.eventId, claims);
+      expect(await fx.results()).toEqual([closedResult(user, admission)]);
+      expect(await inspect(fx.eventId, epoch, admissionId)).toMatchObject({
+        state: 'expired',
+        reason: 'ADMISSION_EXPIRED',
+      });
+      expect(await slots(redis, fx.eventId, epoch)).toBe(0);
+      // Repeating the same reclamation neither adds a row nor returns another slot.
+      await reclaimOverdueClaims(fx.eventId, claims);
+      expect(await slots(redis, fx.eventId, epoch)).toBe(0);
+      const late = await reserve(user, admission);
+      expect(late.status).toBe(410);
+      expect(late.body).toEqual(admissionError('ADMISSION_EXPIRED'));
+      const changed = await reserve(user, admission, { quantity: 2 });
+      expect(changed.status).toBe(409);
+      expect(changed.body).toEqual(admissionError('ADMISSION_REQUEST_MISMATCH'));
+      expect(await fx.state()).toMatchObject({ available: 20, reservations: 0, results: 1 });
+    });
+
+    it('keeps a consumer whose snapshot predates the closed commit from occupying', async () => {
+      fx = await fixture();
+      const [user] = fx.users,
+        admission = await admit(service, fx.eventId, user);
+      // Fixture: an approved claim whose consumer never committed, now past its deadline.
+      await service.claim(claimOf(user, admission));
+      await pastDeadline(admission);
+      const claims = await overdue();
+      // The reclaimer is held before its COMMIT (injected pause on its own connection), with
+      // the closed row written and the admission lock taken. Locks and commits are real.
+      let resume!: () => void;
+      const held = new Promise<void>((resolve) => (resume = resolve));
+      const connect = pool.connect.bind(pool) as unknown as () => Promise<PoolClient>;
+      const paused = new Promise<number>((reached) => {
+        jest.spyOn(pool, 'connect').mockImplementationOnce((async () => {
+          const client = await connect();
+          const query = client.query.bind(client) as (...args: unknown[]) => Promise<unknown>;
+          client.query = (async (...args: unknown[]) => {
+            if (args[0] === 'COMMIT' || args[0] === 'ROLLBACK') {
+              client.query = query as typeof client.query;
+              const pid = (await query('SELECT pg_backend_pid() AS pid')) as {
+                rows: { pid: number }[];
+              };
+              reached(pid.rows[0].pid);
+              await held;
+            }
+            return query(...args);
+          }) as typeof client.query;
+          return client;
+        }) as never);
+      });
+      const reclaiming = reclaimOverdueClaims(fx.eventId, claims);
+      const reclaimerPid = await paused;
+      // The late request takes its SERIALIZABLE snapshot now and waits for the admission lock.
+      const late = reserve(user, admission);
+      await blocked(pool, reclaimerPid);
+      resume();
+      await reclaiming;
+      const response = await late;
+      // Redis answers expired once the close is reflected, in progress just before it.
+      expect([409, 410]).toContain(response.status);
+      expect(response.body.error.code).toMatch(/^ADMISSION_(EXPIRED|IN_PROGRESS)$/);
+      expect(await fx.results()).toEqual([closedResult(user, admission)]);
+      expect(await fx.state()).toMatchObject({ available: 20, reservations: 0, results: 1 });
+      const retry = await reserve(user, admission);
+      expect(retry.status).toBe(410);
+      expect(retry.body).toEqual(admissionError('ADMISSION_EXPIRED'));
+      expect(await fx.state()).toMatchObject({ available: 20, reservations: 0, results: 1 });
+    });
+
+    it('returns the slot of a consumer process killed inside its transaction only after PostgreSQL releases its lock', async () => {
+      fx = await fixture();
+      const [user] = fx.users,
+        admission = await admit(service, fx.eventId, user),
+        { admissionEpoch: epoch, admissionId } = admission;
+      const child = spawn(
+        process.execPath,
+        [
+          '--import',
+          'tsx',
+          'src/tests/integration/admission-consumer-fixture.ts',
+          fx.eventId,
+          user,
+          admissionId,
+          epoch,
+          fingerprintOf(user, admission),
+        ],
+        { stdio: ['ignore', 'pipe', 'pipe', 'ipc'], windowsHide: true },
+      );
+      try {
+        expect((await once(child, 'message', { signal: AbortSignal.timeout(20000) }))[0]).toEqual({
+          claimed: true,
+        });
+        await pastDeadline(admission);
+        await reclaimOverdueClaims(fx.eventId, await overdue());
+        expect((await fx.state()).results).toBe(0);
+        expect(await slots(redis, fx.eventId, epoch)).toBe(1);
+        const exited = once(child, 'exit');
+        child.kill('SIGKILL');
+        await exited;
+        // The server rolls the dead session back; only then can the reclaimer take the lock.
+        expect(
+          await until(async () => {
+            await reclaimOverdueClaims(fx.eventId, await overdue());
+            return (await fx.state()).results === 1;
+          }),
+        ).toBe(true);
+        expect(await fx.results()).toEqual([closedResult(user, admission)]);
+        expect(await slots(redis, fx.eventId, epoch)).toBe(0);
+        const late = await reserve(user, admission);
+        expect(late.status).toBe(410);
+        expect(await fx.state()).toMatchObject({ available: 20, reservations: 0, results: 1 });
+      } finally {
+        if (child.exitCode === null && child.signalCode === null) {
+          const exited = once(child, 'exit');
+          child.kill('SIGKILL');
+          await exited;
+        }
+      }
     });
   });
 });
