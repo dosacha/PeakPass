@@ -22,7 +22,13 @@ interface Api {
   }): number;
   parseRetryAfter(value: unknown): number | null;
   createController(options: Record<string, unknown>): Controller;
+  createTrace(options: { limit: number; meta: Record<string, unknown> }): {
+    push(event: TraceEvent): void;
+    snapshot(): { meta: Record<string, unknown>; dropped: number; events: TraceEvent[] };
+  };
 }
+
+type TraceEvent = Record<string, unknown> & { type: string };
 
 interface Snapshot {
   admissionId: string;
@@ -105,6 +111,12 @@ function memoryStore(): Store {
   };
 }
 
+/** The recognition markers a browser profile shares between its tabs and reloads. */
+function memoryMarkers() {
+  const keys = new Set<string>();
+  return { has: (key: string) => keys.has(key), add: (key: string) => void keys.add(key) };
+}
+
 function load(): Api {
   const context = vm.createContext({});
   vm.runInContext(readFileSync('frontend/admission-polling.js', 'utf8'), context, {
@@ -180,6 +192,7 @@ function tab(api: Api, overrides: Record<string, unknown> = {}) {
   const purchases: Purchase[] = [];
   const results: PurchaseResult[] = [];
   const views: View[] = [];
+  const traces: TraceEvent[] = [];
   const pending = (overrides.pending as Store | undefined) ?? memoryStore();
   const flush = () => new Promise<void>((resolve) => setImmediate(resolve));
   // Counts what the tab has in flight: a request leaves when it settles or is aborted.
@@ -211,7 +224,10 @@ function tab(api: Api, overrides: Record<string, unknown> = {}) {
     },
     onPurchaseResult: (result: PurchaseResult) => results.push(result),
     pending,
+    seen: memoryMarkers(),
     onChange: (view: View) => views.push(view),
+    onTrace: (event: TraceEvent) => traces.push(event),
+    wall: () => SERVER_T0 + now,
     now: () => now,
     setTimer(run: () => void, ms: number) {
       timers.set(++timerSeq, { at: now + ms, run });
@@ -239,6 +255,8 @@ function tab(api: Api, overrides: Record<string, unknown> = {}) {
     results,
     pending,
     views,
+    traces,
+    traced: (type: string) => traces.filter((event) => event.type === type),
     flush,
     now: () => now,
     times: () => calls.map((call) => call.at),
@@ -900,6 +918,47 @@ describe('join, cancel and purchase', () => {
     expect(t.controller.cancel()).toBe(false);
   });
 
+  it('does not apply a cancel answer that is about another entry', async () => {
+    const t = tab(api);
+    t.onRequest((call) =>
+      call.method === 'DELETE'
+        ? t.ok(entry('cancelled', { admissionId: ADMISSION_B, reason: 'ADMISSION_CANCELLED' }), null)
+        : t.ok(entry('waiting'), 5000),
+    );
+    t.controller.start();
+    await t.flush();
+    expect(t.controller.cancel()).toBe(true);
+    await t.flush();
+    expect(t.methods()).toEqual(['GET', 'DELETE']);
+    expect(t.controller.view()).toMatchObject({ phase: 'waiting', notice: 'CANCEL_UNCONFIRMED' });
+    expect(t.controller.view().admission?.admissionId).toBe(ADMISSION_A);
+  });
+
+  it('sends no status request while a purchase is open, in flight or between its retries', async () => {
+    const t = tab(api);
+    t.onRequest(() => t.ok(admittedEntry(t), 1000));
+    t.onPurchase(() =>
+      t.purchases.length === 1 ? { status: 0 } : new Promise<Reply>(() => undefined),
+    );
+    t.controller.start();
+    await t.flush();
+    t.controller.purchase({ ...PURCHASE });
+    // The first attempt failed at once and the retry waits until 1000: nothing is in flight.
+    await t.advance(500);
+    t.setHidden(true);
+    t.setHidden(false);
+    await t.advance(400);
+    expect(t.methods()).toEqual(['GET']);
+    // The second attempt is in flight from 1000.
+    await t.advance(1100);
+    t.setHidden(true);
+    t.setHidden(false);
+    await t.advance(1000);
+    expect(t.methods()).toEqual(['GET']);
+    expect(t.purchases).toHaveLength(2);
+    expect(t.maxActive()).toBe(1);
+  });
+
   it('sends the purchase once with the body it was given while polling is paused', async () => {
     const t = tab(api);
     const answer = deferred<Reply>();
@@ -1106,5 +1165,348 @@ describe('join, cancel and purchase', () => {
     expect(after.purchases[0].body).toEqual(PURCHASE);
     expect(after.results.map((result) => result.status)).toEqual([201]);
     expect(after.pending.size()).toBe(0);
+  });
+});
+
+describe('instrumentation', () => {
+  let api: Api;
+  beforeAll(() => {
+    api = load();
+  });
+
+  const cancelled = () => entry('cancelled', { reason: 'ADMISSION_CANCELLED' });
+
+  it('records the first admitted application once, bounded by the server delta and the round trip', async () => {
+    const t = tab(api);
+    const answer = deferred<Reply>();
+    const admitted = entry('admitted', {
+      admittedAt: iso(SERVER_T0 + 500),
+      expiresAt: iso(SERVER_T0 + 30500),
+    });
+    t.onRequest(() => {
+      if (t.calls.length === 1) return t.ok(entry('waiting'), 1000);
+      return t.calls.length === 2 ? answer.promise : t.ok(admitted, 1000);
+    });
+    t.controller.start();
+    await t.advance(1300);
+    // Sent at 1000, answered at 1300 by a server whose clock read 700 ms after the promotion.
+    answer.resolve({
+      status: 200,
+      data: {
+        contractRevision: 'admission-v1',
+        serverTime: iso(SERVER_T0 + 1200),
+        queue: { eventId: EVENT, epoch: EPOCH_1, mode: 'open' },
+        admission: admitted,
+        nextPollAfterMs: 1000,
+      },
+    });
+    await t.advance(3000);
+    expect(t.calls.length).toBeGreaterThan(3);
+    expect(t.traced('recognition')).toHaveLength(1);
+    expect(t.traced('recognition')[0]).toMatchObject({
+      epoch: EPOCH_1,
+      admissionId: ADMISSION_A,
+      serverDeltaMs: 700,
+      tSend: 1000,
+      tRecv: 1300,
+      tApply: 1300,
+      lowerMs: 700,
+      upperMs: 1000,
+      hiddenAtApply: false,
+      visibleAtPromotion: true,
+      hiddenBetween: false,
+      failuresBefore: 0,
+      viaRecover: false,
+      layer: 'foreground',
+    });
+    expect(t.traced('recognition-missed')).toHaveLength(0);
+  });
+
+  it('does not count a reload or a second tab again, and files a first sight after a load under reconnect', async () => {
+    const seen = memoryMarkers();
+    const admitted = entry('admitted', {
+      admittedAt: iso(SERVER_T0),
+      expiresAt: iso(SERVER_T0 + 30000),
+    });
+    const first = tab(api, { seen });
+    first.onRequest(() => first.ok(admitted, 1000));
+    first.controller.start();
+    await first.flush();
+    expect(first.traced('recognition')).toHaveLength(1);
+    expect(first.traced('recognition')[0]).toMatchObject({ viaRecover: true, layer: 'reconnect' });
+    first.controller.dispose();
+
+    const reloaded = tab(api, { seen });
+    reloaded.onRequest(() => reloaded.ok(admitted, 1000));
+    reloaded.controller.start();
+    await reloaded.advance(3000);
+    expect(reloaded.traced('recognition')).toHaveLength(0);
+    expect(reloaded.traced('recognition-missed')).toHaveLength(0);
+  });
+
+  it('files a recognition made in a hidden tab under hidden, whether it was promoted before or after hiding', async () => {
+    const hiddenFirst = tab(api);
+    hiddenFirst.onRequest(() =>
+      hiddenFirst.calls.length === 1
+        ? hiddenFirst.ok(entry('waiting'), 1000)
+        : hiddenFirst.ok(
+            entry('admitted', {
+              admittedAt: iso(SERVER_T0 + 10000),
+              expiresAt: iso(SERVER_T0 + 40000),
+            }),
+            1000,
+          ),
+    );
+    hiddenFirst.controller.start();
+    await hiddenFirst.advance(500);
+    hiddenFirst.setHidden(true);
+    await hiddenFirst.advance(14500);
+    expect(hiddenFirst.traced('recognition')).toHaveLength(1);
+    expect(hiddenFirst.traced('recognition')[0]).toMatchObject({
+      serverDeltaMs: 5000,
+      lowerMs: 5000,
+      upperMs: 5000,
+      hiddenAtApply: true,
+      visibleAtPromotion: false,
+      hiddenBetween: true,
+      failuresBefore: 0,
+      viaRecover: false,
+      layer: 'hidden',
+    });
+
+    const promotedFirst = tab(api);
+    promotedFirst.onRequest(() =>
+      promotedFirst.calls.length < 3
+        ? promotedFirst.ok(entry('waiting'), 1000)
+        : promotedFirst.ok(
+            entry('admitted', {
+              admittedAt: iso(SERVER_T0 + 1200),
+              expiresAt: iso(SERVER_T0 + 31200),
+            }),
+            1000,
+          ),
+    );
+    promotedFirst.controller.start();
+    await promotedFirst.advance(1500);
+    promotedFirst.setHidden(true);
+    await promotedFirst.advance(14500);
+    expect(promotedFirst.times()).toEqual([0, 1000, 16000]);
+    expect(promotedFirst.traced('recognition')[0]).toMatchObject({
+      serverDeltaMs: 14800,
+      visibleAtPromotion: true,
+      hiddenBetween: true,
+      hiddenAtApply: true,
+      layer: 'hidden',
+    });
+  });
+
+  it('files a recognition that follows failed requests under reconnect', async () => {
+    const t = tab(api);
+    t.onRequest(() => {
+      if (t.calls.length === 1) return t.ok(entry('waiting'), 1000);
+      if (t.calls.length < 4) return { status: 0 };
+      return t.ok(
+        entry('admitted', {
+          admittedAt: iso(SERVER_T0 + 1500),
+          expiresAt: iso(SERVER_T0 + 31500),
+        }),
+        1000,
+      );
+    });
+    t.controller.start();
+    await t.advance(4000);
+    expect(t.times()).toEqual([0, 1000, 2000, 4000]);
+    expect(t.traced('recognition')[0]).toMatchObject({
+      serverDeltaMs: 2500,
+      failuresBefore: 2,
+      viaRecover: false,
+      visibleAtPromotion: true,
+      hiddenBetween: false,
+      layer: 'reconnect',
+    });
+  });
+
+  it('records an admission that ended before this page saw it admitted, once', async () => {
+    const t = tab(api);
+    t.onRequest(() =>
+      t.ok(
+        entry('expired', {
+          reason: 'ADMISSION_EXPIRED',
+          admittedAt: iso(SERVER_T0 - 40000),
+        }),
+        null,
+      ),
+    );
+    t.controller.start();
+    await t.flush();
+    t.setHidden(true);
+    t.setHidden(false);
+    await t.advance(1000);
+    expect(t.calls).toHaveLength(2);
+    expect(t.traced('recognition')).toHaveLength(0);
+    expect(t.traced('recognition-missed')).toHaveLength(1);
+    expect(t.traced('recognition-missed')[0]).toMatchObject({
+      epoch: EPOCH_1,
+      admissionId: ADMISSION_A,
+      state: 'expired',
+      serverDeltaMs: 40000,
+    });
+
+    // A waiting entry whose lease ran out was never admitted.
+    const never = tab(api);
+    never.onRequest(() => never.ok(entry('expired', { reason: 'ADMISSION_EXPIRED' }), null));
+    never.controller.start();
+    await never.flush();
+    expect(never.traced('recognition-missed')).toHaveLength(0);
+  });
+
+  it('does not call an entry missed when this page saw it admitted before it ended', async () => {
+    const t = tab(api);
+    const admittedAt = iso(SERVER_T0);
+    t.onRequest(() =>
+      t.calls.length === 1
+        ? t.ok(entry('admitted', { admittedAt, expiresAt: iso(SERVER_T0 + 30000) }), 1000)
+        : t.ok(entry('expired', { reason: 'ADMISSION_EXPIRED', admittedAt }), null),
+    );
+    t.controller.start();
+    await t.advance(1000);
+    expect(t.controller.view().phase).toBe('expired');
+    expect(t.traced('recognition')).toHaveLength(1);
+    expect(t.traced('recognition-missed')).toHaveLength(0);
+  });
+
+  it('records for every poll why and when it was sent and which delay was planned', async () => {
+    const t = tab(api, { mode: 'adaptive', random: () => 0.25 });
+    t.onRequest(() =>
+      t.calls.length === 3
+        ? failure(503, 'ADMISSION_RECOVERING', 1000)
+        : t.ok(entry('waiting'), 5000),
+    );
+    t.controller.start();
+    await t.advance(10000);
+    expect(t.times()).toEqual([0, 4500, 9000, 10000]);
+    const polls = t.traced('poll');
+    expect(polls).toHaveLength(4);
+    expect(polls[0]).toMatchObject({
+      t: 0,
+      wall: SERVER_T0,
+      seq: 1,
+      reason: 'recover',
+      mode: 'adaptive',
+      hidden: false,
+      tSend: 0,
+      tRecv: 0,
+      status: 200,
+      code: null,
+      state: 'waiting',
+      position: 21,
+      nextPollAfterMs: 5000,
+      plannedDelayMs: null,
+      actualDelayMs: null,
+      baseMs: null,
+      u: null,
+      changed: true,
+    });
+    expect(polls[1]).toMatchObject({
+      seq: 2,
+      reason: 'timer',
+      plannedDelayMs: 4500,
+      actualDelayMs: 4500,
+      baseMs: 5000,
+      u: -0.5,
+      changed: false,
+    });
+    expect(polls[2]).toMatchObject({
+      seq: 3,
+      status: 503,
+      code: 'ADMISSION_RECOVERING',
+      state: null,
+      changed: true,
+    });
+    expect(polls[3]).toMatchObject({
+      seq: 4,
+      reason: 'retry',
+      plannedDelayMs: 1000,
+      actualDelayMs: 1000,
+      baseMs: null,
+      status: 200,
+      changed: true,
+    });
+  });
+
+  it('records a poll that an action pre-empted as aborted, not as answered', async () => {
+    const t = tab(api);
+    t.onRequest((call) => {
+      if (call.method === 'DELETE') return t.ok(cancelled(), null);
+      return t.calls.length === 2 ? new Promise<Reply>(() => undefined) : t.ok(entry('waiting'), 5000);
+    });
+    t.controller.start();
+    await t.advance(1200);
+    t.controller.cancel();
+    await t.flush();
+    expect(t.traced('poll-aborted')).toHaveLength(1);
+    expect(t.traced('poll-aborted')[0]).toMatchObject({ seq: 2, tSend: 1000, t: 1200 });
+    expect(t.traced('poll').map((event) => event.seq)).toEqual([1]);
+  });
+
+  it('records visibility, mode and epoch changes and every join, cancel and purchase attempt', async () => {
+    const t = tab(api);
+    let current: Snapshot | null = null;
+    t.onRequest((call) => {
+      if (call.method === 'POST') current = entry('waiting');
+      if (call.method === 'DELETE') current = cancelled();
+      return t.ok(current, current?.state === 'waiting' ? 5000 : null);
+    });
+    t.controller.start();
+    await t.flush();
+    t.controller.join();
+    await t.flush();
+    t.setHidden(true);
+    t.setHidden(false);
+    t.controller.setMode('adaptive');
+    t.controller.cancel();
+    await t.flush();
+    expect(t.traced('join')[0]).toMatchObject({ status: 200, code: null, tSend: 0, tRecv: 0 });
+    expect(t.traced('cancel')[0]).toMatchObject({ status: 200, admissionId: ADMISSION_A });
+    expect(t.traced('visibility').map((event) => event.hidden)).toEqual([true, false]);
+    expect(t.traced('mode')[0]).toMatchObject({ mode: 'adaptive' });
+
+    const reset = tab(api);
+    reset.onRequest(() =>
+      reset.calls.length === 1 ? reset.ok(entry('waiting'), 5000) : reset.ok(null, null, EPOCH_2),
+    );
+    reset.controller.start();
+    await reset.advance(1000);
+    expect(reset.traced('epoch')[0]).toMatchObject({ from: EPOCH_1, to: EPOCH_2 });
+
+    const buyer = tab(api);
+    buyer.onRequest(() =>
+      buyer.ok(
+        entry('admitted', { admittedAt: iso(SERVER_T0), expiresAt: iso(SERVER_T0 + 30000) }),
+        1000,
+      ),
+    );
+    buyer.onPurchase(() =>
+      buyer.purchases.length === 1
+        ? failure(503, 'ADMISSION_UNAVAILABLE', 1000)
+        : { status: 201, data: { id: 'r-1' } },
+    );
+    buyer.controller.start();
+    await buyer.flush();
+    buyer.controller.purchase({ ...PURCHASE });
+    await buyer.advance(1000);
+    expect(buyer.traced('purchase')).toMatchObject([
+      { attempt: 1, status: 503, code: 'ADMISSION_UNAVAILABLE', tSend: 0 },
+      { attempt: 2, status: 201, code: null, tSend: 1000 },
+    ]);
+  });
+
+  it('keeps the newest events up to the limit of the trace and counts what it dropped', () => {
+    const trace = api.createTrace({ limit: 3, meta: { runId: 'run-1', tabId: 'tab-1' } });
+    for (let seq = 1; seq <= 5; seq += 1) trace.push({ type: 'poll', seq });
+    const snapshot = trace.snapshot();
+    expect(snapshot.meta).toEqual({ runId: 'run-1', tabId: 'tab-1' });
+    expect(snapshot.dropped).toBe(2);
+    expect(snapshot.events.map((event) => event.seq)).toEqual([3, 4, 5]);
   });
 });

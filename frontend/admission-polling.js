@@ -48,8 +48,27 @@
     return /^\d+$/.test(text) ? Number(text) * 1000 : null;
   }
 
+  // What one page did, for the measurements of admission-v1 §7.
+  // ponytail: a ring of `limit` events. What it pushes out is counted in `dropped`, so a
+  // truncated trace is visible; export it before a long session overruns the limit.
+  function createTrace({ limit, meta }) {
+    const events = [];
+    let dropped = 0;
+    return {
+      push(event) {
+        events.push(event);
+        if (events.length > limit) {
+          events.shift();
+          dropped += 1;
+        }
+      },
+      snapshot: () => ({ meta, dropped, events: events.slice() }),
+    };
+  }
+
   const noop = () => {};
   const NO_RESPONSE = Object.freeze({ status: 0, data: null, retryAfterMs: null });
+  const TIMED_OUT = Object.freeze({ status: 0, data: null, retryAfterMs: null, timedOut: true });
   // A join is an explicit new attempt, so it is possible only when no entry is active.
   const JOINABLE = Object.freeze(["not-joined", "reset", "consumed", "cancelled", "expired"]);
   const codeOf = (response) =>
@@ -68,6 +87,11 @@
     return admission === null || (typeof admission === "object" && admission.epoch === queue.epoch);
   }
 
+  function memoryMarkers() {
+    const keys = new Set();
+    return { has: (key) => keys.has(key), add: (key) => void keys.add(key) };
+  }
+
   // One controller serves one context: one user on one event against one API base. The caller
   // disposes it and creates another when any of those changes, so a response of an earlier
   // context has nowhere to land. Within a context at most one request is in flight, whether it
@@ -78,9 +102,12 @@
   function createController(options) {
     const { userId, eventId, transport, sendPurchase, visibility, uuid } = options;
     const onChange = options.onChange || noop;
+    const onTrace = options.onTrace || noop;
     const onPurchaseResult = options.onPurchaseResult || noop;
     const pending = options.pending || null;
+    const seen = options.seen || memoryMarkers();
     const now = options.now || (() => root.performance.now());
+    const wall = options.wall || (() => Date.now());
     const setTimer = options.setTimer || ((run, ms) => root.setTimeout(run, ms));
     const clearTimer = options.clearTimer || ((id) => root.clearTimeout(id));
     const random = options.random || Math.random;
@@ -95,10 +122,12 @@
     let pollTimer = null;
     let pollDue = 0;
     let pollReason = null;
-    let lastDone = 0; // when the last request completed, on the injected clock
+    let pollPlan = null; // { baseMs, u } behind the scheduled poll, for the trace
+    let lastDone = null; // when the last request completed, on the injected clock
     let notBefore = 0; // an error wait: no request before this time
     let failures = 0;
     let polls = 0;
+    let applied = 0; // answers applied by this controller
     let epoch = null;
     let admission = null;
     let phase = "loading";
@@ -110,6 +139,9 @@
     let resetPending = false;
     let deadlineAt = null;
     let unsubscribe = noop;
+    // ponytail: the last 64 visibility changes. A promotion older than the log is filed
+    // under reconnect.
+    const visibilityLog = [];
 
     const view = () => ({
       phase,
@@ -130,30 +162,32 @@
     const emit = () => {
       if (!disposed) onChange(view());
     };
+    const trace = (type, fields) =>
+      onTrace(Object.assign({ type, t: now(), wall: wall() }, fields));
     const draw = () => 2 * random() - 1;
     const purchasing = () => purchase !== null && purchase.status !== "unconfirmed";
     const idle = () => started && !disposed && !busy && !purchase;
     // A join or cancel is a request to the queue API and respects its error wait.
     const ready = () => idle() && notBefore <= now();
+    const shown = () => phase + "|" + (problem ? problem.kind : "");
 
     // `done` runs only for the request that is still the current one. A request that timed
     // out, was pre-empted or belongs to a disposed controller never reaches it.
-    function send(timeoutMs, request, done) {
+    function send(timeoutMs, request, done, pollSeq) {
       const abort = new Abort();
-      const entry = { abort, timeout: null };
-      const tSend = now();
+      const entry = { abort, timeout: null, tSend: now(), pollSeq: pollSeq || null };
       const finish = (response) => {
         if (flight !== entry) return;
         clearTimer(entry.timeout);
         flight = null;
         lastDone = now();
-        done(response, { tSend, tRecv: lastDone });
+        done(response, { tSend: entry.tSend, tRecv: lastDone });
       };
       flight = entry;
       entry.timeout = setTimer(() => {
         if (flight !== entry) return;
         abort.abort();
-        finish(NO_RESPONSE);
+        finish(TIMED_OUT);
       }, timeoutMs);
       Promise.resolve()
         .then(() => request(abort.signal))
@@ -164,6 +198,7 @@
       if (!flight) return;
       clearTimer(flight.timeout);
       flight.abort.abort();
+      if (flight.pollSeq) trace("poll-aborted", { seq: flight.pollSeq, tSend: flight.tSend });
       flight = null;
     }
 
@@ -173,13 +208,14 @@
       pollTimer = null;
     }
 
-    function schedule(delayMs, reason) {
+    function schedule(delayMs, reason, plan) {
       unschedule();
       pollDue = now() + delayMs;
       pollReason = reason;
+      pollPlan = plan || null;
       pollTimer = setTimer(() => {
         pollTimer = null;
-        poll(reason);
+        poll(reason, pollPlan && Object.assign({ delayMs: pollDue - lastDone }, pollPlan));
       }, delayMs);
     }
 
@@ -189,24 +225,51 @@
       unschedule();
     }
 
-    function poll() {
+    function poll(reason, plan) {
       if (disposed || flight || purchasing()) return;
       unschedule();
       polls += 1;
+      const seq = polls;
+      const sent = { mode, hidden: visibility.hidden(), since: lastDone };
       send(
         POLICY.timeoutMs,
         (signal) => transport({ method: "GET", path: path + "/me", signal }),
         (response, timing) => {
+          const before = shown();
           onStatus(response, timing);
+          const body = response.status === 200 && usable(response.data, eventId) ? response.data : null;
+          const entry = body && body.admission;
+          trace("poll", {
+            seq,
+            reason,
+            mode: sent.mode,
+            hidden: sent.hidden,
+            tSend: timing.tSend,
+            tRecv: timing.tRecv,
+            status: response.status,
+            code: codeOf(response),
+            timedOut: response.timedOut === true,
+            state: entry ? entry.state : null,
+            phase: entry ? entry.phase : null,
+            position: entry ? entry.position : null,
+            serverTime: body ? body.serverTime : null,
+            nextPollAfterMs: body ? body.nextPollAfterMs : null,
+            plannedDelayMs: plan ? plan.delayMs : null,
+            actualDelayMs: sent.since === null ? null : timing.tSend - sent.since,
+            baseMs: plan ? plan.baseMs : null,
+            u: plan ? plan.u : null,
+            changed: shown() !== before,
+          });
           emit();
         },
+        seq,
       );
     }
 
     // Reads the state again as soon as the queue API may be asked.
     function refresh() {
       if (notBefore > now()) schedule(notBefore - now(), "retry");
-      else poll();
+      else poll("refresh");
     }
 
     function recovered() {
@@ -215,11 +278,74 @@
       problem = null;
     }
 
-    function apply(data, timing) {
+    // Visibility at a past time on the local clock; null before the log starts.
+    function hiddenAt(time) {
+      let state = null;
+      for (const item of visibilityLog) {
+        if (item.t > time) break;
+        state = item.hidden;
+      }
+      return state;
+    }
+
+    function hiddenWithin(from, to) {
+      return (
+        hiddenAt(from) === true ||
+        visibilityLog.some((item) => item.hidden && item.t > from && item.t <= to)
+      );
+    }
+
+    // admission-v1 §7: one sample per admission, at the first time this browser applies it as
+    // admitted. serverTime and admittedAt are the same server clock, so their difference needs
+    // no local wall time, and the round trip bounds where that server instant lies locally:
+    // the delay is between serverDelta + (apply − receive) and serverDelta + (apply − send).
+    // An entry that ended before it was ever applied as admitted is recorded as missed.
+    function recognize(entry, serverTime, timing, failuresBefore) {
+      const key = entry.epoch + ":" + entry.admissionId;
+      if (seen.has(key)) return;
+      seen.add(key);
+      const serverDeltaMs = Date.parse(serverTime) - Date.parse(entry.admittedAt);
+      const tApply = now();
+      const identity = { epoch: entry.epoch, admissionId: entry.admissionId };
+      if (entry.state !== "admitted") {
+        trace("recognition-missed", Object.assign(identity, { state: entry.state, serverDeltaMs, tApply }));
+        return;
+      }
+      // The promotion happened within [from, to] on the local clock.
+      const from = timing.tSend - serverDeltaMs;
+      const to = timing.tRecv - serverDeltaMs;
+      const visibleAtPromotion = hiddenAt(from) === null ? null : !hiddenWithin(from, to);
+      const hiddenBetween = hiddenWithin(Math.max(from, visibilityLog[0].t), tApply);
+      const hiddenAtApply = visibility.hidden();
+      const viaRecover = applied === 0;
+      const reconnect = viaRecover || failuresBefore > 0 || visibleAtPromotion === null;
+      const hidden = hiddenBetween || hiddenAtApply || visibleAtPromotion === false;
+      trace(
+        "recognition",
+        Object.assign(identity, {
+          serverDeltaMs,
+          tSend: timing.tSend,
+          tRecv: timing.tRecv,
+          tApply,
+          lowerMs: serverDeltaMs + (tApply - timing.tRecv),
+          upperMs: serverDeltaMs + (tApply - timing.tSend),
+          hiddenAtApply,
+          visibleAtPromotion,
+          hiddenBetween,
+          failuresBefore,
+          viaRecover,
+          layer: reconnect ? "reconnect" : hidden ? "hidden" : "foreground",
+          mode,
+        }),
+      );
+    }
+
+    function apply(data, timing, failuresBefore) {
       const next = data.admission;
       const before = phase;
       // The previous epoch is gone for good and its order is not restored.
       if (epoch !== null && data.queue.epoch !== epoch) {
+        trace("epoch", { from: epoch, to: data.queue.epoch });
         if (admission && (admission.state === "waiting" || admission.state === "admitted"))
           resetPending = true;
       }
@@ -232,16 +358,20 @@
       const left =
         phase === "admitted" ? Date.parse(next.expiresAt) - Date.parse(data.serverTime) : NaN;
       deadlineAt = Number.isFinite(left) ? timing.tRecv + left : null;
+      if (next && next.admittedAt) recognize(next, data.serverTime, timing, failuresBefore);
+      applied += 1;
     }
 
     // A normal answer of the status, join or cancel API.
     function accept(data, timing) {
+      const failuresBefore = failures;
       recovered();
-      apply(data, timing);
+      apply(data, timing, failuresBefore);
       if (data.nextPollAfterMs === null) return;
       const hidden = visibility.hidden();
       const u = mode === "adaptive" && !hidden ? draw() : 0;
-      schedule(successDelay({ mode, hidden, baseMs: data.nextPollAfterMs, u }), "timer");
+      const baseMs = data.nextPollAfterMs;
+      schedule(successDelay({ mode, hidden, baseMs, u }), "timer", { baseMs, u });
     }
 
     function unqueued() {
@@ -254,12 +384,13 @@
     // Keeps every identity and reads the state again after the wait.
     function fail(response) {
       failures += 1;
+      const u = draw();
       const delay = failureDelay({
         failures,
         hidden: visibility.hidden(),
         serverMinMs: response.data && response.data.nextPollAfterMs,
         retryAfterMs: response.retryAfterMs,
-        u: draw(),
+        u,
       });
       notBefore = now() + delay;
       problem = {
@@ -267,7 +398,7 @@
         code: response.status === 200 ? "PROTOCOL" : codeOf(response),
         retryAt: notBefore,
       };
-      schedule(delay, "retry");
+      schedule(delay, "retry", { baseMs: null, u });
     }
 
     function onStatus(response, timing) {
@@ -299,7 +430,7 @@
       return true;
     }
 
-    function mutate(kind, request, done) {
+    function mutate(kind, request, detail, done) {
       preempt();
       busy = kind;
       notice = null;
@@ -309,6 +440,18 @@
         (signal) => transport(Object.assign({ signal }, request)),
         (response, timing) => {
           busy = null;
+          trace(
+            kind,
+            Object.assign(
+              {
+                tSend: timing.tSend,
+                tRecv: timing.tRecv,
+                status: response.status,
+                code: codeOf(response),
+              },
+              detail,
+            ),
+          );
           done(response, timing);
           emit();
         },
@@ -321,7 +464,7 @@
       // attempt after a finished entry or in another epoch gets a new one.
       if (!intent || intent.epoch !== epoch) intent = { epoch, joinRequestId: uuid() };
       const body = { epoch: intent.epoch, joinRequestId: intent.joinRequestId };
-      mutate("join", { method: "POST", path, body }, (response, timing) => {
+      mutate("join", { method: "POST", path, body }, { epoch: intent.epoch }, (response, timing) => {
         const { status, data } = response;
         if ((status === 200 || status === 201) && usable(data, eventId)) {
           intent = null;
@@ -345,7 +488,7 @@
         path: path + "/" + target,
         body: { epoch: admission.epoch },
       };
-      mutate("cancel", request, (response, timing) => {
+      mutate("cancel", request, { admissionId: target }, (response, timing) => {
         const { status, data } = response;
         const same = status === 200 && usable(data, eventId) && data.admission !== null;
         if (same && data.admission.admissionId === target) accept(data, timing);
@@ -363,8 +506,15 @@
       send(
         POLICY.purchaseTimeoutMs,
         (signal) => sendPurchase(purchase.body, signal),
-        (response) => {
+        (response, timing) => {
           const { status, data } = response;
+          trace("purchase", {
+            attempt: purchase.attempts,
+            tSend: timing.tSend,
+            tRecv: timing.tRecv,
+            status,
+            code: codeOf(response),
+          });
           if (undecided(status) || codeOf(response) === "ADMISSION_IN_PROGRESS") {
             if (purchase.auto >= POLICY.purchaseAutoRetries) {
               purchase.status = "unconfirmed";
@@ -449,10 +599,14 @@
 
     function onVisibility() {
       if (disposed) return;
-      if (visibility.hidden()) {
+      const hidden = visibility.hidden();
+      visibilityLog.push({ t: now(), hidden });
+      if (visibilityLog.length > 64) visibilityLog.shift();
+      trace("visibility", { hidden });
+      if (hidden) {
         // A pending poll moves out to the hidden interval. It never moves earlier.
         if (pollTimer !== null)
-          schedule(Math.max(pollDue, lastDone + POLICY.hiddenMs) - now(), pollReason);
+          schedule(Math.max(pollDue, lastDone + POLICY.hiddenMs) - now(), pollReason, pollPlan);
         return;
       }
       // One request on return. An error wait keeps its time, and an event without a queue is
@@ -464,15 +618,17 @@
     function start() {
       if (started || disposed) return;
       started = true;
+      visibilityLog.push({ t: now(), hidden: visibility.hidden() });
       unsubscribe = visibility.subscribe(onVisibility);
       restorePurchase();
       emit();
-      poll();
+      poll("recover");
     }
 
     function setMode(next) {
       if (disposed || next === mode || (next !== "fixed" && next !== "adaptive")) return;
       mode = next;
+      trace("mode", { mode });
       emit();
     }
 
@@ -488,7 +644,14 @@
     return { start, join, cancel, purchase: startPurchase, retryPurchase, setMode, view, dispose };
   }
 
-  const api = { POLICY, successDelay, failureDelay, parseRetryAfter, createController };
+  const api = {
+    POLICY,
+    successDelay,
+    failureDelay,
+    parseRetryAfter,
+    createTrace,
+    createController,
+  };
   root.PeakPassAdmission = api;
   if (typeof module === "object" && module && module.exports) module.exports = api;
 })(typeof globalThis !== "undefined" ? globalThis : this);
