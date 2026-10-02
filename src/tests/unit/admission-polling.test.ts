@@ -823,6 +823,101 @@ describe('join, cancel and purchase', () => {
     expect(keys).toEqual(['join-key-1', 'join-key-2']);
   });
 
+  it('uses a new join key once the entry of a join whose answer was lost has been read and finished', async () => {
+    const t = tab(api);
+    // The server keeps the entry of each join key: the same key replays it, a new key creates
+    // a new entry. The answer to the first join is lost after the entry was created.
+    const keys = new Set<string>();
+    let current: Snapshot | null = null;
+    t.onRequest((call) => {
+      if (call.method === 'GET') return t.ok(current, current?.state === 'waiting' ? 5000 : null);
+      if (call.method === 'DELETE') {
+        current = cancelled();
+        return t.ok(current, null);
+      }
+      const key = (call.body as { joinRequestId: string }).joinRequestId;
+      if (keys.has(key)) return t.ok(current, current?.state === 'waiting' ? 5000 : null);
+      keys.add(key);
+      current = entry('waiting', { admissionId: keys.size === 1 ? ADMISSION_A : ADMISSION_B });
+      return keys.size === 1 ? { status: 0 } : { ...t.ok(current, 5000), status: 201 };
+    });
+    t.controller.start();
+    await t.flush();
+    expect(t.controller.join()).toBe(true);
+    await t.flush();
+    await t.advance(1000);
+    expect(t.controller.view()).toMatchObject({ phase: 'waiting' });
+    expect(t.controller.view().admission?.admissionId).toBe(ADMISSION_A);
+    expect(t.controller.cancel()).toBe(true);
+    await t.flush();
+    expect(t.controller.view().phase).toBe('cancelled');
+    expect(t.controller.join()).toBe(true);
+    await t.flush();
+    const sent = t.calls
+      .filter((call) => call.method === 'POST')
+      .map((call) => (call.body as { joinRequestId: string }).joinRequestId);
+    expect(sent).toEqual(['join-key-1', 'join-key-2']);
+    expect(t.controller.view()).toMatchObject({ phase: 'waiting' });
+    expect(t.controller.view().admission?.admissionId).toBe(ADMISSION_B);
+  });
+
+  it('keeps the key of a lost join while the server still shows the entry it started from', async () => {
+    const t = tab(api);
+    let current: Snapshot | null = cancelled();
+    let posts = 0;
+    t.onRequest((call) => {
+      if (call.method === 'GET') return t.ok(current, null);
+      posts += 1;
+      // The first join never reaches the server; the second one creates the entry.
+      if (posts === 1) return { status: 0 };
+      current = entry('waiting', { admissionId: ADMISSION_B });
+      return { ...t.ok(current, 5000), status: 201 };
+    });
+    t.controller.start();
+    await t.flush();
+    expect(t.controller.join()).toBe(true);
+    await t.flush();
+    await t.advance(1000);
+    expect(t.controller.view().admission?.admissionId).toBe(ADMISSION_A);
+    expect(t.controller.join()).toBe(true);
+    await t.flush();
+    expect(t.calls.filter((call) => call.method === 'POST').map((call) => call.body)).toEqual([
+      { epoch: EPOCH_1, joinRequestId: 'join-key-1' },
+      { epoch: EPOCH_1, joinRequestId: 'join-key-1' },
+    ]);
+    expect(t.controller.view().admission?.admissionId).toBe(ADMISSION_B);
+  });
+
+  it('uses a new join key when the entry of a join whose answer was lost is first read as finished', async () => {
+    const t = tab(api);
+    let current: Snapshot | null = null;
+    t.onRequest((call) => {
+      if (call.method === 'GET') return t.ok(current, null);
+      const key = (call.body as { joinRequestId: string }).joinRequestId;
+      if (key === 'join-key-1') {
+        if (current) return t.ok(current, null);
+        // The entry is created, its answer is lost, and it expires before the next read.
+        current = entry('expired', { reason: 'ADMISSION_EXPIRED' });
+        return { status: 0 };
+      }
+      current = entry('waiting', { admissionId: ADMISSION_B });
+      return { ...t.ok(current, 5000), status: 201 };
+    });
+    t.controller.start();
+    await t.flush();
+    expect(t.controller.join()).toBe(true);
+    await t.flush();
+    await t.advance(1000);
+    expect(t.controller.view().phase).toBe('expired');
+    expect(t.controller.join()).toBe(true);
+    await t.flush();
+    expect(t.calls.filter((call) => call.method === 'POST').map((call) => call.body)).toEqual([
+      { epoch: EPOCH_1, joinRequestId: 'join-key-1' },
+      { epoch: EPOCH_1, joinRequestId: 'join-key-2' },
+    ]);
+    expect(t.controller.view().admission?.admissionId).toBe(ADMISSION_B);
+  });
+
   it('adopts the existing entry when another join key is still active and sends no second POST', async () => {
     const t = tab(api);
     const existing = entry('waiting', { admissionId: ADMISSION_B });

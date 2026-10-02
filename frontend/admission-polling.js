@@ -356,6 +356,10 @@
       epoch = data.queue.epoch;
       admission = next;
       if (next) resetPending = false;
+      // A join key belongs to one attempt. Once the server shows another entry than the one the
+      // attempt started from, that attempt is decided, also when its own answer was lost: a
+      // later join is a new attempt with a new key.
+      if (intent && next && next.admissionId !== intent.from) intent = null;
       phase = next ? phaseOf(next) : resetPending ? "reset" : "not-joined";
       if (phase !== before) notice = null;
       // The admission TTL on the local clock, without trusting the local wall time.
@@ -471,12 +475,13 @@
       if (!ready() || epoch === null || !JOINABLE.includes(phase)) return false;
       // The key belongs to one attempt in one epoch: a retry of that attempt repeats it, a new
       // attempt after a finished entry or in another epoch gets a new one.
-      if (!intent || intent.epoch !== epoch) intent = { epoch, joinRequestId: uuid() };
+      if (!intent || intent.epoch !== epoch)
+        intent = { epoch, joinRequestId: uuid(), from: admission ? admission.admissionId : null };
       const body = { epoch: intent.epoch, joinRequestId: intent.joinRequestId };
       mutate("join", { method: "POST", path, body }, { epoch: intent.epoch }, (response, timing) => {
         const { status, data } = response;
+        // A usable answer shows the entry of this attempt, which ends its key (see apply).
         if ((status === 200 || status === 201) && usable(data, eventId)) {
-          intent = null;
           accept(data, timing);
         } else if (status === 404) {
           intent = null;

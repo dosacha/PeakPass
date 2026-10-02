@@ -384,6 +384,14 @@ const App = () => {
     if (liveSession?.userId) setQueueUser({ apiBase, mode, userId: liveSession.userId });
   }, [liveSession]);
 
+  // Step 4 sends the tier and quantity the form shows, so the form follows the reservation the
+  // page holds: one just made, one repeated after a reload, or one read back.
+  const adoptReservation = (data) => {
+    setReservation(data);
+    if (Number.isInteger(data?.quantity)) setQuantity(data.quantity);
+    if (data?.tierId) setSelectedTierId(data.tierId);
+  };
+
   // One controller per context (API base, user, event). It is disposed before the next one
   // starts, so a response of an earlier context has nowhere to land, and the new one always
   // begins by reading the state from the server.
@@ -460,7 +468,7 @@ const App = () => {
       },
       onPurchaseResult({ status, data }) {
         if (status >= 200 && status < 300) {
-          setReservation(data);
+          adoptReservation(data);
           setPurchaseError(null);
           setStepStatus(prev => ({ ...prev, s3: "done" }));
         } else {
@@ -554,18 +562,19 @@ const App = () => {
     // After a reload the page no longer holds the reservation an admission was used for.
     loadReservation: async () => {
       const id = admission?.admission?.outcome?.resourceId;
-      if (!id) return;
+      const context = admissionRef.current;
+      if (!id || !context) return;
       try {
         const session = await ensureLiveDemoSession();
         const res = await callLive(apiBase, "GET", `/reservations/${id}`, null,
           { "Authorization": `Bearer ${session.token}` });
+        // An answer that arrives after the event, user or API base changed belongs to the
+        // context that asked for it and is dropped, as the controller drops its own.
+        if (admissionRef.current !== context) return;
         logReq({ method: "GET", url: `/reservations/${id}`, status: res.status, elapsed: res.elapsed || 0,
                  request: null, response: res.data });
         if (!res.ok) return;
-        // Step 4 sends the tier and quantity of the reservation, not what the form shows now.
-        setReservation(res.data);
-        setQuantity(res.data.quantity);
-        setSelectedTierId(res.data.tierId);
+        adoptReservation(res.data);
         setPurchaseError(null);
         setStep("s3", "done");
       } catch {}
