@@ -392,6 +392,8 @@ describe('admission purchase gate on owned PostgreSQL, Redis and loopback HTTP',
       adjust.mockRejectedValueOnce(new InternalServerError('injected failure'));
       const failed = await reserve(second, admission);
       expect(failed.status).toBe(500);
+      // The application's own error reaches the client; it is not turned into a stored rejection.
+      expect(failed.body.error.message).toBe('injected failure');
       expect(await fx.state()).toMatchObject({ available: 19, reservations: 1, results: 1 });
       const resumed = await reserve(second, admission);
       expect(resumed.status).toBe(201);
