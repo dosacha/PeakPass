@@ -1,22 +1,22 @@
 {
   "runId": "peakpass-p5-20261002",
-  "codeSha": "5000cc203ceb9ef6c25d80ce29d27298e5aa4b82",
+  "codeSha": "ba124509887c38f88747efe7cb7265ce71a5e80f",
   "baseSha": "678ac7c49422cb835a0c9027d49a9e168c8cc979",
   "contract": {
     "revision": "admission-v1",
     "sha256": "e22be4df9910811eba552f630b43170ba0cf0c8d953a54dc5a3cea34c0dcf3d1"
   },
   "archive": "p5-final-20261002.zip",
-  "archiveSha256": "f74a43a65b7fb13c9d8658fdee6149abdc73aa58135b595c8517049b7f39d9aa",
-  "image": "peakpass:p5-issue14-final",
-  "imageId": "sha256:634b74ac7b8de6823d21bd28edbb5743597fee8331aa6ca659881b1875a23119",
+  "archiveSha256": "048e6f26d161a73f99e937bd0b1ab28d4399b2b71fbff4fe79c4410176c8825b",
+  "image": "peakpass:p5-issue14-review",
+  "imageId": "sha256:305f9cdc799098cab2ef3fda9aff4847e6fd91644b243caa705a3d4a12578fc8",
   "results": {
     "build": "pass",
     "typecheck": "pass",
     "lintErrors": 0,
     "lintWarnings": 11,
     "unitPassed": 160,
-    "integrationPassed": 342,
+    "integrationPassed": 344,
     "integrationSkipped": 15,
     "integrationSuitesPassed": 30,
     "integrationSuitesSkipped": 2,
@@ -26,10 +26,10 @@
     "productionImageOn": "pass",
     "upgrade012To013": "pass",
     "dockerLifecyclePassed": 5,
-    "mutationsKilled": 12,
-    "mutationsTotal": 12,
+    "mutationsKilled": 14,
+    "mutationsTotal": 14,
     "repeatRuns": 5,
-    "repeatRunTestsPassedEach": 67
+    "repeatRunTestsPassedEach": 69
   },
   "baseline": {
     "sha": "678ac7c49422cb835a0c9027d49a9e168c8cc979",
@@ -70,7 +70,20 @@
     "order-sweeper-docker (passed separately): the actual default production scheduler clears 1000 due orders within 60 seconds with concurrent checkout",
     "order-sweeper-docker (passed separately): listen startup failure closes worker and resources and exits one naturally"
   ],
-  "note": "Local correctness evidence of an unpushed candidate. No CI run, no independent review, no load or capacity claim, no protected activation in a deployment, no P5 acceptance, merge or deployment.",
+  "note": "Local correctness evidence of an unpushed candidate. No CI run, no review of the final code, no load or capacity claim, no protected activation in a deployment, no P5 acceptance, merge or deployment.",
+  "externalReview": {
+    "kind": "external static review by another vendor's agent session; no test run, no file change",
+    "reviewer": "a Codex session with three parallel helpers; model name, version and effort were not exposed by that session",
+    "target": "39dced43bdb6917f5feb60ca29803155d9a9c95b",
+    "mergeBase": "678ac7c49422cb835a0c9027d49a9e168c8cc979",
+    "findings": "no P1; four P2 (refusal decided on a stale snapshot, order replay behind the admission lock, unbounded first gate wait, an unconditional reclaim time bound in the validation document); one P3 (replay assertion comparing undefined values)",
+    "fixCommits": [
+      "91f8ec5c74facff128b98be90768211ac8f6c5d8",
+      "ba124509887c38f88747efe7cb7265ce71a5e80f"
+    ],
+    "redEvidence": "red-9-external-review.log",
+    "fixReviewed": false
+  },
   "files": [
     {
       "name": "baseline-build.log",
@@ -105,42 +118,42 @@
     {
       "name": "final-callback-harness.log",
       "bytes": 264,
-      "sha256": "15bea350c465174d15da78e52d0fb0dd0e22a928ea316a29c499b20c1d188add"
+      "sha256": "40aac3e4b5c8d4c9b9e0c8638725ba866fe496c60396ea4ada93b60c5ce461a2"
     },
     {
       "name": "final-docker-lifecycle.log",
-      "bytes": 392037,
-      "sha256": "449e02bca7e827eae85a9fca172ea4c4aded6491c789d31cf856400c112912a3"
+      "bytes": 396722,
+      "sha256": "c8e0a0d976334bc0a3926b2bc1b323a7d5f9a6803c7947435f288451fd7e07e0"
     },
     {
       "name": "final-harness.log",
-      "bytes": 3066,
-      "sha256": "4412d7a9871075cd9825a98ad61a614ed3d1d2f1070344e19312f1317050f5f5"
+      "bytes": 3063,
+      "sha256": "37b34244d8fda0cf51281d54fa1ade4407eb6bf92a41533336aaf9211dc2f0a6"
     },
     {
       "name": "final-image-build.log",
-      "bytes": 2567,
-      "sha256": "e038705a2029189fa6d835c4462384b19976967c1a150e38de1004f3e13d1bd5"
+      "bytes": 2624,
+      "sha256": "96c81d3d9475ee1deb04d152dc438fccebdf23d54d2639c1e794a9626f02b676"
     },
     {
       "name": "final-image-id.txt",
-      "bytes": 39,
-      "sha256": "9a14067e5a92d56fdb9ec98adb4ba6ae1e679536b62b11bc6529ac5c061dc8d7"
+      "bytes": 72,
+      "sha256": "0caf792af40edbfbb041fd499a5c16ab0e9fe25be60542f018233efe746214cc"
     },
     {
       "name": "final-image-off.log",
-      "bytes": 6099,
-      "sha256": "5952f01e6baf84b9e67f0601fb22f664033707ad04d80cf2f69d5a88e1b9472f"
+      "bytes": 6101,
+      "sha256": "a69ef0017cbd4866cf4f41f67a937aeb5ff12f8c89d96b17fcd9489b14f7ac51"
     },
     {
       "name": "final-image-on.log",
-      "bytes": 6096,
-      "sha256": "7edef0559789c2aa024694caf0192525baa3a3a1723e451d2d359d202a75379c"
+      "bytes": 6099,
+      "sha256": "036c724e8389c26983a9b33e3b759bd04db4e9cab554bc3e896f17341899adfd"
     },
     {
       "name": "final-integration.log",
-      "bytes": 716185,
-      "sha256": "938f0decf8bd8079a1ec37ff785a43d798806e8b9c6ef4419ba158ee77d22a0c"
+      "bytes": 690448,
+      "sha256": "eb8aa99d2cc30bbe514c6f814638e02d0eaf33508f4e4a21331ac350b34d6b68"
     },
     {
       "name": "final-lint.log",
@@ -149,18 +162,18 @@
     },
     {
       "name": "final-mutation.log",
-      "bytes": 942,
-      "sha256": "c9395daf6161ef7d3cc559cef0034191b350470f4e04f46e65393db4039ffce7"
+      "bytes": 1139,
+      "sha256": "a8bdf171ffe1bb59609ff5f38a82d384ac849864bf697e918f014e0ba49b54b8"
     },
     {
       "name": "final-repeat.txt",
       "bytes": 630,
-      "sha256": "b2796df11adc47de70ac2abc3e5c29a2f5005f4bf7f36bf76398c12adf10752e"
+      "sha256": "ef69d39ca8567700893c59e352df6a33d03b2b3df9713656e7c3f8495af8244d"
     },
     {
       "name": "final-sha.txt",
       "bytes": 41,
-      "sha256": "e682ae7f0b97fb2b84d2f8c96791a402ff64284cedd27484fb6521d3afc19397"
+      "sha256": "123af5e8b5b0884201b635c469d2f463c37dfeba2bf118b5b20ceb2aa300cd4a"
     },
     {
       "name": "final-skip-list.txt",
@@ -179,18 +192,18 @@
     },
     {
       "name": "final-unit.log",
-      "bytes": 16743,
-      "sha256": "ed8680521e1ebf058f77edcf752eed5474ff8189f92280a337825c1d6f03445b"
+      "bytes": 16738,
+      "sha256": "33c87bc8c80b664e9101d472415370dbf9a38154e25798ab5c59899d7789cc79"
     },
     {
       "name": "final-upgrade.log",
-      "bytes": 1256,
-      "sha256": "90cd1fce8d2ca8049644be4b312b7045f622497887b11a6c93db7ae5a773c526"
+      "bytes": 1257,
+      "sha256": "4427c60d4bbfb721b08e5637791b961465858334d4f2d73aa64f33b10c8144ee"
     },
     {
       "name": "mutate.mjs",
-      "bytes": 4163,
-      "sha256": "813cfc4913d103bb1dc8d3b066a1ff9852702a180282b38a085bb886afa1ba6f"
+      "bytes": 4734,
+      "sha256": "306998b5cb8a78fe13adc36115ab14d97dd823f593504554e7441205fd414c0d"
     },
     {
       "name": "red-1-ledger-missing-table.log",
@@ -238,9 +251,19 @@
       "sha256": "b5e18b38cd4a239948136edbc9691bf6ca12aa0f1da2e7ff9282f079f6783ddd"
     },
     {
+      "name": "red-9-external-review.log",
+      "bytes": 26455,
+      "sha256": "e877fe7f64af5d38ce823549543f62155ac5b7928d7bdc11d844a9398355df91"
+    },
+    {
       "name": "results.json",
-      "bytes": 3757,
-      "sha256": "fc628713cb260fe7c6ca5b632de4e0e40827ada3c2ec9738731a74fcd39cf71a"
+      "bytes": 4594,
+      "sha256": "31fa5547fe66053eee620824c4c640c84b895358ef1aec6a6ebb7ed4e6a9fd47"
+    },
+    {
+      "name": "review-external-green.log",
+      "bytes": 179981,
+      "sha256": "a394f597bd97bb4f0e5b3eae76093f535fa70d7da305c12b437b4f35975b950c"
     },
     {
       "name": "upgrade-check.sh",
