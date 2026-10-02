@@ -62,6 +62,12 @@ jobs:
       - name: Build production image
         run: docker build -t peakpass:ci .
 
+      - name: Configure the dedicated admission-v1 Redis fixture
+        run: |
+          docker exec ${{ job.services.redis.id }} redis-cli CONFIG SET save ""
+          docker exec ${{ job.services.redis.id }} redis-cli CONFIG SET appendonly no
+          docker exec ${{ job.services.redis.id }} redis-cli CONFIG SET maxmemory-policy noeviction
+
       - name: Check production image migrations and startup on empty DB
         env:
           DB_HOST: localhost
@@ -72,6 +78,7 @@ jobs:
           REDIS_HOST: localhost
           REDIS_PORT: '6379'
           IMAGE_NETWORK: host
+          ENABLE_ADMISSION: 'true'
         run: node .github/scripts/production-image-check.mjs peakpass:ci
 
       - name: Apply DB migrations
