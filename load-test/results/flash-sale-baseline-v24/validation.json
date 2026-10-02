@@ -1,0 +1,107 @@
+{
+  "baseCommit": "673f0c09a562408618de90c8ea130e79b5c7059d",
+  "testedUncommittedFix": true,
+  "canonicalCodeHashes": {
+    "load-test/flash-sale.js": "fbba78dbb48a2103e7f3f06a1d95f29d92097b8c596bc2a5ab127bce694059e4",
+    "load-test/flash-sale-fixture.mjs": "0164102358c1b5b23008ea73c0fd29bbc41451cab0e982a3dfae4865dd38983c",
+    "load-test/flash-sale-analysis.mjs": "21d15530bb8692458096205ebd709ca74b6909e4e44d57c7889d5332890e8c53",
+    "load-test/flash-sale-check.mjs": "f85fdbf479b540845d7f0f1195759f221c38b88e83612edbaa0beb676c21e5e1"
+  },
+  "checks": {
+    "owner": "ed64603f9dcf4134bc11661794807385",
+    "startedAt": "2026-10-01T03:29:32.2717238Z",
+    "checks": [
+      {
+        "command": "node .github/scripts/production-image-check.mjs peakpass:fs-p2-v23-ample-r2-01",
+        "seconds": 6.2223804,
+        "name": "production-image",
+        "exitCode": 0
+      },
+      {
+        "command": "npm.cmd run test:flash-sale",
+        "seconds": 1.2959505,
+        "name": "harness",
+        "exitCode": 0
+      },
+      {
+        "command": "node --experimental-vm-modules load-test/payment-callback-check.mjs",
+        "seconds": 0.1157753,
+        "name": "callback-harness",
+        "exitCode": 0
+      },
+      {
+        "command": "npm.cmd test -- --runInBand --coverage --json --outputFile=C:\\Users\\dosac\\.codex\\worktrees\\peakpass-issue11-baseline\\PeakPass\\load-test\\results\\flash-sale\\p2-review-validation/unit.json",
+        "seconds": 57.9569192,
+        "name": "unit",
+        "exitCode": 0
+      },
+      {
+        "command": "npx.cmd --no-install jest --runInBand --config jest.integration.cjs --json --outputFile=C:\\Users\\dosac\\.codex\\worktrees\\peakpass-issue11-baseline\\PeakPass\\load-test\\results\\flash-sale\\p2-review-validation/integration.json",
+        "seconds": 152.9435206,
+        "name": "integration",
+        "exitCode": 0
+      },
+      {
+        "command": "npm.cmd run build",
+        "seconds": 6.413705,
+        "name": "build",
+        "exitCode": 0
+      },
+      {
+        "command": "npx.cmd --no-install tsc --noEmit",
+        "seconds": 4.4216455,
+        "name": "typecheck",
+        "exitCode": 0
+      },
+      {
+        "command": "npm.cmd run lint",
+        "seconds": 14.1501201,
+        "name": "lint",
+        "exitCode": 0
+      },
+      {
+        "command": "git diff --check",
+        "seconds": 0.0614756,
+        "name": "diff-check",
+        "exitCode": 0
+      }
+    ],
+    "originalPreserved": {
+      "temporaryName": "peakpass-wave3-preserved-ed64603f9dcf4134bc11661794807385",
+      "running": false,
+      "name": "peakpass-wave3-0928-redis",
+      "id": "b37528cf350e9983f8578e70c0a0bb2ffc0e417421ddf265e1e3bf09c2f22920"
+    },
+    "resources": {
+      "redisId": "b30d842784039adaa948960ef819005453c4d3cb1db3e3b46b51a715ebbe0268",
+      "postgresId": "4cee281aeb8a19d37199c6147666b4d021e430821ee93970797038303bb95919"
+    },
+    "cleanupErrors": [],
+    "originalRestored": true,
+    "finishedAt": "2026-10-01T03:33:42.6488016Z"
+  },
+  "harnessTests": 23,
+  "artifactHashes": {
+    "results.json": "0fc19ab40966f6bb54fa430fc69a7d5e903ae0254d04a4d88b84c1a329b55ec0",
+    "validation-metadata.json": "ec6cbb0d28c44b7e4ed72c0f732fe5c67c7af6e080dfc5c5353fa8648200e87b",
+    "run.ps1": "2696a3182bdd5e228018523ceb38bb2d264ed40d732cd54e268d56433535c29d",
+    "archive-stopped.py": "1f3a78c45c6c591e4020ffa5f92a3a81b4040f449e696fc7302270c32e124fc5",
+    "package-stopped.py": "121691e8c9a0df9532687228f493f80c11888b6bcfdcd4d987296a64b39e2cff",
+    "measure.py": "0e27f090564f456fa20fbf41374e416c72c05a2ecfd23ccee5b5c5f5d1b6fe87",
+    "old-contract-check.json": "8cdb6b47763e5fdb3e4e076b455d690166c804658781b655db34defffecb8661",
+    "harness.txt": "f306530e5d6727e62d3b5c2d4463ecbce257ca5d4ef6f6d10c5017a1be465175",
+    "callback-harness.txt": "7e9b3de1cb5470f72589c4300f895fcaccf654137f2c454ad870b97e792c8434",
+    "unit.txt": "46b7e28ef759c92ebe45723b7be79e6d93609da3a71e39b39f0b120e43436142",
+    "unit.json": "843001b0ecfcb37a7021a70d0112932a3e4206744608ab67b3dcb81fad160954",
+    "integration.txt": "dd0230c46438e928ecdc0515e18d3078709dcba4ce134c114e94a0eb597de712",
+    "integration.json": "a66cade2a489afda52c1004507e224f4f0155a9605660d5a73ba3ffde20ef39d",
+    "production-image.txt": "2c0115832df4938b1ccf22a9aa6eab78ef3743fa2a09a6c8e9659adf7f48e683",
+    "build.txt": "53ce0d718cdd68c1afd54787dbc7b88fe7329e6a9eea69b8250d5c2dd69a2ad1",
+    "typecheck.txt": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "lint.txt": "e0e680ca3337a3e8a12d6e2bdb4dff73126ddf2f9c200cfb40dd5d4ae5a880ba",
+    "diff-check.txt": "7c7d01f8f5630dc8401db574e4505af49284c47a413138adaded566394e06057",
+    "replay-red.txt": "575c89c1ada931742f32430affdffe652496af6aa4a231a138012c47cd9f500b",
+    "review-red.txt": "d8ab045e0e809b0a96f2a870ee9586fc2e66fc77a8fbf4b272af4df6d6cfc966"
+  },
+  "archiveSha256": "d48dea06d490d96460c6ad86203faa77032be78b4d2f7e715661c791a8fc17e4"
+}

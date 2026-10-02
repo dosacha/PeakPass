@@ -17,10 +17,14 @@ const responses = new Counter('api_responses');
 const apiDuration = new Trend('api_duration', true);
 const journeyDuration = new Trend('journey_duration', true);
 const activeVUs = new Trend('active_vus_at_arrival');
+const scenarioStart = new Trend('scenario_start_ms');
+const arrivalLag = new Trend('arrival_lag_ms', true);
+const scriptFailures = new Counter('script_failures');
+const protocolFailures = new Counter('protocol_failures');
 
 export const options = {
   // Exclude the right boundary: some k6 versions also schedule at exactly duration.
-  scenarios: { buyers: { executor: 'constant-arrival-rate', rate: s.rate, timeUnit: '1s', duration: `${s.durationSeconds * 1000 - 1}ms`, preAllocatedVUs: s.preVus, maxVUs: s.maxVus, gracefulStop: '240s' } },
+  scenarios: { buyers: { executor: 'constant-arrival-rate', rate: s.rate, timeUnit: '1s', duration: `${s.durationSeconds * 1000 - 1}ms`, preAllocatedVUs: s.preVus, maxVUs: s.maxVus, gracefulStop: `${s.drainSeconds}s` } },
   summaryTrendStats: ['avg', 'min', 'med', 'max', 'p(50)', 'p(95)', 'p(99)'],
   systemTags: ['status', 'method', 'name', 'scenario', 'error_code', 'expected_response'],
   thresholds: {
@@ -31,7 +35,7 @@ export const options = {
 };
 
 function json(response) { try { return response.json(); } catch { return {}; } }
-function request(stage, body, user, key, kind = 'normal') {
+function request(stage, body, user, key, kind = 'normal', expectedOrderId, expectedTicketIds) {
   const payload = JSON.stringify(body);
   const headers = { 'Content-Type': 'application/json' };
   if (key) headers['Idempotency-Key'] = key;
@@ -40,12 +44,29 @@ function request(stage, body, user, key, kind = 'normal') {
     headers['x-webhook-timestamp'] = timestamp;
     headers['x-webhook-signature'] = crypto.hmac('sha256', __ENV.FS_WEBHOOK_SECRET, `${timestamp}.${payload}`, 'hex');
   } else headers.Authorization = `Bearer ${user.token}`;
-  const tags = { stage, kind, flow: user.flow, name: stage };
+  const tags = { stage, kind, flow: user.flow, buyer: String(user.index), cohort: user.cohort, name: stage };
   const route = { reservation: '/reservations', checkout: '/checkouts', settlement: '/webhooks/payments/settlement' }[stage];
   const response = http.post(`${__ENV.FS_BASE_URL}${route}`, payload, { headers, tags, timeout: '10s' });
-  responses.add(1, { ...tags, status: String(response.status), error_code: String(response.error_code || 0) });
-  apiDuration.add(response.timings.duration, tags);
-  return response;
+  const result = json(response);
+  // Retries/replays may return either the first cached result or a DB replay.
+  const duplicateValid = typeof result.duplicate === 'boolean' && (kind !== 'normal' || result.duplicate === false);
+  const valid = stage === 'settlement' ? response.status === 200 && duplicateValid && paid(result, user, body.orderId, expectedTicketIds)
+    : stage === 'reservation' ? response.status === 201 && !!result.id && result.status === 'active'
+      && result.userId === user.id && result.eventId === fixture.eventId && result.quantity === s.quantity && result.tierId === fixture.tierId
+    : response.status === 201 && !!result.order?.id && (!expectedOrderId || result.order.id === expectedOrderId) && result.order.userId === user.id && result.order.eventId === fixture.eventId
+      && result.order.quantity === s.quantity && result.order.tierId === fixture.tierId
+      && (result.order.reservationId ?? null) === (body.reservationId ?? null)
+      && (kind === 'replay' ? result.order.status === 'paid' && ticketsMatch(result.tickets, user, result.order.id, expectedTicketIds)
+        : result.order.status === 'pending' && Array.isArray(result.tickets) && result.tickets.length === 0);
+  const metricTags = { ...tags, status: String(response.status), error_code: String(response.error_code || 0), code: result.error?.code ?? 'none', business: valid ? 'success' : 'failure' };
+  responses.add(1, metricTags);
+  apiDuration.add(response.timings.duration, metricTags);
+  const expiredSettlement = stage === 'settlement' && kind !== 'replay' && response.status === 200 && result.paymentStatus === 'settled'
+    && duplicateValid
+    && result.order?.id === body.orderId && result.order.status === 'expired' && result.order.userId === user.id
+    && result.order.eventId === fixture.eventId && result.order.quantity === s.quantity && Array.isArray(result.tickets) && result.tickets.length === 0;
+  if (response.status >= 200 && response.status < 300 && !valid && !expiredSettlement) protocolFailures.add(1, metricTags);
+  return { status: response.status, json: () => result, businessValid: valid };
 }
 
 function attempt(stage, body, user, key) {
@@ -60,30 +81,39 @@ function attempt(stage, body, user, key) {
   return response;
 }
 
-function paid(result, user, orderId) {
+function ticketsMatch(tickets, user, orderId, expectedIds) {
+  return Array.isArray(tickets) && tickets.length === s.quantity
+    && tickets.every(t => t && typeof t.id === 'string' && t.id.length > 0 && t.orderId === orderId
+      && t.userId === user.id && t.eventId === fixture.eventId && t.status === 'active')
+    && new Set(tickets.map(t => t.id)).size === s.quantity
+    && (!expectedIds || tickets.every(t => expectedIds.includes(t.id)));
+}
+
+function paid(result, user, orderId, expectedTicketIds) {
   return result.paymentStatus === 'settled' && result.order?.id === orderId && result.order.status === 'paid'
-    && result.order.userId === user.id && result.order.eventId === fixture.eventId && result.order.quantity === s.quantity
-    && Array.isArray(result.tickets) && result.tickets.length === s.quantity
-    && new Set(result.tickets.map(t => t.id)).size === s.quantity
-    && result.tickets.every(t => t.orderId === orderId && t.userId === user.id && t.eventId === fixture.eventId && t.status === 'active');
+    && result.order.userId === user.id && result.order.eventId === fixture.eventId && result.order.quantity === s.quantity && result.order.tierId === fixture.tierId
+    && ticketsMatch(result.tickets, user, orderId, expectedTicketIds);
 }
 
 export default function () {
-  try { purchase(); } catch { unexpected.add(1); }
+  try { purchase(); } catch { unexpected.add(1); scriptFailures.add(1); }
 }
 
 function purchase() {
   const index = exec.scenario.iterationInTest;
-  const user = { ...users[index], flow: index % 2 === 0 ? 'reservation' : 'direct' };
+  const user = { ...users[index], index, cohort: index < s.warmupSeconds * s.rate ? 'warmup' : 'measurement', flow: index % 2 === 0 ? 'reservation' : 'direct' };
   if (!user.id) throw new Error('Arrival model exceeded prepared users');
   const start = Date.now();
-  started.add(1, { flow: user.flow });
+  const tags = { flow: user.flow, buyer: String(index), cohort: user.cohort };
+  if (index === 0) scenarioStart.add(exec.scenario.startTime);
+  arrivalLag.add(Math.max(0, start - exec.scenario.startTime - index * 1000 / s.rate), tags);
+  started.add(1, tags);
   activeVUs.add(exec.instance.vusActive);
   unexpected.add(0); replayFailures.add(0);
-  function finish(outcome) {
-    outcomes.add(1, { outcome, flow: user.flow });
-    journeyDuration.add(Date.now() - start, { outcome, flow: user.flow });
-    if (outcome === 'paid') completed.add(1, { flow: user.flow });
+  function finish(outcome, result) {
+    outcomes.add(1, { ...tags, outcome });
+    journeyDuration.add(Date.now() - start, { ...tags, outcome });
+    if (outcome === 'paid') completed.add(1, { ...tags, order_id: result.order.id, ticket_ids: JSON.stringify(result.tickets.map(t => t.id).sort()) });
     else if (outcome !== 'stock_rejected') unexpected.add(1);
   }
   function rejected(response) {
@@ -93,23 +123,24 @@ function purchase() {
   const body = { userId: user.id, eventId: fixture.eventId, tierId: fixture.tierId, quantity: s.quantity };
   if (user.flow === 'reservation') {
     const response = attempt('reservation', body, user);
-    if (response.status !== 201 || !json(response).id) { rejected(response); return; }
+    if (!response.businessValid) { rejected(response); return; }
     body.reservationId = json(response).id;
     sleep(s.thinkMs / 1000);
   }
   body.idempotencyKey = user.checkoutKey;
   const checkout = attempt('checkout', body, user, user.checkoutKey);
   const order = json(checkout).order;
-  if (checkout.status !== 201 || !order?.id || order.userId !== user.id || order.eventId !== fixture.eventId || order.quantity !== s.quantity || order.status !== 'pending') { rejected(checkout); return; }
+  if (!checkout.businessValid) { rejected(checkout); return; }
   sleep(s.thinkMs / 1000);
   const settlement = { orderId: order.id, providerTransactionId: user.provider, status: 'settled' };
   const response = attempt('settlement', settlement, user, user.callbackKey);
-  if (response.status !== 200 || !paid(json(response), user, order.id)) { rejected(response); return; }
-  finish('paid');
+  if (!response.businessValid) { rejected(response); return; }
+  finish('paid', json(response));
   // Deliberate replays are outside purchase latency and never create another completion.
   if (s.replayEvery > 0 && index % s.replayEvery === 0) {
-    const replayCheckout = request('checkout', body, user, user.checkoutKey, 'replay');
-    const replaySettlement = request('settlement', settlement, user, user.callbackKey, 'replay');
-    if (replayCheckout.status !== 201 || json(replayCheckout).order?.id !== order.id || replaySettlement.status !== 200 || !paid(json(replaySettlement), user, order.id)) replayFailures.add(1);
+    const ticketIds = json(response).tickets.map(t => t.id);
+    const replayCheckout = request('checkout', body, user, user.checkoutKey, 'replay', order.id, ticketIds);
+    const replaySettlement = request('settlement', settlement, user, user.callbackKey, 'replay', order.id, ticketIds);
+    if (!replayCheckout.businessValid || !replaySettlement.businessValid) replayFailures.add(1);
   }
 }

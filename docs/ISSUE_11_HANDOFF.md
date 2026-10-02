@@ -1,5 +1,7 @@
 # P2 / Issue #11 새 세션 인수인계
 
+2026-10-01 후속 실행의 현재 계측 계약은 [FLASH_SALE_EVIDENCE.md](FLASH_SALE_EVIDENCE.md), 실제 측정·수용 tuple·제외 원본·후행 입력은 [FLASH_SALE_BASELINE.md](FLASH_SALE_BASELINE.md)를 따른다. 아래는 P2 착수 전에 작성한 인수 조건과 변경 gate의 기록이다.
+
 이 문서는 [P2 #11: 대기열 없는 쓰기 기준선과 병목 실측](https://github.com/dosacha/PeakPass/issues/11)을 이어가기 위한 진입점이다. **이번 인계에서는 P2를 실행하지 않았다.** P1의 검증된 하네스를 인수하고, 측정 계약의 부족한 부분을 먼저 보완한 뒤 기준선 A를 만든다.
 
 ## 1. 목적과 범위

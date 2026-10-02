@@ -1,4 +1,32 @@
-# 실제 쓰기 부하 측정 계약 — P1 / flash-sale-v1
+# 실제 쓰기 부하 측정 계약 — P2 / flash-sale-v2.6
+
+v2.4는 PR20 오토리뷰를 반영한다. 전체 started buyer와 terminal journey를 buyer별로 대조하고 terminal 수=완료 iterations를 함께 요구해 drain 중단을 배제한다. 각 주문의 null-provider pending payment audit는 해당 buyer checkout key로 정확히1개여야 한다. checkout 응답은 pending일 때 빈 tickets 배열, 정산 후 replay일 때 paid와 최초 정산의 동일한 유효 티켓 ID 집합을 요구한다. 이미 paid인 replay에 expired 응답 예외는 허용하지 않는다.
+
+v2.5는 모든 성공 정산 응답(normal/retry/replay 및 expired ACK)의 `duplicate`에 boolean 타입을 요구한다. 동일 키의 HTTP replay는 첫 응답 캐시를 그대로 반환하므로 `false`도 정상이며, DB 재처리 경로의 `true`도 허용한다. 누락/null/문자열은 protocol failure다. expired ACK는 이 검사를 통과해도 paid가 아니며, 이미 paid인 replay의 expired 응답은 계속 거절한다. [기존 HTTP 경로 테스트](../src/tests/integration/route-contract.test.ts)의 cached false 계약을 유지한다.
+
+v2.6은 최초 `normal` 정산(만료 ACK 포함)에 `duplicate:false`를 요구하며 retry/replay의 boolean 양쪽은 유지한다. paid 응답은 fixture tier와 일치해야 하고, SQL provider 정산 fact의 `reconciliation_required`는 paid일 때 false, expired일 때 true여야 한다. `buyers_completed`에 최초 정산의 `order_id`와 정렬한 티켓 ID 배열 JSON인 `ticket_ids`를 보존한다. 분석은 fixture buyer→paid SQL 주문→그 주문의 정확한 티켓 집합을 모두 대조한 완료만 분자에 포함한다. 태그 누락/파싱 불가/중복 ID는 관측 불완전으로 invalid, 정상 형식이지만 SQL identity와 다르면 integrity-defect다.
+
+분석 `flash-sale-analysis-v2.6.1`은 위 관측에 더해 명시적으로 빈 workingTree와 start/terminal의 정확한 offered buyer 범위(0부터 users-1까지 canonical 문자열, 각1개)를 요구한다. 분석 invalid/예외는 analysisError와 실패 종료로 전달하며 strict manifest.passed/smokePassed를 덮어쓰지 않는다. 이 보강은 저장된 v2.6 원본의 별도 재분석으로 검증하고 원본 판정을 수정하지 않는다. v2.3/v2.4 raw에 최초 HTTP 티켓 ID가 없어 소급 수용하지 않는다. v2.5는 메모리 시작 조건에 미달해 부하0회였으며 v2.6 전체12회 계획으로 대체했다. v2.6은 ample9회·limited3회와 preflight2회를 완료했다. 기존12회는 원본을 보존한 별도 v2.6.1 재분석에서 수치·판정이 같았고, limited02/03은 2026-10-02 같은 조건으로 재개했다. 별도 최종 검토 No findings 뒤 새 정식12회 tuple을 수용했다. #12는 새tuple 소비로 ready(계약미작성), #17은 A입력만 valid이고 P3/P6/P7 대기로 blocked다. 실제후행착수시 수용SHA/동등코드포함을 재확인한다. 현재 상태·고정 행렬·원본은 [FLASH_SALE_BASELINE.md](FLASH_SALE_BASELINE.md)를 따른다.
+
+## v2 변경 계약
+
+v2.3은 Windows Chocolatey launcher와 그 자식 k6 프로세스를 소유 PID 트리로 묶어 CPU·메모리를 합산하고 실행 경로·PID·ShimGen 여부를 기록한다. CPU 누적값은 저부하에서 일정할 수 있으므로 증가 여부 대신 실제 non-shim 프로세스 관측을 요구한다. v2의 launcher-only pilot과 v2.2의 CPU 증가 조건으로 중단한 실행은 원본 그대로 보존하고 formal 결과에서 제외한다.
+
+v2.2부터 checkout replay도 원본 주문 ID를 검증하며, 잘못된 성공 응답은 protocol failure다. graceful drain cutoff에서 iteration이 중단되면 완전한 시도 집계를 확인할 수 없어 무효 측정으로 남긴다.
+
+분석기 v2.6.1은 `flash-sale-analysis-v2.3.1`의 종료 경계 보정을 유지한다. 측정 종료와 정상 k6 종료를 모두 가로지르는 마지막 자원 수집의 engine 부재만 허용하며, 실제 engine 표본에는 기존 최대6000ms 간격을 적용하고 중간 누락은 거절한다. 이전 원본 판정과 당시 재분석 SHA/revision은 보존한다.
+
+P2의 실행 전 프로토콜·분모·중단 기준·결과는 [FLASH_SALE_BASELINE.md](FLASH_SALE_BASELINE.md)에 있다. 아래 P1 설명에서 v2가 바꾼 사항은 이 절이 우선한다. P1 reference ZIP/검증 기록은 수정하지 않으며 `flash-sale-v1` 저부하 증거로만 보존한다.
+
+- `--warmup-seconds`(기본0), `--drain-seconds`(기본30, 최대240), `--limiter-max`(기본1,000,000)를 추가했다. `users/rate`는 warmup을 포함한 연속 도착 기간이다. 측정창은 k6 scenario start + warmup부터 도착 종료까지의 반개방 구간이며 최소2초다. `sample-ms`는 최대250ms로 제한하고 실제 표본 간격/경계도 검사한다.
+- 명시적 실험 limiter는 run 규모와 독립적으로 고정한다. fail-closed/auth/production 쓰기 로직과 CPU·메모리/pool/info 로그는 유지한다. 부모 환경의 `K6_*` override는 provisioning 전에 거절한다.
+- `api_duration`/`api_responses`의 `business=success|failure`는 실제 응답의 status·사용자·이벤트·수량·연결 검증 결과다. `normal|retry|replay`와 별개다. buyer index/cohort로 원본과 SQL identity를 대조한다. 시작 시각·도착 지연도 raw metric으로 보존한다.
+- paid 집계는 실제 status별이다. pending/active hold/expired reconciliation은 미완료와 정합성 위반을 구분한다. 기존 엄격한 smoke `passed`와 k6 종료코드를 유지하고 `analysis.json`에 측정 유효성/안정·과부하·제한재고 결과를 별도로 기록한다.
+- 관측·로그·최종 SQL·cleanup을 독립 시도하므로 smoke 실패가 관측 검사나 cleanup을 건너뛰지 않는다. `resources.jsonl`은 앱/PG/Redis Docker CPU·메모리, host CPU·가용 메모리, k6 process CPU 누적초·메모리 표본이다. `clockChecks`로 PG와 host 시각을 비교한다. CPU 표본은 단독 인과관계 증거가 아니다.
+- child 로그는 줄 단위로 비밀값을 제거해 파일에 저장하고 반환 버퍼는64KiB tail로 제한한다. 앱 로그도 줄 단위로 읽는다. `sourceHashes`는 명명된 SHA256 canonical UTF-8 LF 계약이며 `rawSourceHashes`는 실제 실행 바이트다. 결과 `artifactHashes`는 원본 바이트 SHA256이다.
+- 재분석: `node load-test/flash-sale-analysis.mjs <run-folder>`는 원본을 변경하지 않고 JSON을 출력한다. 성공 throughput은 창 안의 검증된 HTTP 완료와 최종 SQL paid가 일치하는 고유 구매/창 초다. SQL `paid_at`은 transaction-start timestamp이므로 commit 시간으로 쓰지 않는다.
+
+## P1에서 인수한 기본 동작 (v1 역사 포함)
 
 [Issue #10](https://github.com/dosacha/PeakPass/issues/10)의 산출물이다. 기존 예매 계약을 호출하는 측정 도구이며 대기열·캐시 재고 차감·처리량 개선 구현은 포함하지 않는다. 아래 작은 실행은 하네스 정합성 증거다. 서비스의 최대 처리량이나 성능 개선 수치로 사용하지 않는다.
 
@@ -59,7 +87,7 @@ npm run load-test:flash-sale -- --run-id my-limited-01 --stock limited --seats 6
 | `sql-snapshot.json`, `verification.json` | SQL 상태와 불변식·HTTP/DB 수량 대조 |
 | `cleanup.json`, `teardown.txt` | fixture 제거·무관한 sentinel 보존·전용 자원 해제 |
 
-SQL 재고식은 `available + active reservation 수량 + pending/paid/delivered order 수량 = total`이다. converted reservation은 중복 합산하지 않는다. 예약/주문은 사용자당 최대 한 개이고 converted reservation은 정확한 주문에 연결되어야 한다. paid 주문은 정확한 소유자의 티켓·settled provider record·입력에 결합된 callback key를 갖는다. checkout의 원래 pending payment record는 남아 있으므로 전체 payment record 수를 주문 수와 같다고 검사하지 않는다.
+SQL 재고식은 `available + active reservation 수량 + pending/paid/delivered order 수량 = total`이다. converted reservation은 중복 합산하지 않는다. 예약/주문은 사용자당 최대 한 개이고 converted reservation은 정확한 주문에 연결되어야 한다. paid 주문은 정확한 소유자의 티켓·settled provider record·입력에 결합된 callback key를 갖는다. pending/paid/expired 주문 모두 checkout의 원래 pending/null-provider payment record가 해당 buyer checkout key로 정확히1개 남아 있어야 한다. 별도 settlement record가 있으므로 전체 payment record 수를 주문 수와 같다고 검사하지 않는다.
 
 ## 한계와 P2 인수 조건
 

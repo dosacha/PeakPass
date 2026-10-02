@@ -1,0 +1,109 @@
+{
+  "owner": "50532f7514e64cb292d241b39d7dce16",
+  "startedAt": "2026-10-01T02:06:37.7278233Z",
+  "checks": [
+    {
+      "name": "production-image",
+      "command": "node .github/scripts/production-image-check.mjs peakpass:fs-p2-v23-ample-r2-01",
+      "seconds": 4.6184051,
+      "exitCode": 0
+    },
+    {
+      "name": "harness",
+      "command": "npm.cmd run test:flash-sale",
+      "seconds": 1.6087896,
+      "exitCode": 0
+    },
+    {
+      "name": "callback-harness",
+      "command": "node --experimental-vm-modules load-test/payment-callback-check.mjs",
+      "seconds": 0.1244391,
+      "exitCode": 0
+    },
+    {
+      "name": "unit",
+      "command": "npm.cmd test -- --runInBand --coverage --json --outputFile=C:\\Users\\dosac\\.codex\\worktrees\\peakpass-issue11-baseline\\PeakPass\\load-test\\results\\flash-sale\\p2-validation/unit.json",
+      "seconds": 58.2797464,
+      "exitCode": 0
+    },
+    {
+      "name": "integration",
+      "command": "npx.cmd --no-install jest --runInBand --config jest.integration.cjs --json --outputFile=C:\\Users\\dosac\\.codex\\worktrees\\peakpass-issue11-baseline\\PeakPass\\load-test\\results\\flash-sale\\p2-validation/integration.json",
+      "seconds": 169.6048042,
+      "exitCode": 0
+    },
+    {
+      "name": "build",
+      "command": "npm.cmd run build",
+      "seconds": 6.9990469,
+      "exitCode": 0
+    },
+    {
+      "name": "typecheck",
+      "command": "npx.cmd --no-install tsc --noEmit",
+      "seconds": 5.8389187,
+      "exitCode": 0
+    },
+    {
+      "name": "lint",
+      "command": "npm.cmd run lint",
+      "seconds": 12.4473978,
+      "exitCode": 0
+    },
+    {
+      "name": "diff-check",
+      "command": "git diff --check",
+      "seconds": 0.0486178,
+      "exitCode": 0
+    }
+  ],
+  "originalPreserved": {
+    "id": "b37528cf350e9983f8578e70c0a0bb2ffc0e417421ddf265e1e3bf09c2f22920",
+    "temporaryName": "peakpass-wave3-preserved-50532f7514e64cb292d241b39d7dce16",
+    "running": false,
+    "name": "peakpass-wave3-0928-redis"
+  },
+  "resources": {
+    "redisId": "0f5d2915adea8ef8b1a943d3462da95cb36fc252210fe55ee9b0ab10140d0b1c",
+    "postgresId": "8965f49ab1c64f4c886e7fd20e31506c98fb2f39831c28702987d76118b1e948"
+  },
+  "cleanupErrors": [],
+  "originalRestored": true,
+  "finishedAt": "2026-10-01T02:11:03.1089254Z",
+  "suites": {
+    "unit": {
+      "numPassedTestSuites": 21,
+      "numPassedTests": 159,
+      "numFailedTests": 0,
+      "numPendingTests": 0,
+      "success": true
+    },
+    "integration": {
+      "numPassedTestSuites": 24,
+      "numPassedTests": 250,
+      "numFailedTests": 0,
+      "numPendingTests": 0,
+      "success": true
+    }
+  },
+  "archiveSha256": "69055f387c0d60fc45c44d5e22a946dcf0404a05891e69f7ee8b60d994c5d0ce",
+  "artifactHashes": {
+    "build.txt": "53ce0d718cdd68c1afd54787dbc7b88fe7329e6a9eea69b8250d5c2dd69a2ad1",
+    "callback-harness.txt": "7db498b49a6fee5f1fc9b7ddbae78898c9dbd62a2e2a22a2b57de5b80dab8efa",
+    "diff-check.txt": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "harness.txt": "70f05772920c83a7c022f99e54cfcd7cf63cb4f121dcf5cedf3008cd437c943c",
+    "integration.txt": "fcde03deefeed3a2af997d05d99cd6aa759a3a5ece851b26ca0a52983609ac63",
+    "lint.txt": "e0e680ca3337a3e8a12d6e2bdb4dff73126ddf2f9c200cfb40dd5d4ae5a880ba",
+    "production-image.txt": "bbffc18a7b096034f4f304a38e01c2097d34cf90087da50f6e18faf38ed89c4b",
+    "typecheck.txt": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "unit.txt": "fdde68458a0c9d9c61c717528a71585ce8cb241678989032c837d87be416856e",
+    "results.json": "339213b8488c40b4569e61761ce8d4c70ad54c69f67016a90bb4f0a409570266",
+    "unit.json": "42d443ff2f5b121a282f8ee9a60972205ef9652942e958a1dccf5e74629dea14",
+    "integration.json": "0a7276ab1070855ca93547211bc97924b67183cc7272ef387682a240ff27f84b",
+    "run.ps1": "2696a3182bdd5e228018523ceb38bb2d264ed40d732cd54e268d56433535c29d",
+    "archive.py": "e03e13fae040343a1da9a640a52886268505f4cc88037e7b5bbb13f45dde12c3",
+    "report.py": "9cc8614f94b2583843d69cababd9a7881d07218971d8dbdeaa8ae179a440d023",
+    "ocr-preview-code.json": "544ee32599043fa5592c00bf04e22ff46a699c1eef70ae46fe4f116e174e74cb",
+    "ocr-rules.json": "ee147602523cc25fbd19caaf74c3a62e0fccdd48314e5cd6ec909693934e25ec"
+  }
+}
