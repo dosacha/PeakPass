@@ -1,0 +1,251 @@
+{
+  "runId": "peakpass-p5-20261002",
+  "codeSha": "5000cc203ceb9ef6c25d80ce29d27298e5aa4b82",
+  "baseSha": "678ac7c49422cb835a0c9027d49a9e168c8cc979",
+  "contract": {
+    "revision": "admission-v1",
+    "sha256": "e22be4df9910811eba552f630b43170ba0cf0c8d953a54dc5a3cea34c0dcf3d1"
+  },
+  "archive": "p5-final-20261002.zip",
+  "archiveSha256": "f74a43a65b7fb13c9d8658fdee6149abdc73aa58135b595c8517049b7f39d9aa",
+  "image": "peakpass:p5-issue14-final",
+  "imageId": "sha256:634b74ac7b8de6823d21bd28edbb5743597fee8331aa6ca659881b1875a23119",
+  "results": {
+    "build": "pass",
+    "typecheck": "pass",
+    "lintErrors": 0,
+    "lintWarnings": 11,
+    "unitPassed": 160,
+    "integrationPassed": 342,
+    "integrationSkipped": 15,
+    "integrationSuitesPassed": 30,
+    "integrationSuitesSkipped": 2,
+    "harnessPassed": 29,
+    "callbackHarness": "pass",
+    "productionImageOff": "pass",
+    "productionImageOn": "pass",
+    "upgrade012To013": "pass",
+    "dockerLifecyclePassed": 5,
+    "mutationsKilled": 12,
+    "mutationsTotal": 12,
+    "repeatRuns": 5,
+    "repeatRunTestsPassedEach": 67
+  },
+  "baseline": {
+    "sha": "678ac7c49422cb835a0c9027d49a9e168c8cc979",
+    "build": "pass",
+    "typecheck": "pass",
+    "lintErrors": 0,
+    "lintWarnings": 10,
+    "unitPassed": 160,
+    "integrationPassed": 282,
+    "integrationSkipped": 15
+  },
+  "review": {
+    "kind": "internal, not independent",
+    "reviewer": "read-only subagent of the implementing session; the identifiers of reviewer and implementer are in the hand-off report, not in this repository",
+    "mode": "read-only static",
+    "wholeBranchTarget": "59510554de7029daca680f8dea34fe950355bc35",
+    "wholeBranchFindings": "no P1; one P2 (an unheard client error ends the process when PostgreSQL ends a session that is idle in a purchase transaction); several P3",
+    "fixTarget": "2b85f263130e286a720d0b204dd3ce90a0a69f65",
+    "deltaRange": "59510554de7029daca680f8dea34fe950355bc35..2b85f263130e286a720d0b204dd3ce90a0a69f65",
+    "deltaVerdict": "no new P1 or P2; two behaviour notes and two test notes",
+    "followUp": "5000cc203ceb9ef6c25d80ce29d27298e5aa4b82 (tests only; not read by the reviewer)",
+    "independentTestExecution": false
+  },
+  "skippedTests": [
+    "order-sweeper: commits orders during actual Redis outage and retries no committed business side effects",
+    "order-sweeper: a Redis disconnect triggered after COMMIT cannot turn an expired order into failed work",
+    "order-expiration-http: actual Redis stop after commit cannot undo expiration or reconciliation; recovery preserves replay",
+    "redis-recovery: recovers after real retry exhaustion, shares failed/successful recreations, and restores HTTP/hold/lock use in the same PID",
+    "redis-recovery: bounds already-ready commands during actual Redis pause, retires their queue, and recovers in the same PID",
+    "redis-recovery: shutdown during real reconnect prevents later command/probe/explicit-init recreation",
+    "redis-recovery: initial Redis absence rejects startup and closes resources",
+    "redis-recovery: child process exits naturally during reconnecting with real Redis outage",
+    "redis-recovery: child process exits naturally during recreating with real Redis outage",
+    "redis-recovery: child process exits naturally during startup with real Redis outage",
+    "order-sweeper-docker (passed separately with the P5 image, see final-docker-lifecycle.log): catches up on production boot and naturally exits zero on idle SIGTERM",
+    "order-sweeper-docker (passed separately): SIGTERM stops new orders and waits for a DB-observed inflight transaction before pool closure",
+    "order-sweeper-docker (passed separately): SIGKILL mid-batch preserves committed terminal work and restart immediately retries uncommitted orders",
+    "order-sweeper-docker (passed separately): the actual default production scheduler clears 1000 due orders within 60 seconds with concurrent checkout",
+    "order-sweeper-docker (passed separately): listen startup failure closes worker and resources and exits one naturally"
+  ],
+  "note": "Local correctness evidence of an unpushed candidate. No CI run, no independent review, no load or capacity claim, no protected activation in a deployment, no P5 acceptance, merge or deployment.",
+  "files": [
+    {
+      "name": "baseline-build.log",
+      "bytes": 94,
+      "sha256": "b1549c2c034dd03e6b5ea3ea465f2ea87716fe6eaf9d08c5c2e361930a7701a0"
+    },
+    {
+      "name": "baseline-integration.log",
+      "bytes": 509914,
+      "sha256": "853b42b1993baa082e410ebaf1599d84559522106b1d404e7fb23e681f4bca71"
+    },
+    {
+      "name": "baseline-lint.log",
+      "bytes": 1395,
+      "sha256": "d23c73379ffde3f60195bf754f9cb3d6462311577e2ea1cd2588649f4b0414f4"
+    },
+    {
+      "name": "baseline-typecheck.log",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "name": "baseline-unit.log",
+      "bytes": 16695,
+      "sha256": "3d646f1f7dad205e10d7788df10e1a9c02652a2bf623f94e64943cb967721915"
+    },
+    {
+      "name": "final-build.log",
+      "bytes": 94,
+      "sha256": "b1549c2c034dd03e6b5ea3ea465f2ea87716fe6eaf9d08c5c2e361930a7701a0"
+    },
+    {
+      "name": "final-callback-harness.log",
+      "bytes": 264,
+      "sha256": "15bea350c465174d15da78e52d0fb0dd0e22a928ea316a29c499b20c1d188add"
+    },
+    {
+      "name": "final-docker-lifecycle.log",
+      "bytes": 392037,
+      "sha256": "449e02bca7e827eae85a9fca172ea4c4aded6491c789d31cf856400c112912a3"
+    },
+    {
+      "name": "final-harness.log",
+      "bytes": 3066,
+      "sha256": "4412d7a9871075cd9825a98ad61a614ed3d1d2f1070344e19312f1317050f5f5"
+    },
+    {
+      "name": "final-image-build.log",
+      "bytes": 2567,
+      "sha256": "e038705a2029189fa6d835c4462384b19976967c1a150e38de1004f3e13d1bd5"
+    },
+    {
+      "name": "final-image-id.txt",
+      "bytes": 39,
+      "sha256": "9a14067e5a92d56fdb9ec98adb4ba6ae1e679536b62b11bc6529ac5c061dc8d7"
+    },
+    {
+      "name": "final-image-off.log",
+      "bytes": 6099,
+      "sha256": "5952f01e6baf84b9e67f0601fb22f664033707ad04d80cf2f69d5a88e1b9472f"
+    },
+    {
+      "name": "final-image-on.log",
+      "bytes": 6096,
+      "sha256": "7edef0559789c2aa024694caf0192525baa3a3a1723e451d2d359d202a75379c"
+    },
+    {
+      "name": "final-integration.log",
+      "bytes": 716185,
+      "sha256": "938f0decf8bd8079a1ec37ff785a43d798806e8b9c6ef4419ba158ee77d22a0c"
+    },
+    {
+      "name": "final-lint.log",
+      "bytes": 1602,
+      "sha256": "e2ebbf186237529957e52b3bea89609e9947d7dd55a74aefefb3d2b5420fa8ba"
+    },
+    {
+      "name": "final-mutation.log",
+      "bytes": 942,
+      "sha256": "c9395daf6161ef7d3cc559cef0034191b350470f4e04f46e65393db4039ffce7"
+    },
+    {
+      "name": "final-repeat.txt",
+      "bytes": 630,
+      "sha256": "b2796df11adc47de70ac2abc3e5c29a2f5005f4bf7f36bf76398c12adf10752e"
+    },
+    {
+      "name": "final-sha.txt",
+      "bytes": 41,
+      "sha256": "e682ae7f0b97fb2b84d2f8c96791a402ff64284cedd27484fb6521d3afc19397"
+    },
+    {
+      "name": "final-skip-list.txt",
+      "bytes": 1665,
+      "sha256": "28cd760a0dbd73efd99ceff4cbcbf216e49921253f6cf1e4e0b7508eead5c9d5"
+    },
+    {
+      "name": "final-stale-snapshot-retry-code.log",
+      "bytes": 8863,
+      "sha256": "e52d2e9a2581ad95937ecd0713ec4cbcbbce70969f3e1df1fe0130a4311dafb7"
+    },
+    {
+      "name": "final-typecheck.log",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "name": "final-unit.log",
+      "bytes": 16743,
+      "sha256": "ed8680521e1ebf058f77edcf752eed5474ff8189f92280a337825c1d6f03445b"
+    },
+    {
+      "name": "final-upgrade.log",
+      "bytes": 1256,
+      "sha256": "90cd1fce8d2ca8049644be4b312b7045f622497887b11a6c93db7ae5a773c526"
+    },
+    {
+      "name": "mutate.mjs",
+      "bytes": 4163,
+      "sha256": "813cfc4913d103bb1dc8d3b066a1ff9852702a180282b38a085bb886afa1ba6f"
+    },
+    {
+      "name": "red-1-ledger-missing-table.log",
+      "bytes": 37357,
+      "sha256": "438a2e5117bc24c03b601d92f57dec65507505bc91a5762910c46dc13b85e5a4"
+    },
+    {
+      "name": "red-2-reservation-path.log",
+      "bytes": 33279,
+      "sha256": "eca0b9385aace19075e19d1e50e797c0d7ae22e3ba7ea90d1488354569fe1803"
+    },
+    {
+      "name": "red-2b-claim-second-connection.log",
+      "bytes": 42583,
+      "sha256": "41010adcf9a3446c774475cd2111cb11edfba31f0638d78243739c50f8bc41d6"
+    },
+    {
+      "name": "red-2c-eligibility-lock-order.log",
+      "bytes": 189214,
+      "sha256": "9770b0384b6831c78d532475dea3b9c16d824435d73477186a519d1eaa9b8a70"
+    },
+    {
+      "name": "red-3-checkout-path.log",
+      "bytes": 31251,
+      "sha256": "5496ecdd69dd50cdd13d02400981cb8bf38a2e95d310a211893fbeb8f717bad0"
+    },
+    {
+      "name": "red-4-reclaimer-missing.log",
+      "bytes": 1243,
+      "sha256": "f9acb29742c4be0eaf1830a3efaf95e9825aa1643565acb8b30c3cd8e51e0a6d"
+    },
+    {
+      "name": "red-6-p4-guard.log",
+      "bytes": 7017,
+      "sha256": "9bc9dd8d2119abd0a6737fda830b2233aba174c694e0804cb6a0084cc6971218"
+    },
+    {
+      "name": "red-7-review-findings.log",
+      "bytes": 143776,
+      "sha256": "be0b495b81edc9471f9ff52a72ace6ff8777a8da85052ae66cf7f71bf34b5848"
+    },
+    {
+      "name": "red-8-cancel-order-sensitivity.log",
+      "bytes": 7698,
+      "sha256": "b5e18b38cd4a239948136edbc9691bf6ca12aa0f1da2e7ff9282f079f6783ddd"
+    },
+    {
+      "name": "results.json",
+      "bytes": 3757,
+      "sha256": "fc628713cb260fe7c6ca5b632de4e0e40827ada3c2ec9738731a74fcd39cf71a"
+    },
+    {
+      "name": "upgrade-check.sh",
+      "bytes": 6763,
+      "sha256": "e411caadcbc0ac33c92f8d5d2bc6fa357c043ba5cafcdb93ef50e533b3d9a02d"
+    }
+  ]
+}
