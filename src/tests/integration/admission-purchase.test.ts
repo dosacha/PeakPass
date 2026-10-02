@@ -285,6 +285,38 @@ describe('admission purchase gate on owned PostgreSQL, Redis and loopback HTTP',
       expect(await fx.state()).toMatchObject({ available: 20, reservations: 0, results: 0 });
     });
 
+    it('lets either the cancel or the purchase win an admission, never both', async () => {
+      fx = await fixture(20, true, 5);
+      let purchased = 0;
+      for (const user of fx.users) {
+        const admission = await admit(service, fx.eventId, user);
+        const [cancel, purchase] = await Promise.all([
+          request(
+            'DELETE',
+            `/events/${fx.eventId}/admissions/${admission.admissionId}`,
+            { epoch: admission.admissionEpoch },
+            { authorization: fx.token(user) },
+          ),
+          reserve(user, admission),
+        ]);
+        if (purchase.status === 201) {
+          purchased++;
+          // The claim or its result was first: the cancel is refused and nothing is undone.
+          expect(cancel.status).toBe(409);
+          expect(cancel.body.error.code).toMatch(/^ADMISSION_(IN_PROGRESS|ALREADY_CONSUMED)$/);
+        } else {
+          expect(cancel.status).toBe(200);
+          expect(purchase.status).toBe(410);
+          expect(purchase.body).toEqual(admissionError('ADMISSION_CANCELLED'));
+        }
+      }
+      expect(await fx.state()).toMatchObject({
+        available: 20 - purchased,
+        reservations: purchased,
+        results: purchased,
+      });
+    });
+
     it('stores a sold-out rejection once and replays it after stock returns', async () => {
       fx = await fixture(1);
       const [buyer, late] = fx.users;
