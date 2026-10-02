@@ -58,7 +58,10 @@ describe('admission_results ledger constraints on owned PostgreSQL (migration 01
   beforeAll(async () => {
     initLogger();
     pool = await initPostgresPool();
-    await pool.query('INSERT INTO users(id,email) VALUES($1,$2)', [userId, `${userId}@ledger.test`]);
+    await pool.query('INSERT INTO users(id,email) VALUES($1,$2)', [
+      userId,
+      `${userId}@ledger.test`,
+    ]);
     await pool.query(
       `INSERT INTO events(id,name,starts_at,ends_at,total_seats,available_seats,status)
       VALUES($1,'p5 ledger',NOW(),NOW()+interval '1 day',10,10,'published')`,
@@ -103,14 +106,21 @@ describe('admission_results ledger constraints on owned PostgreSQL (migration 01
       'SELECT outcome,created_at FROM admission_results WHERE event_id=$1 ORDER BY outcome',
       [eventId],
     );
-    expect(stored.rows.map((r) => r.outcome)).toEqual(['closed', 'consumed', 'consumed', 'rejected']);
+    expect(stored.rows.map((r) => r.outcome)).toEqual([
+      'closed',
+      'consumed',
+      'consumed',
+      'rejected',
+    ]);
     expect(stored.rows.every((r) => r.created_at instanceof Date)).toBe(true);
   });
   it.each<[string, Partial<Row>]>([
     ['consumed without a target', { ...consumed }],
     ['consumed reservation pointing at an order', { ...consumed, orderId }],
-    ['consumed direct checkout pointing at a reservation',
-      { ...consumed, operation: 'direct-checkout', reservationId }],
+    [
+      'consumed direct checkout pointing at a reservation',
+      { ...consumed, operation: 'direct-checkout', reservationId },
+    ],
     ['consumed with both targets', { ...consumed, reservationId, orderId }],
     ['consumed carrying an error', { ...consumed, reservationId, errorCode: 'CONFLICT' }],
     ['rejected with a target', { reservationId }],

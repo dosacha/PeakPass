@@ -30,7 +30,8 @@ export async function purchaseFixture(pool: Pool, secret: string, seats = 20, us
     VALUES($1,'p5 purchase',NOW()+interval '1 hour',NOW()+interval '2 hours',$2,$2,$3,'published')`,
     [eventId, seats, JSON.stringify([{ id: TIER, name: 'General', price: 50, quantity: seats }])],
   );
-  const token = (userId: string) => `Bearer ${jwt.sign({ sub: userId }, secret, { expiresIn: '1h' })}`;
+  const token = (userId: string) =>
+    `Bearer ${jwt.sign({ sub: userId }, secret, { expiresIn: '1h' })}`;
   async function state() {
     return (
       await pool.query(

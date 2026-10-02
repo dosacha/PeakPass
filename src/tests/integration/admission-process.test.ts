@@ -119,7 +119,12 @@ describe('admission actual process interruption and product startup', () => {
     const child = spawn(process.execPath, ['--import', 'tsx', 'src/main.ts'], {
       windowsHide: true,
       stdio: ['ignore', 'pipe', 'pipe'],
-      env: { ...process.env, PORT: String(port), LOG_LEVEL: 'error', ENABLE_ADMISSION: String(enabled) },
+      env: {
+        ...process.env,
+        PORT: String(port),
+        LOG_LEVEL: 'error',
+        ENABLE_ADMISSION: String(enabled),
+      },
     });
     let output = '';
     child.stdout!.on('data', (chunk) => (output += String(chunk)));
@@ -197,7 +202,12 @@ describe('admission actual process interruption and product startup', () => {
         expect(response.status).toBe(400);
         expect(response.body.error.code).toBe('ADMISSION_INVALID_INPUT');
       }
-      expect(await fx.state()).toMatchObject({ available: 20, reservations: 0, orders: 0, results: 0 });
+      expect(await fx.state()).toMatchObject({
+        available: 20,
+        reservations: 0,
+        orders: 0,
+        results: 0,
+      });
     } finally {
       await stop?.();
       await fx.cleanup(redis);
@@ -216,10 +226,15 @@ describe('admission actual process interruption and product startup', () => {
       // The product's own coordinator publishes the namespace of the protected policy.
       let status = await product.call('GET', `${queue}/me`, token);
       expect(
-        await poll(async () => (status = await product.call('GET', `${queue}/me`, token)).status === 200),
+        await poll(
+          async () => (status = await product.call('GET', `${queue}/me`, token)).status === 200,
+        ),
       ).toBe(true);
       const epoch = status.body.queue.epoch;
-      const joined = await product.call('POST', queue, token, { epoch, joinRequestId: randomUUID() });
+      const joined = await product.call('POST', queue, token, {
+        epoch,
+        joinRequestId: randomUUID(),
+      });
       expect(joined.status).toBe(201);
       const admissionId = joined.body.admission.admissionId;
       expect(
@@ -246,11 +261,17 @@ describe('admission actual process interruption and product startup', () => {
         state: 'consumed',
         outcome: { kind: 'reservation', resourceId: reserved.body.id, code: null },
       });
-      expect(await fx.state()).toMatchObject({ available: 19, held: 1, reservations: 1, results: 1 });
+      expect(await fx.state()).toMatchObject({
+        available: 19,
+        held: 1,
+        reservations: 1,
+        results: 1,
+      });
       await fx.verify();
       process.stdout.write(
-        JSON.stringify({ admissionPurchaseProcess: { admissionId, reservationId: reserved.body.id } }) +
-          '\n',
+        JSON.stringify({
+          admissionPurchaseProcess: { admissionId, reservationId: reserved.body.id },
+        }) + '\n',
       );
     } finally {
       await stop?.();

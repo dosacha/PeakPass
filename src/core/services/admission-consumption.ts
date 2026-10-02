@@ -263,7 +263,8 @@ export async function occupyThroughAdmission<T>(
       ...(direct ? [command.checkoutKey] : []),
     ],
   );
-  if (inserted.rowCount !== 1) throw new Error('Admission result target does not match its request');
+  if (inserted.rowCount !== 1)
+    throw new Error('Admission result target does not match its request');
   return {
     value: occupied.value,
     settlement: {

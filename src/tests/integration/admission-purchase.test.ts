@@ -151,11 +151,24 @@ describe('admission purchase gate on owned PostgreSQL, Redis and loopback HTTP',
       const response = await reserve(user, admission);
       expect(response.status).toBe(201);
       // The success body keeps the existing reservation schema.
-      expect(Object.keys(response.body).sort()).toEqual(
-        ['createdAt', 'eventId', 'expiresAt', 'id', 'quantity', 'status', 'tierId', 'updatedAt', 'userId'],
-      );
+      expect(Object.keys(response.body).sort()).toEqual([
+        'createdAt',
+        'eventId',
+        'expiresAt',
+        'id',
+        'quantity',
+        'status',
+        'tierId',
+        'updatedAt',
+        'userId',
+      ]);
       expect(response.body).toMatchObject({ userId: user, eventId: fx.eventId, status: 'active' });
-      expect(await fx.state()).toMatchObject({ available: 19, held: 1, reservations: 1, results: 1 });
+      expect(await fx.state()).toMatchObject({
+        available: 19,
+        held: 1,
+        reservations: 1,
+        results: 1,
+      });
       expect(await fx.results()).toEqual([
         {
           admissionId: admission.admissionId,
@@ -180,7 +193,9 @@ describe('admission purchase gate on owned PostgreSQL, Redis and loopback HTTP',
         },
       ]);
       // Redis reflects the committed result and returns the slot exactly once.
-      expect(await inspect(fx.eventId, admission.admissionEpoch, admission.admissionId)).toMatchObject({
+      expect(
+        await inspect(fx.eventId, admission.admissionEpoch, admission.admissionId),
+      ).toMatchObject({
         state: 'consumed',
         phase: 'idle',
         outcome: { kind: 'reservation', resourceId: response.body.id, code: null },
@@ -199,7 +214,9 @@ describe('admission purchase gate on owned PostgreSQL, Redis and loopback HTTP',
       expect(replay.body.id).toBe(created.body.id);
       // A fresh admission whose first ten requests all race for the same result.
       const racing = await admit(service, fx.eventId, second);
-      const responses = await Promise.all(Array.from({ length: 10 }, () => reserve(second, racing)));
+      const responses = await Promise.all(
+        Array.from({ length: 10 }, () => reserve(second, racing)),
+      );
       // Every answer is the one reservation. Only on a host slow enough to exceed lock_timeout may
       // a request instead be told that the same request is in progress, which it may retry.
       const created201 = responses.filter((r) => r.status === 201);
@@ -210,7 +227,12 @@ describe('admission purchase gate on owned PostgreSQL, Redis and loopback HTTP',
         expect(response.body).toEqual(admissionError('ADMISSION_IN_PROGRESS'));
       }
       expect((await reserve(second, racing)).body.id).toBe(created201[0].body.id);
-      expect(await fx.state()).toMatchObject({ available: 18, held: 2, reservations: 2, results: 2 });
+      expect(await fx.state()).toMatchObject({
+        available: 18,
+        held: 2,
+        reservations: 2,
+        results: 2,
+      });
     });
 
     it('answers 409 to a changed request and 404 to another user, before and after consumption', async () => {
@@ -246,7 +268,12 @@ describe('admission purchase gate on owned PostgreSQL, Redis and loopback HTTP',
         .admission!;
       expect(waiting.state).toBe('waiting');
       const cases: Array<[string, Admission, number, string]> = [
-        [waitingUser, { admissionId: waiting.admissionId, admissionEpoch: epoch }, 409, 'ADMISSION_NOT_READY'],
+        [
+          waitingUser,
+          { admissionId: waiting.admissionId, admissionEpoch: epoch },
+          409,
+          'ADMISSION_NOT_READY',
+        ],
         [cancelledUser, cancelled, 410, 'ADMISSION_CANCELLED'],
         [expiredUser, expired, 410, 'ADMISSION_EXPIRED'],
       ];
@@ -281,7 +308,9 @@ describe('admission purchase gate on owned PostgreSQL, Redis and loopback HTTP',
         errorCode: 'INSUFFICIENT_INVENTORY',
         httpStatus: 409,
       });
-      expect(await inspect(fx.eventId, admission.admissionEpoch, admission.admissionId)).toMatchObject({
+      expect(
+        await inspect(fx.eventId, admission.admissionEpoch, admission.admissionId),
+      ).toMatchObject({
         state: 'consumed',
         outcome: { kind: 'rejected', resourceId: null, code: 'INSUFFICIENT_INVENTORY' },
       });
@@ -292,7 +321,12 @@ describe('admission purchase gate on owned PostgreSQL, Redis and loopback HTTP',
       const replay = await reserve(late, admission);
       expect(replay.status).toBe(409);
       expect(replay.body.error).toEqual(rejected.body.error);
-      expect(await fx.state()).toMatchObject({ available: 1, held: 0, reservations: 1, results: 2 });
+      expect(await fx.state()).toMatchObject({
+        available: 1,
+        held: 0,
+        reservations: 1,
+        results: 2,
+      });
     });
 
     it('retries one transient failure inside the request and resumes the same claim after exhaustion', async () => {
@@ -355,7 +389,12 @@ describe('admission purchase gate on owned PostgreSQL, Redis and loopback HTTP',
       expect((await reserve(user, ignored)).status).toBe(201);
       // No retry key exists without protection: the same body holds another seat, as before.
       expect((await reserve(user, ignored)).status).toBe(201);
-      expect(await fx.state()).toMatchObject({ available: 0, held: 3, reservations: 3, results: 0 });
+      expect(await fx.state()).toMatchObject({
+        available: 0,
+        held: 3,
+        reservations: 3,
+        results: 0,
+      });
     });
 
     it('lets concurrent unprotected reservations wait for the event row instead of failing serialization', async () => {
@@ -393,7 +432,10 @@ describe('admission purchase gate on owned PostgreSQL, Redis and loopback HTTP',
       expect(created.status).toBe(201);
       // The success body keeps the existing order schema; nothing of the claim leaks into it.
       expect(Object.keys(created.body).sort()).toEqual(['order', 'tickets']);
-      expect(created.body).toMatchObject({ order: { userId: user, status: 'pending' }, tickets: [] });
+      expect(created.body).toMatchObject({
+        order: { userId: user, status: 'pending' },
+        tickets: [],
+      });
       expect(await fx.results()).toEqual([
         expect.objectContaining({
           admissionId: admission.admissionId,
@@ -412,7 +454,9 @@ describe('admission purchase gate on owned PostgreSQL, Redis and loopback HTTP',
           ]),
         }),
       ]);
-      expect(await inspect(fx.eventId, admission.admissionEpoch, admission.admissionId)).toMatchObject({
+      expect(
+        await inspect(fx.eventId, admission.admissionEpoch, admission.admissionId),
+      ).toMatchObject({
         state: 'consumed',
         outcome: { kind: 'direct-checkout', resourceId: created.body.order.id, code: null },
       });
@@ -450,7 +494,9 @@ describe('admission purchase gate on owned PostgreSQL, Redis and loopback HTTP',
     it('stores a sold-out direct checkout as one rejection without a partial order', async () => {
       fx = await fixture(1);
       const [buyer, late] = fx.users;
-      expect((await checkout(buyer, randomUUID(), await admit(service, fx.eventId, buyer))).status).toBe(201);
+      expect(
+        (await checkout(buyer, randomUUID(), await admit(service, fx.eventId, buyer))).status,
+      ).toBe(201);
       const key = randomUUID(),
         admission = await admit(service, fx.eventId, late);
       const rejected = await checkout(late, key, admission);
@@ -461,7 +507,8 @@ describe('admission purchase gate on owned PostgreSQL, Redis and loopback HTTP',
       expect(replay.body.error).toEqual(rejected.body.error);
       expect(await fx.state()).toMatchObject({ available: 0, ordered: 1, orders: 1, results: 2 });
       expect(
-        (await pool.query('SELECT COUNT(*)::int AS n FROM orders WHERE user_id=$1', [late])).rows[0].n,
+        (await pool.query('SELECT COUNT(*)::int AS n FROM orders WHERE user_id=$1', [late])).rows[0]
+          .n,
       ).toBe(0);
       expect(
         (
@@ -487,7 +534,12 @@ describe('admission purchase gate on owned PostgreSQL, Redis and loopback HTTP',
       expect((await service.control(fx.eventId))!.epoch).not.toBe(admission.admissionEpoch);
       await redis.del(await redis.keys(`peakpass:admission:${fx.eventId}:*`));
       const conversion = { reservationId: reservation.body.id };
-      const wrong = await checkout(user, key, { ...admission, admissionId: randomUUID() }, conversion);
+      const wrong = await checkout(
+        user,
+        key,
+        { ...admission, admissionId: randomUUID() },
+        conversion,
+      );
       expect(wrong.status).toBe(409);
       expect(wrong.body).toEqual(admissionError('ADMISSION_REQUEST_MISMATCH'));
       expect(await fx.state()).toMatchObject({ held: 1, orders: 0 });
@@ -509,7 +561,11 @@ describe('admission purchase gate on owned PostgreSQL, Redis and loopback HTTP',
       const settled = await request(
         'POST',
         '/webhooks/payments/settlement',
-        { orderId: converted.body.order.id, providerTransactionId: randomUUID(), status: 'settled' },
+        {
+          orderId: converted.body.order.id,
+          providerTransactionId: randomUUID(),
+          status: 'settled',
+        },
         { 'idempotency-key': randomUUID() },
       );
       expect(settled.status).toBe(200);
@@ -537,7 +593,9 @@ describe('admission purchase gate on owned PostgreSQL, Redis and loopback HTTP',
       expect(replay.body.order.id).toBe(legacyOrder.body.order.id);
       // Neither request bound or consumed the admission: it still buys one new reservation.
       expect((await fx.state()).results).toBe(0);
-      expect(await inspect(fx.eventId, admission.admissionEpoch, admission.admissionId)).toMatchObject({
+      expect(
+        await inspect(fx.eventId, admission.admissionEpoch, admission.admissionId),
+      ).toMatchObject({
         state: 'admitted',
         phase: 'idle',
       });
@@ -566,7 +624,13 @@ describe('admission purchase gate on owned PostgreSQL, Redis and loopback HTTP',
       });
       lost.on('error', () => undefined);
       lost.end(
-        JSON.stringify({ eventId: fx.eventId, userId: user, tierId: TIER, quantity: 1, ...admission }),
+        JSON.stringify({
+          eventId: fx.eventId,
+          userId: user,
+          tierId: TIER,
+          quantity: 1,
+          ...admission,
+        }),
       );
       await occupying;
       lost.destroy();
@@ -574,7 +638,12 @@ describe('admission purchase gate on owned PostgreSQL, Redis and loopback HTTP',
       const replay = await reserve(user, admission);
       expect(replay.status).toBe(201);
       expect((await fx.results())[0].reservationId).toBe(replay.body.id);
-      expect(await fx.state()).toMatchObject({ available: 19, held: 1, reservations: 1, results: 1 });
+      expect(await fx.state()).toMatchObject({
+        available: 19,
+        held: 1,
+        reservations: 1,
+        results: 1,
+      });
     });
 
     it('keeps unprotected direct checkout and its replay unchanged', async () => {
@@ -642,7 +711,9 @@ describe('admission purchase gate on owned PostgreSQL, Redis and loopback HTTP',
       const response = await reserve(user, admission);
       expect(response.status).toBe(410);
       expect(response.body).toEqual(admissionError('ADMISSION_RESET'));
-      expect(await inspect(fx.eventId, admission.admissionEpoch, admission.admissionId)).toMatchObject({
+      expect(
+        await inspect(fx.eventId, admission.admissionEpoch, admission.admissionId),
+      ).toMatchObject({
         state: 'admitted',
         phase: 'idle',
       });
@@ -695,7 +766,9 @@ describe('admission purchase gate on owned PostgreSQL, Redis and loopback HTTP',
         const delayed = await reserve(user, admission);
         expect(delayed.status).toBe(503);
         expect(delayed.body).toEqual(admissionError('ADMISSION_UNAVAILABLE', 1000));
-        expect(await inspect(fx.eventId, admission.admissionEpoch, admission.admissionId)).toMatchObject({
+        expect(
+          await inspect(fx.eventId, admission.admissionEpoch, admission.admissionId),
+        ).toMatchObject({
           state: 'admitted',
           phase: 'processing',
         });
