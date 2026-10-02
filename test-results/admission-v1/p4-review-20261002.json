@@ -1,0 +1,175 @@
+{
+  "runId": "peakpass-pr24-review-20261002",
+  "baseSha": "e6583fb70c14d0a99a19c530eeda1b178b64274d",
+  "codeSha": "e408fd246d7467af3b555d6a96707fafe10afde3",
+  "archive": "p4-review-20261002.zip",
+  "archiveSha256": "aed9f94a9c41b85cb2539d1e5993ce2884ec0bd7a9e6f7d3ad79b46fdeaf5b51",
+  "review": {
+    "source": "GitHub chatgpt-codex-connector review 5388546072 on PR #24",
+    "reviewedCommit": "e6583fb70c14d0a99a19c530eeda1b178b64274d",
+    "findings": [
+      {
+        "comment": 4163076374,
+        "priority": "P2",
+        "path": "src/core/services/admission.service.ts",
+        "title": "Fence stale controls when protection is disabled"
+      },
+      {
+        "comment": 4163076377,
+        "priority": "P2",
+        "path": "src/core/services/admission.service.ts",
+        "title": "Probe intact Redis state before freezing after transient errors"
+      },
+      {
+        "comment": 4163076382,
+        "priority": "P2",
+        "path": "src/infra/redis/admission.ts",
+        "title": "Allow durable finalization after the epoch deadline"
+      }
+    ],
+    "independentReviewOfFix": false
+  },
+  "environment": {
+    "host": "Windows, Node 24.15.0",
+    "postgres": "16.12 on 127.0.0.1:64369",
+    "redis": "7.4.8 on 127.0.0.1:64370 (appendonly no, save empty, maxmemory-policy noeviction, maxmemory 256mb)",
+    "containerLabel": "peakpass.task=peakpass-pr24-review-20261002"
+  },
+  "results": {
+    "baselineAdmissionPassedAtBase": 36,
+    "redFailed": 6,
+    "redPassed": 23,
+    "redSuitesFailedToCompile": 1,
+    "greenPassed": 34,
+    "build": "pass",
+    "typecheck": "pass",
+    "lintErrors": 0,
+    "lintWarnings": 10,
+    "unitPassed": 160,
+    "integrationPassed": 279,
+    "integrationSkipped": 15,
+    "integrationSuitesPassed": 27,
+    "integrationSuitesSkipped": 2,
+    "harnessPassed": 29,
+    "callbackIsolation": "pass",
+    "twoProcessSmoke": "pass"
+  },
+  "twoProcessSmoke": {
+    "app": "node dist/main.js built at codeSha, ENABLE_ADMISSION=true, real scheduler",
+    "coordinator": "review-smoke-fixture.ts in a second process; no maintain/recover call after the release",
+    "servedWhileProtected": {
+      "get": 200,
+      "join": 201
+    },
+    "promotedByAppScheduler": "admitted",
+    "afterRelease": {
+      "finalStatus": 404,
+      "code": "ADMISSION_NOT_ENABLED",
+      "elapsedMs": 258,
+      "statusesSeen": {
+        "200": 8,
+        "404": 1
+      }
+    },
+    "control": null,
+    "epochKeysLeft": 0,
+    "policy": {
+      "protected": false,
+      "phase": "recovering",
+      "generation": "1",
+      "epochChanged": true
+    },
+    "note": "Single local observation of one release; elapsedMs is not a latency bound."
+  },
+  "skippedSuites": [
+    {
+      "file": "src/tests/integration/redis-recovery.test.ts",
+      "tests": 7,
+      "reason": "WAVE3_REDIS_DESTRUCTIVE unset; requires the fixed peakpass-wave3-0928-redis container on 127.0.0.1:63532"
+    },
+    {
+      "file": "src/tests/integration/order-sweeper-docker.test.ts",
+      "tests": 5,
+      "reason": "WAVE4_TEST_IMAGE unset; production image not rebuilt for this follow-up"
+    }
+  ],
+  "skippedTestsInRunningSuites": [
+    "order-sweeper: commits orders during actual Redis outage and retries no committed business side effects",
+    "order-sweeper: a Redis disconnect triggered after COMMIT cannot turn an expired order into failed work",
+    "order-expiration-http: actual Redis stop after commit cannot undo expiration or reconciliation; recovery preserves replay"
+  ],
+  "notRerun": [
+    "production image build and ENABLE_ADMISSION off/on empty-DB checks",
+    "Docker order-worker lifecycle cases (5)",
+    "existing-011 database upgrade check",
+    "independent static review of the follow-up change"
+  ],
+  "files": [
+    {
+      "name": "review-baseline-admission.log",
+      "bytes": 22401,
+      "sha256": "71b122a2dbaf5b38ce3c79ccd55a21522b8ee5ee5324e8ec119ffc04b025fcf3"
+    },
+    {
+      "name": "review-red.log",
+      "bytes": 30692,
+      "sha256": "7300c1cad323635f8808d1e3034791d2dece3b6d64ae881561d787c6c06dcd09"
+    },
+    {
+      "name": "review-green.log",
+      "bytes": 25435,
+      "sha256": "5977e7bd22c4c13711f9e81f0d8f6843aa851ba0b448477407003a7d39faee37"
+    },
+    {
+      "name": "review-build.log",
+      "bytes": 94,
+      "sha256": "b1549c2c034dd03e6b5ea3ea465f2ea87716fe6eaf9d08c5c2e361930a7701a0"
+    },
+    {
+      "name": "review-typecheck.log",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "name": "review-lint.log",
+      "bytes": 1411,
+      "sha256": "dd513080f2093d6c20af66ccd8b0fed54e0a38b5aef4f47e4cc9b6f38e915704"
+    },
+    {
+      "name": "review-unit.log",
+      "bytes": 16732,
+      "sha256": "72e1d679a32ca073a17ef3ea4e6fc9bc79e60f1ea08f56199a0903f208339f23"
+    },
+    {
+      "name": "review-integration.log",
+      "bytes": 534740,
+      "sha256": "a9d3ead728c71b56ff4dd621cc3303153834ffa595f34930e2a3d0d223b58e55"
+    },
+    {
+      "name": "review-harness.log",
+      "bytes": 3066,
+      "sha256": "c5c1e7bc308d417a56402f77451fab87ef98043e282992f4f45154057cf2eea9"
+    },
+    {
+      "name": "review-callback-harness.log",
+      "bytes": 264,
+      "sha256": "435535c00099f9403ec49778bd1ac4886559c8666185bfa55c045f6c47b9f42c"
+    },
+    {
+      "name": "review-smoke-app.log",
+      "bytes": 15626,
+      "sha256": "8a577c698a5e6f1ece2ac4ed9beeaffe36ea658e2501c9218098020fa4c5a613"
+    },
+    {
+      "name": "review-smoke-client.log",
+      "bytes": 858,
+      "sha256": "c979ecc4c283a4085897b792bbe36b6e390addafe512a0611af88aae80371c05"
+    },
+    {
+      "name": "review-smoke-fixture.ts",
+      "bytes": 5344,
+      "sha256": "5ce9819ded09f3efc35c1a205221c202c3557cf35916a85be12e68f4c71da697"
+    }
+  ],
+  "note": "Follow-up correctness evidence for three review findings; no capacity claim, protected activation, P4 acceptance, merge or deployment."
+}
