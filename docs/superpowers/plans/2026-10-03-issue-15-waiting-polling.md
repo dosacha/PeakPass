@@ -60,8 +60,8 @@ Interfaces (all on `globalThis.PeakPassAdmission`, and `module.exports` when it 
 - `successDelay({ mode, hidden, baseMs, u }): number` — `mode` is `'fixed' | 'adaptive'`, `u` is a draw in [-1, 1).
 - `failureDelay({ failures, hidden, serverMinMs, retryAfterMs, u }): number` — `failures` counts from 1.
 - `parseRetryAfter(value): number | null` — delta-seconds to milliseconds.
-- [ ] Failing tests: fixed is 1000 whatever the base; adaptive jitters and clamps at both bounds; hidden is 15000 in both modes; the backoff steps with jitter and cap; a server minimum or `Retry-After` beyond 15 s wins; header parsing.
-- [ ] Implement; the file passes.
+- [x] Failing tests: fixed is 1000 whatever the base; adaptive jitters and clamps at both bounds; hidden is 15000 in both modes; the backoff steps with jitter and cap; a server minimum or `Retry-After` beyond 15 s wins; header parsing.
+- [x] Implement; the file passes.
 
 ## Task 2: Polling controller
 
