@@ -1,0 +1,5976 @@
+{
+  "format": 1,
+  "revision": "flash-sale-v2.6",
+  "analysisRevision": "flash-sale-analysis-v2.6.1",
+  "analysisCommit": "598ad50bc389b47bcbcfc0175359735671718fe1",
+  "acceptedRevision": "flash-sale-v2.6",
+  "acceptedRunIds": [
+    "p2-v26-ample-r10-01",
+    "p2-v26-ample-r10-02",
+    "p2-v26-ample-r10-03",
+    "p2-v26-ample-r2-01",
+    "p2-v26-ample-r2-02",
+    "p2-v26-ample-r2-03",
+    "p2-v26-ample-r25-01",
+    "p2-v26-ample-r25-02",
+    "p2-v26-ample-r25-03",
+    "p2-v26-limited-01",
+    "p2-v26-limited-02",
+    "p2-v26-limited-03"
+  ],
+  "matrixComplete": true,
+  "state": "accepted",
+  "previousCheckpoint": "../flash-sale-baseline-v26/index.json",
+  "runs": [
+    {
+      "runId": "p2-v26-ample-r10-01",
+      "revision": "flash-sale-v2.6",
+      "commit": "33a74de24cef2493bf4f8e473a695910fc404c42",
+      "settings": {
+        "users": 400,
+        "rate": 10,
+        "thinkMs": 20,
+        "retries": 1,
+        "retryDelayMs": 100,
+        "replayEvery": 3,
+        "quantity": 2,
+        "preVus": 100,
+        "maxVus": 100,
+        "poolMax": 10,
+        "sampleMs": 250,
+        "warmupSeconds": 10,
+        "drainSeconds": 30,
+        "limiterMax": 1000000,
+        "durationSeconds": 40,
+        "measurementSeconds": 30,
+        "stock": "ample",
+        "seats": 800,
+        "runId": "p2-v26-ample-r10-01"
+      },
+      "startedAt": "2026-10-01T04:39:10.593Z",
+      "formal": true,
+      "acceptedFormal": true,
+      "archive": "../flash-sale-baseline-v26/p2-v26-ample-r10-01.zip",
+      "sha256": "bdf28442a4233955dcec45a111299e0659f2d21386e998af18145b9882f4c730",
+      "files": 23,
+      "verifiedArtifactHashes": 22,
+      "sourceHashes": {
+        "load-test/flash-sale.js": "f7a8e56f07f83fe86b4adc3e14efe5d1958c6610f51c248e9333b8eb39f378e6",
+        "load-test/flash-sale-fixture.mjs": "89901d5144f562bd0553e84730c74327a39702d86731bfa30bb689a2b69e4b1e",
+        "load-test/flash-sale-analysis.mjs": "8568000836a0ad98995eafb3bc51a3469f70bca646e330c3a08755e235901eb9",
+        "load-test/flash-sale-check.mjs": "316963391fa60897a50c8ede523a27d1f578eb38d63d302e3a2a278fbddf9966",
+        "docker-compose.flash-sale.yml": "192312953cb3b7d59ed563e16fb552ac91c312786aac9f0c9278840eb19acab5",
+        "Dockerfile": "947dab29bc64bd1593e04f9afcd3fde6c7cdf0d79f561966b9c615f95eef7a85",
+        "package-lock.json": "1788914f59b4f5b1d08da539e8097eee171f01114057769a71a3765e8f65d225",
+        "src/infra/config.ts": "bac9ddb9173e4777f9c60070dba08e3904aa93ae65fd43069911dae9085b2044",
+        "src/infra/postgres/client.ts": "86047dda0772689a28380b5e5d166a89fa9cb66ced2b3498ddb9ccad60370642"
+      },
+      "originalAnalysisRevision": "flash-sale-analysis-v2.6",
+      "originalClassification": "valid-stable",
+      "analysis": {
+        "revision": "flash-sale-v2.6",
+        "analysisRevision": "flash-sale-analysis-v2.6.1",
+        "runId": "p2-v26-ample-r10-01",
+        "classification": "valid-stable",
+        "smokePassed": true,
+        "k6ExitCode": 0,
+        "invalidReasons": [],
+        "evidence": {
+          "sourceClean": true,
+          "checkoutProtocol": true,
+          "paidIdentityObserved": true,
+          "checkoutAuditObserved": true,
+          "accounting": {
+            "checks": {
+              "offeredBuyers": true,
+              "attempts": true,
+              "journeys": true,
+              "arrivalMetrics": true,
+              "summaryCounts": true
+            },
+            "complete": true
+          },
+          "observer": {
+            "count": 119,
+            "first": 1790829582503,
+            "last": 1790829613494,
+            "maxGapMs": 305,
+            "errors": 0,
+            "complete": true
+          },
+          "pool": {
+            "count": 126,
+            "first": 1790829582415,
+            "last": 1790829613692,
+            "maxGapMs": 255,
+            "errors": 0,
+            "complete": true
+          },
+          "resources": {
+            "count": 11,
+            "first": 1790829578151,
+            "last": 1790829610451,
+            "maxGapMs": 3413,
+            "errors": 0,
+            "complete": true
+          },
+          "clockAligned": true,
+          "generatorObserved": true,
+          "containersObserved": true,
+          "clean": true,
+          "auth": true,
+          "lifecycle": true
+        },
+        "window": {
+          "start": "2026-10-01T04:39:43.254Z",
+          "endExclusive": "2026-10-01T04:40:13.254Z",
+          "seconds": 30,
+          "confirmedPaid": 300,
+          "paidPerSecond": 10,
+          "warmupSpillover": 0,
+          "firstHalfPaidPerSecond": 10,
+          "secondHalfPaidPerSecond": 10,
+          "nonReplayAttempts": 750,
+          "failureAttempts": 0,
+          "failureFraction": 0,
+          "responseKey": "stage/kind/flow/status/error_code/code/business",
+          "apiLatencyMs": {
+            "reservation/normal/reservation/201/0/none/success": {
+              "count": 150,
+              "min": 5.3909,
+              "median": 7.914149999999999,
+              "p95": 15.515129999999992,
+              "p99": 41.28944599999996,
+              "max": 45.5556
+            },
+            "checkout/normal/reservation/201/0/none/success": {
+              "count": 150,
+              "min": 7.1017,
+              "median": 9.486149999999999,
+              "p95": 15.229579999999999,
+              "p99": 25.171785999999923,
+              "max": 29.7574
+            },
+            "settlement/normal/reservation/200/0/none/success": {
+              "count": 150,
+              "min": 7.7984,
+              "median": 10.687750000000001,
+              "p95": 21.772859999999994,
+              "p99": 33.16691599999994,
+              "max": 134.601
+            },
+            "checkout/normal/direct/201/0/none/success": {
+              "count": 150,
+              "min": 7.3726,
+              "median": 9.70185,
+              "p95": 19.254959999999986,
+              "p99": 28.522332999999986,
+              "max": 40.0557
+            },
+            "settlement/normal/direct/200/0/none/success": {
+              "count": 150,
+              "min": 8.1214,
+              "median": 10.669899999999998,
+              "p95": 32.629579999999926,
+              "p99": 51.29025699999996,
+              "max": 112.9589
+            },
+            "checkout/replay/reservation/201/0/none/success": {
+              "count": 50,
+              "min": 4.1673,
+              "median": 5.8386,
+              "p95": 13.21955999999999,
+              "p99": 16.044396999999996,
+              "max": 16.473
+            },
+            "settlement/replay/reservation/200/0/none/success": {
+              "count": 50,
+              "min": 1.5695,
+              "median": 2.6372999999999998,
+              "p95": 6.199554999999999,
+              "p99": 10.685656,
+              "max": 10.8452
+            },
+            "checkout/replay/direct/201/0/none/success": {
+              "count": 50,
+              "min": 4.1988,
+              "median": 5.90105,
+              "p95": 12.782154999999996,
+              "p99": 48.275464999999926,
+              "max": 68.2339
+            },
+            "settlement/replay/direct/200/0/none/success": {
+              "count": 50,
+              "min": 1.5558,
+              "median": 2.6807,
+              "p95": 6.290149999999998,
+              "p99": 12.76929599999998,
+              "max": 17.8063
+            }
+          }
+        },
+        "cohort": {
+          "offered": 300,
+          "started": 300,
+          "actualWindowArrivals": 300,
+          "confirmedPaid": 300,
+          "completionFraction": 1,
+          "unfinished": 0,
+          "outcomes": {
+            "paid": 300
+          },
+          "paidJourneyMs": {
+            "count": 300,
+            "min": 37,
+            "median": 66,
+            "p95": 91.05000000000001,
+            "p99": 129.05999999999995,
+            "max": 204
+          },
+          "allFinishedJourneyMs": {
+            "count": 300,
+            "min": 37,
+            "median": 66,
+            "p95": 91.05000000000001,
+            "p99": 129.05999999999995,
+            "max": 204
+          },
+          "lastArrival": 1790829613154,
+          "lastConfirmedCompletion": 1790829613193,
+          "maximumDrainEnd": "2026-10-01T04:40:43.253Z"
+        },
+        "all": {
+          "offered": 400,
+          "started": 400,
+          "httpPaid": 400,
+          "sqlPaid": 400,
+          "sqlPaidWithoutHttp": 0,
+          "httpPaidWithoutSql": 0,
+          "missingPaidIdentity": 0,
+          "httpPaidIdentityMismatches": 0,
+          "duplicateStarts": 0,
+          "duplicateCompletions": 0,
+          "dropped": 0,
+          "scriptFailures": 0,
+          "protocolFailures": 0,
+          "replayFailures": 0,
+          "arrivalLagMs": {
+            "count": 400,
+            "min": 0,
+            "median": 0,
+            "p95": 1,
+            "p99": 4.019999999999982,
+            "max": 10
+          },
+          "responses": {
+            "reservation/normal/reservation/201/0/none/success": 200,
+            "checkout/normal/reservation/201/0/none/success": 200,
+            "settlement/normal/reservation/200/0/none/success": 200,
+            "checkout/replay/reservation/201/0/none/success": 67,
+            "settlement/replay/reservation/200/0/none/success": 67,
+            "checkout/normal/direct/201/0/none/success": 200,
+            "settlement/normal/direct/200/0/none/success": 200,
+            "checkout/replay/direct/201/0/none/success": 67,
+            "settlement/replay/direct/200/0/none/success": 67
+          },
+          "maxActiveVUs": 3
+        },
+        "diagnostics": {
+          "poolWaiting": {
+            "count": 120,
+            "min": 0,
+            "median": 0,
+            "p95": 0,
+            "p99": 0,
+            "max": 0
+          },
+          "poolCheckedOut": {
+            "count": 120,
+            "min": 0,
+            "median": 0,
+            "p95": 1,
+            "p99": 1,
+            "max": 1
+          },
+          "lockWaiters": {
+            "count": 115,
+            "min": 0,
+            "median": 0,
+            "p95": 0,
+            "p99": 0,
+            "max": 0
+          },
+          "lockTypes": [],
+          "redisObserverRttMs": {
+            "count": 115,
+            "min": 0.6239999999961583,
+            "median": 0.9648999999990338,
+            "p95": 3.341209999999407,
+            "p99": 14.320647999999778,
+            "max": 32.22370000000228
+          },
+          "retriesScheduledInWindow": 4,
+          "hostCpuPercent": {
+            "count": 9,
+            "min": 4.181893046476914,
+            "median": 12.557090188741537,
+            "p95": 22.414365713687975,
+            "p99": 22.499440313823715,
+            "max": 22.52070896385765
+          },
+          "hostFreeBytes": {
+            "count": 9,
+            "min": 2862202880,
+            "median": 2926219264,
+            "p95": 3005709516.8,
+            "p99": 3014056181.76,
+            "max": 3016142848
+          },
+          "containers": {
+            "app": {
+              "cpuPercent": {
+                "count": 9,
+                "min": 12.97,
+                "median": 17.59,
+                "p95": 27.742,
+                "p99": 28.884400000000003,
+                "max": 29.17
+              },
+              "memoryPercent": {
+                "count": 9,
+                "min": 8.78,
+                "median": 11.94,
+                "p95": 18.564,
+                "p99": 18.5768,
+                "max": 18.58
+              }
+            },
+            "postgres": {
+              "cpuPercent": {
+                "count": 9,
+                "min": 9.15,
+                "median": 10.41,
+                "p95": 17.323999999999998,
+                "p99": 18.8728,
+                "max": 19.26
+              },
+              "memoryPercent": {
+                "count": 9,
+                "min": 8.43,
+                "median": 8.58,
+                "p95": 8.92,
+                "p99": 9.048,
+                "max": 9.08
+              }
+            },
+            "redis": {
+              "cpuPercent": {
+                "count": 9,
+                "min": 3.87,
+                "median": 4.08,
+                "p95": 9.679999999999998,
+                "p99": 11.328,
+                "max": 11.74
+              },
+              "memoryPercent": {
+                "count": 9,
+                "min": 1.87,
+                "median": 2.23,
+                "p95": 2.26,
+                "p99": 2.26,
+                "max": 2.26
+              }
+            }
+          },
+          "generatorCpuSeconds": {
+            "count": 9,
+            "min": 0.09375,
+            "median": 0.234375,
+            "p95": 0.3,
+            "p99": 0.31,
+            "max": 0.3125
+          },
+          "generatorMemoryBytes": {
+            "count": 9,
+            "min": 83480576,
+            "median": 91226112,
+            "p95": 102001049.6,
+            "p99": 104007761.92,
+            "max": 104509440
+          }
+        },
+        "sqlCounts": {
+          "offered": 400,
+          "started": 400,
+          "completed": 400,
+          "dropped": 0,
+          "paidOrders": 400,
+          "ordersByStatus": {
+            "paid": 400
+          },
+          "tickets": 800,
+          "activeHolds": 0
+        },
+        "failedSmokeChecks": []
+      }
+    },
+    {
+      "runId": "p2-v26-ample-r10-02",
+      "revision": "flash-sale-v2.6",
+      "commit": "33a74de24cef2493bf4f8e473a695910fc404c42",
+      "settings": {
+        "users": 400,
+        "rate": 10,
+        "thinkMs": 20,
+        "retries": 1,
+        "retryDelayMs": 100,
+        "replayEvery": 3,
+        "quantity": 2,
+        "preVus": 100,
+        "maxVus": 100,
+        "poolMax": 10,
+        "sampleMs": 250,
+        "warmupSeconds": 10,
+        "drainSeconds": 30,
+        "limiterMax": 1000000,
+        "durationSeconds": 40,
+        "measurementSeconds": 30,
+        "stock": "ample",
+        "seats": 800,
+        "runId": "p2-v26-ample-r10-02"
+      },
+      "startedAt": "2026-10-01T04:43:13.807Z",
+      "formal": true,
+      "acceptedFormal": true,
+      "archive": "../flash-sale-baseline-v26/p2-v26-ample-r10-02.zip",
+      "sha256": "a30657d7430c417f4382edcf9c336a154b8afacbafc6f4190ab0c60d769cf9f8",
+      "files": 23,
+      "verifiedArtifactHashes": 22,
+      "sourceHashes": {
+        "load-test/flash-sale.js": "f7a8e56f07f83fe86b4adc3e14efe5d1958c6610f51c248e9333b8eb39f378e6",
+        "load-test/flash-sale-fixture.mjs": "89901d5144f562bd0553e84730c74327a39702d86731bfa30bb689a2b69e4b1e",
+        "load-test/flash-sale-analysis.mjs": "8568000836a0ad98995eafb3bc51a3469f70bca646e330c3a08755e235901eb9",
+        "load-test/flash-sale-check.mjs": "316963391fa60897a50c8ede523a27d1f578eb38d63d302e3a2a278fbddf9966",
+        "docker-compose.flash-sale.yml": "192312953cb3b7d59ed563e16fb552ac91c312786aac9f0c9278840eb19acab5",
+        "Dockerfile": "947dab29bc64bd1593e04f9afcd3fde6c7cdf0d79f561966b9c615f95eef7a85",
+        "package-lock.json": "1788914f59b4f5b1d08da539e8097eee171f01114057769a71a3765e8f65d225",
+        "src/infra/config.ts": "bac9ddb9173e4777f9c60070dba08e3904aa93ae65fd43069911dae9085b2044",
+        "src/infra/postgres/client.ts": "86047dda0772689a28380b5e5d166a89fa9cb66ced2b3498ddb9ccad60370642"
+      },
+      "originalAnalysisRevision": "flash-sale-analysis-v2.6",
+      "originalClassification": "valid-stable",
+      "analysis": {
+        "revision": "flash-sale-v2.6",
+        "analysisRevision": "flash-sale-analysis-v2.6.1",
+        "runId": "p2-v26-ample-r10-02",
+        "classification": "valid-stable",
+        "smokePassed": true,
+        "k6ExitCode": 0,
+        "invalidReasons": [],
+        "evidence": {
+          "sourceClean": true,
+          "checkoutProtocol": true,
+          "paidIdentityObserved": true,
+          "checkoutAuditObserved": true,
+          "accounting": {
+            "checks": {
+              "offeredBuyers": true,
+              "attempts": true,
+              "journeys": true,
+              "arrivalMetrics": true,
+              "summaryCounts": true
+            },
+            "complete": true
+          },
+          "observer": {
+            "count": 119,
+            "first": 1790829825547,
+            "last": 1790829856515,
+            "maxGapMs": 294,
+            "errors": 0,
+            "complete": true
+          },
+          "pool": {
+            "count": 128,
+            "first": 1790829825301,
+            "last": 1790829857075,
+            "maxGapMs": 252,
+            "errors": 0,
+            "complete": true
+          },
+          "resources": {
+            "count": 11,
+            "first": 1790829821658,
+            "last": 1790829854523,
+            "maxGapMs": 3612,
+            "errors": 0,
+            "complete": true
+          },
+          "clockAligned": true,
+          "generatorObserved": true,
+          "containersObserved": true,
+          "clean": true,
+          "auth": true,
+          "lifecycle": true
+        },
+        "window": {
+          "start": "2026-10-01T04:43:46.291Z",
+          "endExclusive": "2026-10-01T04:44:16.291Z",
+          "seconds": 30,
+          "confirmedPaid": 300,
+          "paidPerSecond": 10,
+          "warmupSpillover": 0,
+          "firstHalfPaidPerSecond": 10,
+          "secondHalfPaidPerSecond": 10,
+          "nonReplayAttempts": 751,
+          "failureAttempts": 1,
+          "failureFraction": 0.0013315579227696406,
+          "responseKey": "stage/kind/flow/status/error_code/code/business",
+          "apiLatencyMs": {
+            "reservation/normal/reservation/201/0/none/success": {
+              "count": 150,
+              "min": 6.3957,
+              "median": 8.43245,
+              "p95": 14.042345,
+              "p99": 34.70562099999998,
+              "max": 40.4489
+            },
+            "checkout/normal/reservation/201/0/none/success": {
+              "count": 150,
+              "min": 7.4449,
+              "median": 10.2379,
+              "p95": 19.642159999999997,
+              "p99": 29.295935999999994,
+              "max": 41.8774
+            },
+            "settlement/normal/reservation/200/0/none/success": {
+              "count": 149,
+              "min": 7.7111,
+              "median": 10.9828,
+              "p95": 23.056699999999996,
+              "p99": 48.56346400000011,
+              "max": 68.9936
+            },
+            "checkout/normal/direct/201/0/none/success": {
+              "count": 150,
+              "min": 7.9424,
+              "median": 10.35535,
+              "p95": 19.973809999999997,
+              "p99": 34.078503999999846,
+              "max": 51.9516
+            },
+            "settlement/normal/direct/200/0/none/success": {
+              "count": 150,
+              "min": 8.5019,
+              "median": 11.0521,
+              "p95": 20.77811999999992,
+              "p99": 43.301670999999885,
+              "max": 63.5354
+            },
+            "checkout/replay/reservation/201/0/none/success": {
+              "count": 50,
+              "min": 4.7275,
+              "median": 6.5346,
+              "p95": 13.348049999999999,
+              "p99": 15.285701999999993,
+              "max": 16.9028
+            },
+            "settlement/replay/reservation/200/0/none/success": {
+              "count": 50,
+              "min": 2.066,
+              "median": 2.7157999999999998,
+              "p95": 7.7986699999999995,
+              "p99": 14.437427999999983,
+              "max": 18.5499
+            },
+            "checkout/replay/direct/201/0/none/success": {
+              "count": 50,
+              "min": 4.2148,
+              "median": 5.875,
+              "p95": 15.029609999999993,
+              "p99": 35.81645399999995,
+              "max": 47.6036
+            },
+            "settlement/replay/direct/200/0/none/success": {
+              "count": 50,
+              "min": 1.5661,
+              "median": 2.65315,
+              "p95": 10.010989999999994,
+              "p99": 13.450980999999999,
+              "max": 13.6387
+            },
+            "settlement/normal/reservation/500/1500/INTERNAL_ERROR/failure": {
+              "count": 1,
+              "min": 132.7508,
+              "median": 132.7508,
+              "p95": 132.7508,
+              "p99": 132.7508,
+              "max": 132.7508
+            },
+            "settlement/retry/reservation/200/0/none/success": {
+              "count": 1,
+              "min": 16.269,
+              "median": 16.269,
+              "p95": 16.269,
+              "p99": 16.269,
+              "max": 16.269
+            }
+          }
+        },
+        "cohort": {
+          "offered": 300,
+          "started": 300,
+          "actualWindowArrivals": 300,
+          "confirmedPaid": 300,
+          "completionFraction": 1,
+          "unfinished": 0,
+          "outcomes": {
+            "paid": 300
+          },
+          "paidJourneyMs": {
+            "count": 300,
+            "min": 37,
+            "median": 66,
+            "p95": 98.15000000000003,
+            "p99": 119.01999999999998,
+            "max": 341
+          },
+          "allFinishedJourneyMs": {
+            "count": 300,
+            "min": 37,
+            "median": 66,
+            "p95": 98.15000000000003,
+            "p99": 119.01999999999998,
+            "max": 341
+          },
+          "lastArrival": 1790829856191,
+          "lastConfirmedCompletion": 1790829856238,
+          "maximumDrainEnd": "2026-10-01T04:44:46.290Z"
+        },
+        "all": {
+          "offered": 400,
+          "started": 400,
+          "httpPaid": 400,
+          "sqlPaid": 400,
+          "sqlPaidWithoutHttp": 0,
+          "httpPaidWithoutSql": 0,
+          "missingPaidIdentity": 0,
+          "httpPaidIdentityMismatches": 0,
+          "duplicateStarts": 0,
+          "duplicateCompletions": 0,
+          "dropped": 0,
+          "scriptFailures": 0,
+          "protocolFailures": 0,
+          "replayFailures": 0,
+          "arrivalLagMs": {
+            "count": 400,
+            "min": 0,
+            "median": 0,
+            "p95": 0,
+            "p99": 3,
+            "max": 26
+          },
+          "responses": {
+            "reservation/normal/reservation/201/0/none/success": 200,
+            "checkout/normal/reservation/201/0/none/success": 200,
+            "settlement/normal/reservation/200/0/none/success": 199,
+            "checkout/replay/reservation/201/0/none/success": 67,
+            "settlement/replay/reservation/200/0/none/success": 67,
+            "checkout/normal/direct/201/0/none/success": 200,
+            "settlement/normal/direct/200/0/none/success": 200,
+            "checkout/replay/direct/201/0/none/success": 67,
+            "settlement/replay/direct/200/0/none/success": 67,
+            "settlement/normal/reservation/500/1500/INTERNAL_ERROR/failure": 1,
+            "settlement/retry/reservation/200/0/none/success": 1
+          },
+          "maxActiveVUs": 3
+        },
+        "diagnostics": {
+          "poolWaiting": {
+            "count": 120,
+            "min": 0,
+            "median": 0,
+            "p95": 0,
+            "p99": 0,
+            "max": 0
+          },
+          "poolCheckedOut": {
+            "count": 120,
+            "min": 0,
+            "median": 0,
+            "p95": 1,
+            "p99": 1.8100000000000023,
+            "max": 2
+          },
+          "lockWaiters": {
+            "count": 115,
+            "min": 0,
+            "median": 0,
+            "p95": 0,
+            "p99": 0,
+            "max": 0
+          },
+          "lockTypes": [],
+          "redisObserverRttMs": {
+            "count": 115,
+            "min": 0.6159000000043306,
+            "median": 0.9769000000014785,
+            "p95": 2.5283400000051186,
+            "p99": 6.659918000002943,
+            "max": 8.255399999994552
+          },
+          "retriesScheduledInWindow": 7,
+          "hostCpuPercent": {
+            "count": 9,
+            "min": 5.452990593088181,
+            "median": 12.531113446540187,
+            "p95": 23.94912054972856,
+            "p99": 26.687692230917452,
+            "max": 27.372335151214678
+          },
+          "hostFreeBytes": {
+            "count": 9,
+            "min": 2225885184,
+            "median": 2334797824,
+            "p95": 2679800627.2,
+            "p99": 2721372733.44,
+            "max": 2731765760
+          },
+          "containers": {
+            "app": {
+              "cpuPercent": {
+                "count": 9,
+                "min": 8.92,
+                "median": 17.2,
+                "p95": 25.983999999999995,
+                "p99": 29.8048,
+                "max": 30.76
+              },
+              "memoryPercent": {
+                "count": 9,
+                "min": 11.01,
+                "median": 13.3,
+                "p95": 14.826,
+                "p99": 14.9412,
+                "max": 14.97
+              }
+            },
+            "postgres": {
+              "cpuPercent": {
+                "count": 9,
+                "min": 6.99,
+                "median": 10.1,
+                "p95": 13.181999999999999,
+                "p99": 13.988399999999999,
+                "max": 14.19
+              },
+              "memoryPercent": {
+                "count": 9,
+                "min": 8.43,
+                "median": 8.61,
+                "p95": 9.038,
+                "p99": 9.063600000000001,
+                "max": 9.07
+              }
+            },
+            "redis": {
+              "cpuPercent": {
+                "count": 9,
+                "min": 3.49,
+                "median": 4.31,
+                "p95": 7.515999999999998,
+                "p99": 9.007200000000001,
+                "max": 9.38
+              },
+              "memoryPercent": {
+                "count": 9,
+                "min": 1.97,
+                "median": 2.25,
+                "p95": 2.43,
+                "p99": 2.43,
+                "max": 2.43
+              }
+            }
+          },
+          "generatorCpuSeconds": {
+            "count": 9,
+            "min": 0.140625,
+            "median": 0.234375,
+            "p95": 0.284375,
+            "p99": 0.294375,
+            "max": 0.296875
+          },
+          "generatorMemoryBytes": {
+            "count": 9,
+            "min": 84701184,
+            "median": 92741632,
+            "p95": 103555891.2,
+            "p99": 104666071.04,
+            "max": 104943616
+          }
+        },
+        "sqlCounts": {
+          "offered": 400,
+          "started": 400,
+          "completed": 400,
+          "dropped": 0,
+          "paidOrders": 400,
+          "ordersByStatus": {
+            "paid": 400
+          },
+          "tickets": 800,
+          "activeHolds": 0
+        },
+        "failedSmokeChecks": []
+      }
+    },
+    {
+      "runId": "p2-v26-ample-r10-03",
+      "revision": "flash-sale-v2.6",
+      "commit": "33a74de24cef2493bf4f8e473a695910fc404c42",
+      "settings": {
+        "users": 400,
+        "rate": 10,
+        "thinkMs": 20,
+        "retries": 1,
+        "retryDelayMs": 100,
+        "replayEvery": 3,
+        "quantity": 2,
+        "preVus": 100,
+        "maxVus": 100,
+        "poolMax": 10,
+        "sampleMs": 250,
+        "warmupSeconds": 10,
+        "drainSeconds": 30,
+        "limiterMax": 1000000,
+        "durationSeconds": 40,
+        "measurementSeconds": 30,
+        "stock": "ample",
+        "seats": 800,
+        "runId": "p2-v26-ample-r10-03"
+      },
+      "startedAt": "2026-10-01T04:50:30.471Z",
+      "formal": true,
+      "acceptedFormal": true,
+      "archive": "../flash-sale-baseline-v26/p2-v26-ample-r10-03.zip",
+      "sha256": "e18457e276bc43930b562c32d327f5e818cac6139011a889cb5963c649e8a6e9",
+      "files": 23,
+      "verifiedArtifactHashes": 22,
+      "sourceHashes": {
+        "load-test/flash-sale.js": "f7a8e56f07f83fe86b4adc3e14efe5d1958c6610f51c248e9333b8eb39f378e6",
+        "load-test/flash-sale-fixture.mjs": "89901d5144f562bd0553e84730c74327a39702d86731bfa30bb689a2b69e4b1e",
+        "load-test/flash-sale-analysis.mjs": "8568000836a0ad98995eafb3bc51a3469f70bca646e330c3a08755e235901eb9",
+        "load-test/flash-sale-check.mjs": "316963391fa60897a50c8ede523a27d1f578eb38d63d302e3a2a278fbddf9966",
+        "docker-compose.flash-sale.yml": "192312953cb3b7d59ed563e16fb552ac91c312786aac9f0c9278840eb19acab5",
+        "Dockerfile": "947dab29bc64bd1593e04f9afcd3fde6c7cdf0d79f561966b9c615f95eef7a85",
+        "package-lock.json": "1788914f59b4f5b1d08da539e8097eee171f01114057769a71a3765e8f65d225",
+        "src/infra/config.ts": "bac9ddb9173e4777f9c60070dba08e3904aa93ae65fd43069911dae9085b2044",
+        "src/infra/postgres/client.ts": "86047dda0772689a28380b5e5d166a89fa9cb66ced2b3498ddb9ccad60370642"
+      },
+      "originalAnalysisRevision": "flash-sale-analysis-v2.6",
+      "originalClassification": "valid-stable",
+      "analysis": {
+        "revision": "flash-sale-v2.6",
+        "analysisRevision": "flash-sale-analysis-v2.6.1",
+        "runId": "p2-v26-ample-r10-03",
+        "classification": "valid-stable",
+        "smokePassed": true,
+        "k6ExitCode": 0,
+        "invalidReasons": [],
+        "evidence": {
+          "sourceClean": true,
+          "checkoutProtocol": true,
+          "paidIdentityObserved": true,
+          "checkoutAuditObserved": true,
+          "accounting": {
+            "checks": {
+              "offeredBuyers": true,
+              "attempts": true,
+              "journeys": true,
+              "arrivalMetrics": true,
+              "summaryCounts": true
+            },
+            "complete": true
+          },
+          "observer": {
+            "count": 120,
+            "first": 1790830260313,
+            "last": 1790830291433,
+            "maxGapMs": 292,
+            "errors": 0,
+            "complete": true
+          },
+          "pool": {
+            "count": 126,
+            "first": 1790830260275,
+            "last": 1790830291546,
+            "maxGapMs": 252,
+            "errors": 0,
+            "complete": true
+          },
+          "resources": {
+            "count": 11,
+            "first": 1790830256841,
+            "last": 1790830288746,
+            "maxGapMs": 3355,
+            "errors": 0,
+            "complete": true
+          },
+          "clockAligned": true,
+          "generatorObserved": true,
+          "containersObserved": true,
+          "clean": true,
+          "auth": true,
+          "lifecycle": true
+        },
+        "window": {
+          "start": "2026-10-01T04:51:01.259Z",
+          "endExclusive": "2026-10-01T04:51:31.259Z",
+          "seconds": 30,
+          "confirmedPaid": 300,
+          "paidPerSecond": 10,
+          "warmupSpillover": 0,
+          "firstHalfPaidPerSecond": 10,
+          "secondHalfPaidPerSecond": 10,
+          "nonReplayAttempts": 750,
+          "failureAttempts": 0,
+          "failureFraction": 0,
+          "responseKey": "stage/kind/flow/status/error_code/code/business",
+          "apiLatencyMs": {
+            "reservation/normal/reservation/201/0/none/success": {
+              "count": 150,
+              "min": 6.2596,
+              "median": 7.5461,
+              "p95": 12.003889999999982,
+              "p99": 30.119537999999938,
+              "max": 40.4388
+            },
+            "checkout/normal/reservation/201/0/none/success": {
+              "count": 150,
+              "min": 7.5164,
+              "median": 9.08385,
+              "p95": 13.22397,
+              "p99": 28.779913999999984,
+              "max": 45.4567
+            },
+            "settlement/normal/reservation/200/0/none/success": {
+              "count": 150,
+              "min": 8.4015,
+              "median": 10.0692,
+              "p95": 14.794114999999998,
+              "p99": 45.415534999999934,
+              "max": 59.0118
+            },
+            "checkout/normal/direct/201/0/none/success": {
+              "count": 150,
+              "min": 6.8789,
+              "median": 8.993500000000001,
+              "p95": 15.345264999999978,
+              "p99": 48.27290799999992,
+              "max": 55.9085
+            },
+            "settlement/normal/direct/200/0/none/success": {
+              "count": 150,
+              "min": 8.2162,
+              "median": 10.0732,
+              "p95": 14.88147499999998,
+              "p99": 42.50186599999993,
+              "max": 47.7527
+            },
+            "checkout/replay/reservation/201/0/none/success": {
+              "count": 50,
+              "min": 4.4377,
+              "median": 5.390599999999999,
+              "p95": 8.15298,
+              "p99": 26.357007999999965,
+              "max": 34.8883
+            },
+            "settlement/replay/reservation/200/0/none/success": {
+              "count": 50,
+              "min": 1.546,
+              "median": 2.6096000000000004,
+              "p95": 3.9974349999999985,
+              "p99": 7.11243799999999,
+              "max": 9.5153
+            },
+            "checkout/replay/direct/201/0/none/success": {
+              "count": 50,
+              "min": 4.178,
+              "median": 5.33295,
+              "p95": 7.7260849999999985,
+              "p99": 16.663560999999973,
+              "max": 23.0488
+            },
+            "settlement/replay/direct/200/0/none/success": {
+              "count": 50,
+              "min": 1.5628,
+              "median": 2.6119,
+              "p95": 3.543029999999999,
+              "p99": 9.443176999999997,
+              "max": 10.4147
+            }
+          }
+        },
+        "cohort": {
+          "offered": 300,
+          "started": 300,
+          "actualWindowArrivals": 300,
+          "confirmedPaid": 300,
+          "completionFraction": 1,
+          "unfinished": 0,
+          "outcomes": {
+            "paid": 300
+          },
+          "paidJourneyMs": {
+            "count": 300,
+            "min": 37,
+            "median": 65,
+            "p95": 79.05000000000001,
+            "p99": 116.04999999999995,
+            "max": 169
+          },
+          "allFinishedJourneyMs": {
+            "count": 300,
+            "min": 37,
+            "median": 65,
+            "p95": 79.05000000000001,
+            "p99": 116.04999999999995,
+            "max": 169
+          },
+          "lastArrival": 1790830291159,
+          "lastConfirmedCompletion": 1790830291196,
+          "maximumDrainEnd": "2026-10-01T04:52:01.258Z"
+        },
+        "all": {
+          "offered": 400,
+          "started": 400,
+          "httpPaid": 400,
+          "sqlPaid": 400,
+          "sqlPaidWithoutHttp": 0,
+          "httpPaidWithoutSql": 0,
+          "missingPaidIdentity": 0,
+          "httpPaidIdentityMismatches": 0,
+          "duplicateStarts": 0,
+          "duplicateCompletions": 0,
+          "dropped": 0,
+          "scriptFailures": 0,
+          "protocolFailures": 0,
+          "replayFailures": 0,
+          "arrivalLagMs": {
+            "count": 400,
+            "min": 0,
+            "median": 0,
+            "p95": 1,
+            "p99": 2.009999999999991,
+            "max": 11
+          },
+          "responses": {
+            "reservation/normal/reservation/201/0/none/success": 200,
+            "checkout/normal/reservation/201/0/none/success": 200,
+            "settlement/normal/reservation/200/0/none/success": 200,
+            "checkout/replay/reservation/201/0/none/success": 67,
+            "settlement/replay/reservation/200/0/none/success": 67,
+            "checkout/normal/direct/201/0/none/success": 200,
+            "settlement/normal/direct/200/0/none/success": 200,
+            "checkout/replay/direct/201/0/none/success": 67,
+            "settlement/replay/direct/200/0/none/success": 67
+          },
+          "maxActiveVUs": 2
+        },
+        "diagnostics": {
+          "poolWaiting": {
+            "count": 120,
+            "min": 0,
+            "median": 0,
+            "p95": 0,
+            "p99": 0,
+            "max": 0
+          },
+          "poolCheckedOut": {
+            "count": 120,
+            "min": 0,
+            "median": 0,
+            "p95": 1,
+            "p99": 1,
+            "max": 2
+          },
+          "lockWaiters": {
+            "count": 115,
+            "min": 0,
+            "median": 0,
+            "p95": 0,
+            "p99": 0,
+            "max": 0
+          },
+          "lockTypes": [],
+          "redisObserverRttMs": {
+            "count": 115,
+            "min": 0.6373999999996158,
+            "median": 0.858699999997043,
+            "p95": 1.5056400000001304,
+            "p99": 2.53790799999857,
+            "max": 2.7606999999989057
+          },
+          "retriesScheduledInWindow": 1,
+          "hostCpuPercent": {
+            "count": 9,
+            "min": 3.1668290681573397,
+            "median": 8.667860518330595,
+            "p95": 15.834574133907005,
+            "p99": 18.191052586200104,
+            "max": 18.78017219927338
+          },
+          "hostFreeBytes": {
+            "count": 9,
+            "min": 2042388480,
+            "median": 2110709760,
+            "p95": 2149516083.2,
+            "p99": 2149931581.44,
+            "max": 2150035456
+          },
+          "containers": {
+            "app": {
+              "cpuPercent": {
+                "count": 9,
+                "min": 14.59,
+                "median": 17.16,
+                "p95": 23.468,
+                "p99": 24.5336,
+                "max": 24.8
+              },
+              "memoryPercent": {
+                "count": 9,
+                "min": 10.94,
+                "median": 12.18,
+                "p95": 14.862,
+                "p99": 14.9004,
+                "max": 14.91
+              }
+            },
+            "postgres": {
+              "cpuPercent": {
+                "count": 9,
+                "min": 6.56,
+                "median": 9.97,
+                "p95": 20.74,
+                "p99": 23.188,
+                "max": 23.8
+              },
+              "memoryPercent": {
+                "count": 9,
+                "min": 8.44,
+                "median": 8.61,
+                "p95": 8.984,
+                "p99": 9.0128,
+                "max": 9.02
+              }
+            },
+            "redis": {
+              "cpuPercent": {
+                "count": 9,
+                "min": 3.55,
+                "median": 4.01,
+                "p95": 7.911999999999999,
+                "p99": 9.0064,
+                "max": 9.28
+              },
+              "memoryPercent": {
+                "count": 9,
+                "min": 2.11,
+                "median": 2.21,
+                "p95": 2.436,
+                "p99": 2.4552,
+                "max": 2.46
+              }
+            }
+          },
+          "generatorCpuSeconds": {
+            "count": 9,
+            "min": 0.21875,
+            "median": 0.296875,
+            "p95": 0.390625,
+            "p99": 0.390625,
+            "max": 0.390625
+          },
+          "generatorMemoryBytes": {
+            "count": 9,
+            "min": 85176320,
+            "median": 91865088,
+            "p95": 97384038.4,
+            "p99": 97559674.88,
+            "max": 97603584
+          }
+        },
+        "sqlCounts": {
+          "offered": 400,
+          "started": 400,
+          "completed": 400,
+          "dropped": 0,
+          "paidOrders": 400,
+          "ordersByStatus": {
+            "paid": 400
+          },
+          "tickets": 800,
+          "activeHolds": 0
+        },
+        "failedSmokeChecks": []
+      }
+    },
+    {
+      "runId": "p2-v26-ample-r2-01",
+      "revision": "flash-sale-v2.6",
+      "commit": "33a74de24cef2493bf4f8e473a695910fc404c42",
+      "settings": {
+        "users": 80,
+        "rate": 2,
+        "thinkMs": 20,
+        "retries": 1,
+        "retryDelayMs": 100,
+        "replayEvery": 3,
+        "quantity": 2,
+        "preVus": 100,
+        "maxVus": 100,
+        "poolMax": 10,
+        "sampleMs": 250,
+        "warmupSeconds": 10,
+        "drainSeconds": 30,
+        "limiterMax": 1000000,
+        "durationSeconds": 40,
+        "measurementSeconds": 30,
+        "stock": "ample",
+        "seats": 160,
+        "runId": "p2-v26-ample-r2-01"
+      },
+      "startedAt": "2026-10-01T04:37:56.340Z",
+      "formal": true,
+      "acceptedFormal": true,
+      "archive": "../flash-sale-baseline-v26/p2-v26-ample-r2-01.zip",
+      "sha256": "77850dab4dcc14c65259690ba18abe1b286cc62bcc4a7757a30a0ced9106602a",
+      "files": 23,
+      "verifiedArtifactHashes": 22,
+      "sourceHashes": {
+        "load-test/flash-sale.js": "f7a8e56f07f83fe86b4adc3e14efe5d1958c6610f51c248e9333b8eb39f378e6",
+        "load-test/flash-sale-fixture.mjs": "89901d5144f562bd0553e84730c74327a39702d86731bfa30bb689a2b69e4b1e",
+        "load-test/flash-sale-analysis.mjs": "8568000836a0ad98995eafb3bc51a3469f70bca646e330c3a08755e235901eb9",
+        "load-test/flash-sale-check.mjs": "316963391fa60897a50c8ede523a27d1f578eb38d63d302e3a2a278fbddf9966",
+        "docker-compose.flash-sale.yml": "192312953cb3b7d59ed563e16fb552ac91c312786aac9f0c9278840eb19acab5",
+        "Dockerfile": "947dab29bc64bd1593e04f9afcd3fde6c7cdf0d79f561966b9c615f95eef7a85",
+        "package-lock.json": "1788914f59b4f5b1d08da539e8097eee171f01114057769a71a3765e8f65d225",
+        "src/infra/config.ts": "bac9ddb9173e4777f9c60070dba08e3904aa93ae65fd43069911dae9085b2044",
+        "src/infra/postgres/client.ts": "86047dda0772689a28380b5e5d166a89fa9cb66ced2b3498ddb9ccad60370642"
+      },
+      "originalAnalysisRevision": "flash-sale-analysis-v2.6",
+      "originalClassification": "valid-stable",
+      "analysis": {
+        "revision": "flash-sale-v2.6",
+        "analysisRevision": "flash-sale-analysis-v2.6.1",
+        "runId": "p2-v26-ample-r2-01",
+        "classification": "valid-stable",
+        "smokePassed": true,
+        "k6ExitCode": 0,
+        "invalidReasons": [],
+        "evidence": {
+          "sourceClean": true,
+          "checkoutProtocol": true,
+          "paidIdentityObserved": true,
+          "checkoutAuditObserved": true,
+          "accounting": {
+            "checks": {
+              "offeredBuyers": true,
+              "attempts": true,
+              "journeys": true,
+              "arrivalMetrics": true,
+              "summaryCounts": true
+            },
+            "complete": true
+          },
+          "observer": {
+            "count": 118,
+            "first": 1790829506124,
+            "last": 1790829537264,
+            "maxGapMs": 605,
+            "errors": 0,
+            "complete": true
+          },
+          "pool": {
+            "count": 125,
+            "first": 1790829506213,
+            "last": 1790829537246,
+            "maxGapMs": 252,
+            "errors": 0,
+            "complete": true
+          },
+          "resources": {
+            "count": 11,
+            "first": 1790829502822,
+            "last": 1790829534433,
+            "maxGapMs": 3307,
+            "errors": 0,
+            "complete": true
+          },
+          "clockAligned": true,
+          "generatorObserved": true,
+          "containersObserved": true,
+          "clean": true,
+          "auth": true,
+          "lifecycle": true
+        },
+        "window": {
+          "start": "2026-10-01T04:38:26.999Z",
+          "endExclusive": "2026-10-01T04:38:56.999Z",
+          "seconds": 30,
+          "confirmedPaid": 60,
+          "paidPerSecond": 2,
+          "warmupSpillover": 0,
+          "firstHalfPaidPerSecond": 2,
+          "secondHalfPaidPerSecond": 2,
+          "nonReplayAttempts": 150,
+          "failureAttempts": 0,
+          "failureFraction": 0,
+          "responseKey": "stage/kind/flow/status/error_code/code/business",
+          "apiLatencyMs": {
+            "reservation/normal/reservation/201/0/none/success": {
+              "count": 30,
+              "min": 7.2488,
+              "median": 9.0307,
+              "p95": 18.328654999999983,
+              "p99": 340.8481880000004,
+              "max": 471.3809
+            },
+            "checkout/normal/reservation/201/0/none/success": {
+              "count": 30,
+              "min": 8.2102,
+              "median": 9.7493,
+              "p95": 15.233664999999993,
+              "p99": 20.481137000000004,
+              "max": 22.1877
+            },
+            "settlement/normal/reservation/200/0/none/success": {
+              "count": 30,
+              "min": 8.5292,
+              "median": 10.8034,
+              "p95": 18.22379499999999,
+              "p99": 114.06087100000012,
+              "max": 152.5033
+            },
+            "checkout/normal/direct/201/0/none/success": {
+              "count": 30,
+              "min": 8.9536,
+              "median": 12.3818,
+              "p95": 27.946304999999978,
+              "p99": 120.8221040000001,
+              "max": 157.3918
+            },
+            "settlement/normal/direct/200/0/none/success": {
+              "count": 30,
+              "min": 8.6437,
+              "median": 10.53515,
+              "p95": 20.454259999999984,
+              "p99": 24.535187,
+              "max": 25.031
+            },
+            "checkout/replay/direct/201/0/none/success": {
+              "count": 10,
+              "min": 4.5755,
+              "median": 5.2907,
+              "p95": 10.156924999999994,
+              "p99": 11.943785,
+              "max": 12.3905
+            },
+            "settlement/replay/direct/200/0/none/success": {
+              "count": 10,
+              "min": 2.0871,
+              "median": 2.6322,
+              "p95": 3.2646949999999997,
+              "p99": 3.2722189999999998,
+              "max": 3.2741
+            },
+            "checkout/replay/reservation/201/0/none/success": {
+              "count": 10,
+              "min": 4.7075,
+              "median": 5.858,
+              "p95": 9.499374999999999,
+              "p99": 9.537715,
+              "max": 9.5473
+            },
+            "settlement/replay/reservation/200/0/none/success": {
+              "count": 10,
+              "min": 1.5731,
+              "median": 2.8952999999999998,
+              "p95": 10.17646499999999,
+              "p99": 13.809693000000001,
+              "max": 14.718
+            }
+          }
+        },
+        "cohort": {
+          "offered": 60,
+          "started": 60,
+          "actualWindowArrivals": 60,
+          "confirmedPaid": 60,
+          "completionFraction": 1,
+          "unfinished": 0,
+          "outcomes": {
+            "paid": 60
+          },
+          "paidJourneyMs": {
+            "count": 60,
+            "min": 40,
+            "median": 68,
+            "p95": 85.24999999999999,
+            "p99": 410.3399999999984,
+            "max": 690
+          },
+          "allFinishedJourneyMs": {
+            "count": 60,
+            "min": 40,
+            "median": 68,
+            "p95": 85.24999999999999,
+            "p99": 410.3399999999984,
+            "max": 690
+          },
+          "lastArrival": 1790829536499,
+          "lastConfirmedCompletion": 1790829536543,
+          "maximumDrainEnd": "2026-10-01T04:39:26.998Z"
+        },
+        "all": {
+          "offered": 80,
+          "started": 80,
+          "httpPaid": 80,
+          "sqlPaid": 80,
+          "sqlPaidWithoutHttp": 0,
+          "httpPaidWithoutSql": 0,
+          "missingPaidIdentity": 0,
+          "httpPaidIdentityMismatches": 0,
+          "duplicateStarts": 0,
+          "duplicateCompletions": 0,
+          "dropped": 0,
+          "scriptFailures": 0,
+          "protocolFailures": 0,
+          "replayFailures": 0,
+          "arrivalLagMs": {
+            "count": 80,
+            "min": 0,
+            "median": 0,
+            "p95": 1,
+            "p99": 7.629999999999981,
+            "max": 10
+          },
+          "responses": {
+            "reservation/normal/reservation/201/0/none/success": 40,
+            "checkout/normal/reservation/201/0/none/success": 40,
+            "settlement/normal/reservation/200/0/none/success": 40,
+            "checkout/replay/reservation/201/0/none/success": 14,
+            "settlement/replay/reservation/200/0/none/success": 14,
+            "checkout/normal/direct/201/0/none/success": 40,
+            "settlement/normal/direct/200/0/none/success": 40,
+            "checkout/replay/direct/201/0/none/success": 13,
+            "settlement/replay/direct/200/0/none/success": 13
+          },
+          "maxActiveVUs": 2
+        },
+        "diagnostics": {
+          "poolWaiting": {
+            "count": 120,
+            "min": 0,
+            "median": 0,
+            "p95": 0,
+            "p99": 0,
+            "max": 0
+          },
+          "poolCheckedOut": {
+            "count": 120,
+            "min": 0,
+            "median": 0,
+            "p95": 0,
+            "p99": 0.8100000000000023,
+            "max": 1
+          },
+          "lockWaiters": {
+            "count": 112,
+            "min": 0,
+            "median": 0,
+            "p95": 0,
+            "p99": 0,
+            "max": 0
+          },
+          "lockTypes": [],
+          "redisObserverRttMs": {
+            "count": 112,
+            "min": 0.6187999999965541,
+            "median": 0.913749999999709,
+            "p95": 1.371824999999443,
+            "p99": 2.6039519999994813,
+            "max": 13.467499999998836
+          },
+          "retriesScheduledInWindow": 1,
+          "hostCpuPercent": {
+            "count": 9,
+            "min": 2.997880544419196,
+            "median": 6.51094590075374,
+            "p95": 15.346412127736318,
+            "p99": 17.96792550635812,
+            "max": 18.623303851013574
+          },
+          "hostFreeBytes": {
+            "count": 9,
+            "min": 3147759616,
+            "median": 3311026176,
+            "p95": 3450073907.2,
+            "p99": 3474842583.04,
+            "max": 3481034752
+          },
+          "containers": {
+            "app": {
+              "cpuPercent": {
+                "count": 9,
+                "min": 3.54,
+                "median": 6,
+                "p95": 13.206,
+                "p99": 14.1532,
+                "max": 14.39
+              },
+              "memoryPercent": {
+                "count": 9,
+                "min": 8.55,
+                "median": 9.94,
+                "p95": 10.214,
+                "p99": 10.2428,
+                "max": 10.25
+              }
+            },
+            "postgres": {
+              "cpuPercent": {
+                "count": 9,
+                "min": 1.87,
+                "median": 5.23,
+                "p95": 15.418,
+                "p99": 16.035600000000002,
+                "max": 16.19
+              },
+              "memoryPercent": {
+                "count": 9,
+                "min": 7.78,
+                "median": 8.25,
+                "p95": 8.678,
+                "p99": 8.7196,
+                "max": 8.73
+              }
+            },
+            "redis": {
+              "cpuPercent": {
+                "count": 9,
+                "min": 2.69,
+                "median": 2.97,
+                "p95": 3.408,
+                "p99": 3.4656,
+                "max": 3.48
+              },
+              "memoryPercent": {
+                "count": 9,
+                "min": 1.92,
+                "median": 2.06,
+                "p95": 2.5359999999999996,
+                "p99": 2.7472,
+                "max": 2.8
+              }
+            }
+          },
+          "generatorCpuSeconds": {
+            "count": 9,
+            "min": 0.0625,
+            "median": 0.09375,
+            "p95": 0.125,
+            "p99": 0.125,
+            "max": 0.125
+          },
+          "generatorMemoryBytes": {
+            "count": 9,
+            "min": 72597504,
+            "median": 75563008,
+            "p95": 78977433.6,
+            "p99": 78991851.52,
+            "max": 78995456
+          }
+        },
+        "sqlCounts": {
+          "offered": 80,
+          "started": 80,
+          "completed": 80,
+          "dropped": 0,
+          "paidOrders": 80,
+          "ordersByStatus": {
+            "paid": 80
+          },
+          "tickets": 160,
+          "activeHolds": 0
+        },
+        "failedSmokeChecks": []
+      }
+    },
+    {
+      "runId": "p2-v26-ample-r2-02",
+      "revision": "flash-sale-v2.6",
+      "commit": "33a74de24cef2493bf4f8e473a695910fc404c42",
+      "settings": {
+        "users": 80,
+        "rate": 2,
+        "thinkMs": 20,
+        "retries": 1,
+        "retryDelayMs": 100,
+        "replayEvery": 3,
+        "quantity": 2,
+        "preVus": 100,
+        "maxVus": 100,
+        "poolMax": 10,
+        "sampleMs": 250,
+        "warmupSeconds": 10,
+        "drainSeconds": 30,
+        "limiterMax": 1000000,
+        "durationSeconds": 40,
+        "measurementSeconds": 30,
+        "stock": "ample",
+        "seats": 160,
+        "runId": "p2-v26-ample-r2-02"
+      },
+      "startedAt": "2026-10-01T04:44:31.334Z",
+      "formal": true,
+      "acceptedFormal": true,
+      "archive": "../flash-sale-baseline-v26/p2-v26-ample-r2-02.zip",
+      "sha256": "4b9e5ac4dcdb896a1fe47ecbe487c6750470787e9145d5c782433335cd21af60",
+      "files": 23,
+      "verifiedArtifactHashes": 22,
+      "sourceHashes": {
+        "load-test/flash-sale.js": "f7a8e56f07f83fe86b4adc3e14efe5d1958c6610f51c248e9333b8eb39f378e6",
+        "load-test/flash-sale-fixture.mjs": "89901d5144f562bd0553e84730c74327a39702d86731bfa30bb689a2b69e4b1e",
+        "load-test/flash-sale-analysis.mjs": "8568000836a0ad98995eafb3bc51a3469f70bca646e330c3a08755e235901eb9",
+        "load-test/flash-sale-check.mjs": "316963391fa60897a50c8ede523a27d1f578eb38d63d302e3a2a278fbddf9966",
+        "docker-compose.flash-sale.yml": "192312953cb3b7d59ed563e16fb552ac91c312786aac9f0c9278840eb19acab5",
+        "Dockerfile": "947dab29bc64bd1593e04f9afcd3fde6c7cdf0d79f561966b9c615f95eef7a85",
+        "package-lock.json": "1788914f59b4f5b1d08da539e8097eee171f01114057769a71a3765e8f65d225",
+        "src/infra/config.ts": "bac9ddb9173e4777f9c60070dba08e3904aa93ae65fd43069911dae9085b2044",
+        "src/infra/postgres/client.ts": "86047dda0772689a28380b5e5d166a89fa9cb66ced2b3498ddb9ccad60370642"
+      },
+      "originalAnalysisRevision": "flash-sale-analysis-v2.6",
+      "originalClassification": "valid-stable",
+      "analysis": {
+        "revision": "flash-sale-v2.6",
+        "analysisRevision": "flash-sale-analysis-v2.6.1",
+        "runId": "p2-v26-ample-r2-02",
+        "classification": "valid-stable",
+        "smokePassed": true,
+        "k6ExitCode": 0,
+        "invalidReasons": [],
+        "evidence": {
+          "sourceClean": true,
+          "checkoutProtocol": true,
+          "paidIdentityObserved": true,
+          "checkoutAuditObserved": true,
+          "accounting": {
+            "checks": {
+              "offeredBuyers": true,
+              "attempts": true,
+              "journeys": true,
+              "arrivalMetrics": true,
+              "summaryCounts": true
+            },
+            "complete": true
+          },
+          "observer": {
+            "count": 119,
+            "first": 1790829904634,
+            "last": 1790829935677,
+            "maxGapMs": 304,
+            "errors": 0,
+            "complete": true
+          },
+          "pool": {
+            "count": 125,
+            "first": 1790829904852,
+            "last": 1790829935886,
+            "maxGapMs": 252,
+            "errors": 0,
+            "complete": true
+          },
+          "resources": {
+            "count": 11,
+            "first": 1790829900859,
+            "last": 1790829933214,
+            "maxGapMs": 3366,
+            "errors": 0,
+            "complete": true
+          },
+          "clockAligned": true,
+          "generatorObserved": true,
+          "containersObserved": true,
+          "clean": true,
+          "auth": true,
+          "lifecycle": true
+        },
+        "window": {
+          "start": "2026-10-01T04:45:05.605Z",
+          "endExclusive": "2026-10-01T04:45:35.605Z",
+          "seconds": 30,
+          "confirmedPaid": 60,
+          "paidPerSecond": 2,
+          "warmupSpillover": 0,
+          "firstHalfPaidPerSecond": 2,
+          "secondHalfPaidPerSecond": 2,
+          "nonReplayAttempts": 150,
+          "failureAttempts": 0,
+          "failureFraction": 0,
+          "responseKey": "stage/kind/flow/status/error_code/code/business",
+          "apiLatencyMs": {
+            "reservation/normal/reservation/201/0/none/success": {
+              "count": 30,
+              "min": 6.926,
+              "median": 9.05875,
+              "p95": 18.624539999999982,
+              "p99": 34.994427000000016,
+              "max": 40.3866
+            },
+            "checkout/normal/reservation/201/0/none/success": {
+              "count": 30,
+              "min": 7.89,
+              "median": 9.55335,
+              "p95": 15.237049999999998,
+              "p99": 16.984513000000003,
+              "max": 17.64
+            },
+            "settlement/normal/reservation/200/0/none/success": {
+              "count": 30,
+              "min": 9.3846,
+              "median": 12.274799999999999,
+              "p95": 16.33388499999999,
+              "p99": 18.837767000000003,
+              "max": 19.3707
+            },
+            "checkout/normal/direct/201/0/none/success": {
+              "count": 30,
+              "min": 8.3691,
+              "median": 10.517800000000001,
+              "p95": 24.07674999999996,
+              "p99": 38.95631200000001,
+              "max": 42.4123
+            },
+            "settlement/normal/direct/200/0/none/success": {
+              "count": 30,
+              "min": 7.774,
+              "median": 10.533999999999999,
+              "p95": 17.566769999999995,
+              "p99": 19.481526000000002,
+              "max": 20.0472
+            },
+            "checkout/replay/direct/201/0/none/success": {
+              "count": 10,
+              "min": 4.7294,
+              "median": 5.8588000000000005,
+              "p95": 9.908525,
+              "p99": 9.992585,
+              "max": 10.0136
+            },
+            "settlement/replay/direct/200/0/none/success": {
+              "count": 10,
+              "min": 1.588,
+              "median": 2.3106,
+              "p95": 3.754784999999999,
+              "p99": 4.123677000000001,
+              "max": 4.2159
+            },
+            "checkout/replay/reservation/201/0/none/success": {
+              "count": 10,
+              "min": 5.7443,
+              "median": 7.2331,
+              "p95": 9.443584999999999,
+              "p99": 9.613757,
+              "max": 9.6563
+            },
+            "settlement/replay/reservation/200/0/none/success": {
+              "count": 10,
+              "min": 2.133,
+              "median": 3.1997999999999998,
+              "p95": 4.262619999999999,
+              "p99": 4.369324,
+              "max": 4.396
+            }
+          }
+        },
+        "cohort": {
+          "offered": 60,
+          "started": 60,
+          "actualWindowArrivals": 60,
+          "confirmedPaid": 60,
+          "completionFraction": 1,
+          "unfinished": 0,
+          "outcomes": {
+            "paid": 60
+          },
+          "paidJourneyMs": {
+            "count": 60,
+            "min": 39,
+            "median": 68.5,
+            "p95": 84.19999999999999,
+            "p99": 98.37999999999994,
+            "max": 109
+          },
+          "allFinishedJourneyMs": {
+            "count": 60,
+            "min": 39,
+            "median": 68.5,
+            "p95": 84.19999999999999,
+            "p99": 98.37999999999994,
+            "max": 109
+          },
+          "lastArrival": 1790829935105,
+          "lastConfirmedCompletion": 1790829935147,
+          "maximumDrainEnd": "2026-10-01T04:46:05.604Z"
+        },
+        "all": {
+          "offered": 80,
+          "started": 80,
+          "httpPaid": 80,
+          "sqlPaid": 80,
+          "sqlPaidWithoutHttp": 0,
+          "httpPaidWithoutSql": 0,
+          "missingPaidIdentity": 0,
+          "httpPaidIdentityMismatches": 0,
+          "duplicateStarts": 0,
+          "duplicateCompletions": 0,
+          "dropped": 0,
+          "scriptFailures": 0,
+          "protocolFailures": 0,
+          "replayFailures": 0,
+          "arrivalLagMs": {
+            "count": 80,
+            "min": 0,
+            "median": 0,
+            "p95": 1,
+            "p99": 1.2099999999999937,
+            "max": 2
+          },
+          "responses": {
+            "reservation/normal/reservation/201/0/none/success": 40,
+            "checkout/normal/reservation/201/0/none/success": 40,
+            "settlement/normal/reservation/200/0/none/success": 40,
+            "checkout/replay/reservation/201/0/none/success": 14,
+            "settlement/replay/reservation/200/0/none/success": 14,
+            "checkout/normal/direct/201/0/none/success": 40,
+            "settlement/normal/direct/200/0/none/success": 40,
+            "checkout/replay/direct/201/0/none/success": 13,
+            "settlement/replay/direct/200/0/none/success": 13
+          },
+          "maxActiveVUs": 1
+        },
+        "diagnostics": {
+          "poolWaiting": {
+            "count": 119,
+            "min": 0,
+            "median": 0,
+            "p95": 0,
+            "p99": 0,
+            "max": 0
+          },
+          "poolCheckedOut": {
+            "count": 119,
+            "min": 0,
+            "median": 0,
+            "p95": 1,
+            "p99": 1,
+            "max": 2
+          },
+          "lockWaiters": {
+            "count": 114,
+            "min": 0,
+            "median": 0,
+            "p95": 0,
+            "p99": 0,
+            "max": 0
+          },
+          "lockTypes": [],
+          "redisObserverRttMs": {
+            "count": 114,
+            "min": 0.6595999999990454,
+            "median": 0.9386500000000524,
+            "p95": 1.6124800000008668,
+            "p99": 7.312482999998403,
+            "max": 18.681700000001
+          },
+          "retriesScheduledInWindow": 0,
+          "hostCpuPercent": {
+            "count": 9,
+            "min": 5.834188847434707,
+            "median": 10.411759928530817,
+            "p95": 17.922198263885704,
+            "p99": 18.63822658009653,
+            "max": 18.817233659149235
+          },
+          "hostFreeBytes": {
+            "count": 9,
+            "min": 1842098176,
+            "median": 1931497472,
+            "p95": 1982482841.6,
+            "p99": 1987058565.12,
+            "max": 1988202496
+          },
+          "containers": {
+            "app": {
+              "cpuPercent": {
+                "count": 9,
+                "min": 3.34,
+                "median": 4.28,
+                "p95": 15.307999999999998,
+                "p99": 16.0536,
+                "max": 16.24
+              },
+              "memoryPercent": {
+                "count": 9,
+                "min": 8.42,
+                "median": 17.39,
+                "p95": 17.67,
+                "p99": 17.67,
+                "max": 17.67
+              }
+            },
+            "postgres": {
+              "cpuPercent": {
+                "count": 9,
+                "min": 5.15,
+                "median": 5.3,
+                "p95": 6.803999999999999,
+                "p99": 7.1848,
+                "max": 7.28
+              },
+              "memoryPercent": {
+                "count": 9,
+                "min": 7.75,
+                "median": 7.9,
+                "p95": 8.668,
+                "p99": 8.6936,
+                "max": 8.7
+              }
+            },
+            "redis": {
+              "cpuPercent": {
+                "count": 9,
+                "min": 2.89,
+                "median": 3.06,
+                "p95": 4.148,
+                "p99": 4.5256,
+                "max": 4.62
+              },
+              "memoryPercent": {
+                "count": 9,
+                "min": 1.88,
+                "median": 2.01,
+                "p95": 2.214,
+                "p99": 2.2268,
+                "max": 2.23
+              }
+            }
+          },
+          "generatorCpuSeconds": {
+            "count": 9,
+            "min": 0.125,
+            "median": 0.125,
+            "p95": 0.125,
+            "p99": 0.125,
+            "max": 0.125
+          },
+          "generatorMemoryBytes": {
+            "count": 9,
+            "min": 71585792,
+            "median": 75456512,
+            "p95": 79256780.8,
+            "p99": 79273820.16,
+            "max": 79278080
+          }
+        },
+        "sqlCounts": {
+          "offered": 80,
+          "started": 80,
+          "completed": 80,
+          "dropped": 0,
+          "paidOrders": 80,
+          "ordersByStatus": {
+            "paid": 80
+          },
+          "tickets": 160,
+          "activeHolds": 0
+        },
+        "failedSmokeChecks": []
+      }
+    },
+    {
+      "runId": "p2-v26-ample-r2-03",
+      "revision": "flash-sale-v2.6",
+      "commit": "33a74de24cef2493bf4f8e473a695910fc404c42",
+      "settings": {
+        "users": 80,
+        "rate": 2,
+        "thinkMs": 20,
+        "retries": 1,
+        "retryDelayMs": 100,
+        "replayEvery": 3,
+        "quantity": 2,
+        "preVus": 100,
+        "maxVus": 100,
+        "poolMax": 10,
+        "sampleMs": 250,
+        "warmupSeconds": 10,
+        "drainSeconds": 30,
+        "limiterMax": 1000000,
+        "durationSeconds": 40,
+        "measurementSeconds": 30,
+        "stock": "ample",
+        "seats": 160,
+        "runId": "p2-v26-ample-r2-03"
+      },
+      "startedAt": "2026-10-01T04:47:47.433Z",
+      "formal": true,
+      "acceptedFormal": true,
+      "archive": "../flash-sale-baseline-v26/p2-v26-ample-r2-03.zip",
+      "sha256": "b6e18da4559d751bcca76284034331f58ace40f03e71199760eb32d10ce7059c",
+      "files": 23,
+      "verifiedArtifactHashes": 22,
+      "sourceHashes": {
+        "load-test/flash-sale.js": "f7a8e56f07f83fe86b4adc3e14efe5d1958c6610f51c248e9333b8eb39f378e6",
+        "load-test/flash-sale-fixture.mjs": "89901d5144f562bd0553e84730c74327a39702d86731bfa30bb689a2b69e4b1e",
+        "load-test/flash-sale-analysis.mjs": "8568000836a0ad98995eafb3bc51a3469f70bca646e330c3a08755e235901eb9",
+        "load-test/flash-sale-check.mjs": "316963391fa60897a50c8ede523a27d1f578eb38d63d302e3a2a278fbddf9966",
+        "docker-compose.flash-sale.yml": "192312953cb3b7d59ed563e16fb552ac91c312786aac9f0c9278840eb19acab5",
+        "Dockerfile": "947dab29bc64bd1593e04f9afcd3fde6c7cdf0d79f561966b9c615f95eef7a85",
+        "package-lock.json": "1788914f59b4f5b1d08da539e8097eee171f01114057769a71a3765e8f65d225",
+        "src/infra/config.ts": "bac9ddb9173e4777f9c60070dba08e3904aa93ae65fd43069911dae9085b2044",
+        "src/infra/postgres/client.ts": "86047dda0772689a28380b5e5d166a89fa9cb66ced2b3498ddb9ccad60370642"
+      },
+      "originalAnalysisRevision": "flash-sale-analysis-v2.6",
+      "originalClassification": "valid-stable",
+      "analysis": {
+        "revision": "flash-sale-v2.6",
+        "analysisRevision": "flash-sale-analysis-v2.6.1",
+        "runId": "p2-v26-ample-r2-03",
+        "classification": "valid-stable",
+        "smokePassed": true,
+        "k6ExitCode": 0,
+        "invalidReasons": [],
+        "evidence": {
+          "sourceClean": true,
+          "checkoutProtocol": true,
+          "paidIdentityObserved": true,
+          "checkoutAuditObserved": true,
+          "accounting": {
+            "checks": {
+              "offeredBuyers": true,
+              "attempts": true,
+              "journeys": true,
+              "arrivalMetrics": true,
+              "summaryCounts": true
+            },
+            "complete": true
+          },
+          "observer": {
+            "count": 119,
+            "first": 1790830098960,
+            "last": 1790830130069,
+            "maxGapMs": 306,
+            "errors": 0,
+            "complete": true
+          },
+          "pool": {
+            "count": 126,
+            "first": 1790830099072,
+            "last": 1790830130349,
+            "maxGapMs": 257,
+            "errors": 0,
+            "complete": true
+          },
+          "resources": {
+            "count": 11,
+            "first": 1790830095539,
+            "last": 1790830127195,
+            "maxGapMs": 3264,
+            "errors": 0,
+            "complete": true
+          },
+          "clockAligned": true,
+          "generatorObserved": true,
+          "containersObserved": true,
+          "clean": true,
+          "auth": true,
+          "lifecycle": true
+        },
+        "window": {
+          "start": "2026-10-01T04:48:19.888Z",
+          "endExclusive": "2026-10-01T04:48:49.888Z",
+          "seconds": 30,
+          "confirmedPaid": 60,
+          "paidPerSecond": 2,
+          "warmupSpillover": 0,
+          "firstHalfPaidPerSecond": 2,
+          "secondHalfPaidPerSecond": 2,
+          "nonReplayAttempts": 150,
+          "failureAttempts": 0,
+          "failureFraction": 0,
+          "responseKey": "stage/kind/flow/status/error_code/code/business",
+          "apiLatencyMs": {
+            "reservation/normal/reservation/201/0/none/success": {
+              "count": 30,
+              "min": 6.8648,
+              "median": 8.76765,
+              "p95": 32.71008999999992,
+              "p99": 46.521185,
+              "max": 46.8615
+            },
+            "checkout/normal/reservation/201/0/none/success": {
+              "count": 30,
+              "min": 8.5592,
+              "median": 9.56295,
+              "p95": 13.477099999999995,
+              "p99": 18.310784000000005,
+              "max": 19.8914
+            },
+            "settlement/normal/reservation/200/0/none/success": {
+              "count": 30,
+              "min": 8.9669,
+              "median": 10.50505,
+              "p95": 14.132454999999991,
+              "p99": 18.633486000000005,
+              "max": 19.9172
+            },
+            "checkout/normal/direct/201/0/none/success": {
+              "count": 30,
+              "min": 8.3946,
+              "median": 10.10625,
+              "p95": 15.027935,
+              "p99": 40.09402700000003,
+              "max": 50.2364
+            },
+            "settlement/normal/direct/200/0/none/success": {
+              "count": 30,
+              "min": 8.2366,
+              "median": 10.5415,
+              "p95": 38.970824999999955,
+              "p99": 49.009294000000004,
+              "max": 50.4191
+            },
+            "checkout/replay/direct/201/0/none/success": {
+              "count": 10,
+              "min": 4.7109,
+              "median": 5.8088999999999995,
+              "p95": 11.951264999999992,
+              "p99": 14.702493,
+              "max": 15.3903
+            },
+            "settlement/replay/direct/200/0/none/success": {
+              "count": 10,
+              "min": 2.0727,
+              "median": 2.6101,
+              "p95": 12.813584999999982,
+              "p99": 19.139037000000005,
+              "max": 20.7204
+            },
+            "checkout/replay/reservation/201/0/none/success": {
+              "count": 10,
+              "min": 4.5333,
+              "median": 5.27815,
+              "p95": 9.609084999999993,
+              "p99": 11.987497000000001,
+              "max": 12.5821
+            },
+            "settlement/replay/reservation/200/0/none/success": {
+              "count": 10,
+              "min": 1.5718,
+              "median": 2.3424500000000004,
+              "p95": 3.2735499999999997,
+              "p99": 3.41935,
+              "max": 3.4558
+            }
+          }
+        },
+        "cohort": {
+          "offered": 60,
+          "started": 60,
+          "actualWindowArrivals": 60,
+          "confirmedPaid": 60,
+          "completionFraction": 1,
+          "unfinished": 0,
+          "outcomes": {
+            "paid": 60
+          },
+          "paidJourneyMs": {
+            "count": 60,
+            "min": 38,
+            "median": 68,
+            "p95": 93.54999999999997,
+            "p99": 113.41,
+            "max": 114
+          },
+          "allFinishedJourneyMs": {
+            "count": 60,
+            "min": 38,
+            "median": 68,
+            "p95": 93.54999999999997,
+            "p99": 113.41,
+            "max": 114
+          },
+          "lastArrival": 1790830129388,
+          "lastConfirmedCompletion": 1790830129430,
+          "maximumDrainEnd": "2026-10-01T04:49:19.887Z"
+        },
+        "all": {
+          "offered": 80,
+          "started": 80,
+          "httpPaid": 80,
+          "sqlPaid": 80,
+          "sqlPaidWithoutHttp": 0,
+          "httpPaidWithoutSql": 0,
+          "missingPaidIdentity": 0,
+          "httpPaidIdentityMismatches": 0,
+          "duplicateStarts": 0,
+          "duplicateCompletions": 0,
+          "dropped": 0,
+          "scriptFailures": 0,
+          "protocolFailures": 0,
+          "replayFailures": 0,
+          "arrivalLagMs": {
+            "count": 80,
+            "min": 0,
+            "median": 1,
+            "p95": 1,
+            "p99": 2.2099999999999937,
+            "max": 3
+          },
+          "responses": {
+            "reservation/normal/reservation/201/0/none/success": 40,
+            "checkout/normal/reservation/201/0/none/success": 40,
+            "settlement/normal/reservation/200/0/none/success": 40,
+            "checkout/replay/reservation/201/0/none/success": 14,
+            "settlement/replay/reservation/200/0/none/success": 14,
+            "checkout/normal/direct/201/0/none/success": 40,
+            "settlement/normal/direct/200/0/none/success": 40,
+            "checkout/replay/direct/201/0/none/success": 13,
+            "settlement/replay/direct/200/0/none/success": 13
+          },
+          "maxActiveVUs": 1
+        },
+        "diagnostics": {
+          "poolWaiting": {
+            "count": 120,
+            "min": 0,
+            "median": 0,
+            "p95": 0,
+            "p99": 0,
+            "max": 0
+          },
+          "poolCheckedOut": {
+            "count": 120,
+            "min": 0,
+            "median": 0,
+            "p95": 0,
+            "p99": 0,
+            "max": 0
+          },
+          "lockWaiters": {
+            "count": 114,
+            "min": 0,
+            "median": 0,
+            "p95": 0,
+            "p99": 0,
+            "max": 0
+          },
+          "lockTypes": [],
+          "redisObserverRttMs": {
+            "count": 114,
+            "min": 0.6258000000016182,
+            "median": 0.9079500000043481,
+            "p95": 2.034769999998751,
+            "p99": 4.607491999998675,
+            "max": 6.374300000003132
+          },
+          "retriesScheduledInWindow": 0,
+          "hostCpuPercent": {
+            "count": 9,
+            "min": 3.1719876416065884,
+            "median": 7.371794871794868,
+            "p95": 10.196379747056659,
+            "p99": 10.332545180180565,
+            "max": 10.366586538461542
+          },
+          "hostFreeBytes": {
+            "count": 9,
+            "min": 2049757184,
+            "median": 2087718912,
+            "p95": 2096155033.6,
+            "p99": 2097296670.72,
+            "max": 2097582080
+          },
+          "containers": {
+            "app": {
+              "cpuPercent": {
+                "count": 9,
+                "min": 3.5,
+                "median": 4.58,
+                "p95": 7.026,
+                "p99": 7.3652,
+                "max": 7.45
+              },
+              "memoryPercent": {
+                "count": 9,
+                "min": 8.59,
+                "median": 9.88,
+                "p95": 10.161999999999999,
+                "p99": 10.1844,
+                "max": 10.19
+              }
+            },
+            "postgres": {
+              "cpuPercent": {
+                "count": 9,
+                "min": 4.83,
+                "median": 5.13,
+                "p95": 6.73,
+                "p99": 6.970000000000001,
+                "max": 7.03
+              },
+              "memoryPercent": {
+                "count": 9,
+                "min": 7.77,
+                "median": 7.88,
+                "p95": 8.102,
+                "p99": 8.1084,
+                "max": 8.11
+              }
+            },
+            "redis": {
+              "cpuPercent": {
+                "count": 9,
+                "min": 2.84,
+                "median": 3.21,
+                "p95": 3.87,
+                "p99": 3.998,
+                "max": 4.03
+              },
+              "memoryPercent": {
+                "count": 9,
+                "min": 1.95,
+                "median": 2.16,
+                "p95": 2.29,
+                "p99": 2.29,
+                "max": 2.29
+              }
+            }
+          },
+          "generatorCpuSeconds": {
+            "count": 9,
+            "min": 0.078125,
+            "median": 0.09375,
+            "p95": 0.109375,
+            "p99": 0.109375,
+            "max": 0.109375
+          },
+          "generatorMemoryBytes": {
+            "count": 9,
+            "min": 71651328,
+            "median": 75833344,
+            "p95": 79217459.2,
+            "p99": 79252848.64,
+            "max": 79261696
+          }
+        },
+        "sqlCounts": {
+          "offered": 80,
+          "started": 80,
+          "completed": 80,
+          "dropped": 0,
+          "paidOrders": 80,
+          "ordersByStatus": {
+            "paid": 80
+          },
+          "tickets": 160,
+          "activeHolds": 0
+        },
+        "failedSmokeChecks": []
+      }
+    },
+    {
+      "runId": "p2-v26-ample-r25-01",
+      "revision": "flash-sale-v2.6",
+      "commit": "33a74de24cef2493bf4f8e473a695910fc404c42",
+      "settings": {
+        "users": 1000,
+        "rate": 25,
+        "thinkMs": 20,
+        "retries": 1,
+        "retryDelayMs": 100,
+        "replayEvery": 3,
+        "quantity": 2,
+        "preVus": 100,
+        "maxVus": 100,
+        "poolMax": 10,
+        "sampleMs": 250,
+        "warmupSeconds": 10,
+        "drainSeconds": 30,
+        "limiterMax": 1000000,
+        "durationSeconds": 40,
+        "measurementSeconds": 30,
+        "stock": "ample",
+        "seats": 2000,
+        "runId": "p2-v26-ample-r25-01"
+      },
+      "startedAt": "2026-10-01T04:40:28.559Z",
+      "formal": true,
+      "acceptedFormal": true,
+      "archive": "../flash-sale-baseline-v26/p2-v26-ample-r25-01.zip",
+      "sha256": "898aadb41616155084cffe52b96c77bdac14375d60b30cb49c317b9911449c10",
+      "files": 23,
+      "verifiedArtifactHashes": 22,
+      "sourceHashes": {
+        "load-test/flash-sale.js": "f7a8e56f07f83fe86b4adc3e14efe5d1958c6610f51c248e9333b8eb39f378e6",
+        "load-test/flash-sale-fixture.mjs": "89901d5144f562bd0553e84730c74327a39702d86731bfa30bb689a2b69e4b1e",
+        "load-test/flash-sale-analysis.mjs": "8568000836a0ad98995eafb3bc51a3469f70bca646e330c3a08755e235901eb9",
+        "load-test/flash-sale-check.mjs": "316963391fa60897a50c8ede523a27d1f578eb38d63d302e3a2a278fbddf9966",
+        "docker-compose.flash-sale.yml": "192312953cb3b7d59ed563e16fb552ac91c312786aac9f0c9278840eb19acab5",
+        "Dockerfile": "947dab29bc64bd1593e04f9afcd3fde6c7cdf0d79f561966b9c615f95eef7a85",
+        "package-lock.json": "1788914f59b4f5b1d08da539e8097eee171f01114057769a71a3765e8f65d225",
+        "src/infra/config.ts": "bac9ddb9173e4777f9c60070dba08e3904aa93ae65fd43069911dae9085b2044",
+        "src/infra/postgres/client.ts": "86047dda0772689a28380b5e5d166a89fa9cb66ced2b3498ddb9ccad60370642"
+      },
+      "originalAnalysisRevision": "flash-sale-analysis-v2.6",
+      "originalClassification": "valid-overload",
+      "analysis": {
+        "revision": "flash-sale-v2.6",
+        "analysisRevision": "flash-sale-analysis-v2.6.1",
+        "runId": "p2-v26-ample-r25-01",
+        "classification": "valid-overload",
+        "smokePassed": false,
+        "k6ExitCode": 99,
+        "invalidReasons": [],
+        "evidence": {
+          "sourceClean": true,
+          "checkoutProtocol": true,
+          "paidIdentityObserved": true,
+          "checkoutAuditObserved": true,
+          "accounting": {
+            "checks": {
+              "offeredBuyers": true,
+              "attempts": true,
+              "journeys": true,
+              "arrivalMetrics": true,
+              "summaryCounts": true
+            },
+            "complete": true
+          },
+          "observer": {
+            "count": 119,
+            "first": 1790829660429,
+            "last": 1790829691342,
+            "maxGapMs": 308,
+            "errors": 0,
+            "complete": true
+          },
+          "pool": {
+            "count": 128,
+            "first": 1790829660265,
+            "last": 1790829692071,
+            "maxGapMs": 271,
+            "errors": 0,
+            "complete": true
+          },
+          "resources": {
+            "count": 11,
+            "first": 1790829656753,
+            "last": 1790829689147,
+            "maxGapMs": 3572,
+            "errors": 0,
+            "complete": true
+          },
+          "clockAligned": true,
+          "generatorObserved": true,
+          "containersObserved": true,
+          "clean": true,
+          "auth": true,
+          "lifecycle": true
+        },
+        "window": {
+          "start": "2026-10-01T04:41:01.170Z",
+          "endExclusive": "2026-10-01T04:41:31.170Z",
+          "seconds": 30,
+          "confirmedPaid": 738,
+          "paidPerSecond": 24.6,
+          "warmupSpillover": 0,
+          "firstHalfPaidPerSecond": 24.866666666666667,
+          "secondHalfPaidPerSecond": 24.333333333333332,
+          "nonReplayAttempts": 1910,
+          "failureAttempts": 51,
+          "failureFraction": 0.026701570680628273,
+          "responseKey": "stage/kind/flow/status/error_code/code/business",
+          "apiLatencyMs": {
+            "checkout/replay/direct/201/0/none/success": {
+              "count": 125,
+              "min": 4.1265,
+              "median": 6.6913,
+              "p95": 14.033619999999997,
+              "p99": 21.823152000000015,
+              "max": 28.3177
+            },
+            "settlement/replay/direct/200/0/none/success": {
+              "count": 125,
+              "min": 1.5829,
+              "median": 2.6347,
+              "p95": 7.399319999999998,
+              "p99": 36.314496000000034,
+              "max": 47.4414
+            },
+            "reservation/normal/reservation/201/0/none/success": {
+              "count": 375,
+              "min": 5.1352,
+              "median": 8.4125,
+              "p95": 29.970900000000015,
+              "p99": 88.57924399999996,
+              "max": 174.7779
+            },
+            "checkout/normal/reservation/201/0/none/success": {
+              "count": 366,
+              "min": 6.0206,
+              "median": 9.5535,
+              "p95": 55.46295,
+              "p99": 136.2915850000004,
+              "max": 181.8248
+            },
+            "checkout/normal/direct/201/0/none/success": {
+              "count": 371,
+              "min": 6.7752,
+              "median": 9.4707,
+              "p95": 41.115849999999995,
+              "p99": 91.67861000000012,
+              "max": 192.3269
+            },
+            "settlement/normal/reservation/200/0/none/success": {
+              "count": 364,
+              "min": 7.632,
+              "median": 10.122,
+              "p95": 48.858749999999986,
+              "p99": 150.50503700000007,
+              "max": 177.7417
+            },
+            "settlement/normal/direct/200/0/none/success": {
+              "count": 354,
+              "min": 7.3538,
+              "median": 11.05285,
+              "p95": 60.913644999999924,
+              "p99": 118.52227499999992,
+              "max": 163.802
+            },
+            "checkout/replay/reservation/201/0/none/success": {
+              "count": 123,
+              "min": 4.1731,
+              "median": 6.4604,
+              "p95": 17.335829999999998,
+              "p99": 28.490682000000003,
+              "max": 100.2782
+            },
+            "settlement/replay/reservation/200/0/none/success": {
+              "count": 123,
+              "min": 1.5759,
+              "median": 2.6275,
+              "p95": 7.611499999999999,
+              "p99": 25.164750000000005,
+              "max": 54.986
+            },
+            "settlement/normal/direct/500/1500/INTERNAL_ERROR/failure": {
+              "count": 20,
+              "min": 79.2342,
+              "median": 126.30525,
+              "p95": 298.48102,
+              "p99": 305.695244,
+              "max": 307.4988
+            },
+            "settlement/retry/direct/200/0/none/success": {
+              "count": 17,
+              "min": 9.3268,
+              "median": 28.4161,
+              "p95": 139.43579999999986,
+              "p99": 270.95387999999997,
+              "max": 303.8334
+            },
+            "settlement/normal/reservation/500/1500/INTERNAL_ERROR/failure": {
+              "count": 7,
+              "min": 86.5133,
+              "median": 128.6914,
+              "p95": 280.24375999999995,
+              "p99": 302.68923199999995,
+              "max": 308.3006
+            },
+            "settlement/retry/reservation/200/0/none/success": {
+              "count": 3,
+              "min": 21.8996,
+              "median": 37.614,
+              "p95": 84.56825999999998,
+              "p99": 88.741972,
+              "max": 89.7854
+            },
+            "settlement/retry/reservation/500/1500/INTERNAL_ERROR/failure": {
+              "count": 4,
+              "min": 127.1408,
+              "median": 213.8014,
+              "p95": 264.80654499999997,
+              "p99": 271.58602899999994,
+              "max": 273.2809
+            },
+            "checkout/normal/reservation/500/1500/INTERNAL_ERROR/failure": {
+              "count": 9,
+              "min": 89.9675,
+              "median": 177.3682,
+              "p95": 260.92436,
+              "p99": 265.373032,
+              "max": 266.4852
+            },
+            "checkout/retry/reservation/201/0/none/success": {
+              "count": 5,
+              "min": 12.3703,
+              "median": 18.4271,
+              "p95": 50.95212,
+              "p99": 51.631144,
+              "max": 51.8009
+            },
+            "settlement/retry/direct/500/1500/INTERNAL_ERROR/failure": {
+              "count": 3,
+              "min": 84.4736,
+              "median": 164.5603,
+              "p95": 256.35463,
+              "p99": 264.514126,
+              "max": 266.554
+            },
+            "checkout/normal/direct/500/1500/INTERNAL_ERROR/failure": {
+              "count": 4,
+              "min": 161.3164,
+              "median": 194.64094999999998,
+              "p95": 229.60775999999998,
+              "p99": 232.262112,
+              "max": 232.9257
+            },
+            "checkout/retry/direct/201/0/none/success": {
+              "count": 4,
+              "min": 54.4598,
+              "median": 113.85785000000001,
+              "p95": 202.749925,
+              "p99": 207.427585,
+              "max": 208.597
+            },
+            "checkout/retry/reservation/500/1500/INTERNAL_ERROR/failure": {
+              "count": 4,
+              "min": 93.0812,
+              "median": 154.36495000000002,
+              "p95": 271.98446,
+              "p99": 280.020572,
+              "max": 282.0296
+            }
+          }
+        },
+        "cohort": {
+          "offered": 750,
+          "started": 750,
+          "actualWindowArrivals": 750,
+          "confirmedPaid": 739,
+          "completionFraction": 0.9853333333333333,
+          "unfinished": 11,
+          "outcomes": {
+            "paid": 739,
+            "http_500": 11
+          },
+          "paidJourneyMs": {
+            "count": 739,
+            "min": 35,
+            "median": 66,
+            "p95": 244.30000000000007,
+            "p99": 455.5000000000001,
+            "max": 937
+          },
+          "allFinishedJourneyMs": {
+            "count": 750,
+            "min": 35,
+            "median": 66,
+            "p95": 284.1999999999998,
+            "p99": 602.4599999999996,
+            "max": 937
+          },
+          "lastArrival": 1790829691131,
+          "lastConfirmedCompletion": 1790829691170,
+          "maximumDrainEnd": "2026-10-01T04:42:01.169Z"
+        },
+        "all": {
+          "offered": 1000,
+          "started": 1000,
+          "httpPaid": 986,
+          "sqlPaid": 986,
+          "sqlPaidWithoutHttp": 0,
+          "httpPaidWithoutSql": 0,
+          "missingPaidIdentity": 0,
+          "httpPaidIdentityMismatches": 0,
+          "duplicateStarts": 0,
+          "duplicateCompletions": 0,
+          "dropped": 0,
+          "scriptFailures": 0,
+          "protocolFailures": 0,
+          "replayFailures": 0,
+          "arrivalLagMs": {
+            "count": 1000,
+            "min": 0,
+            "median": 1,
+            "p95": 1,
+            "p99": 7,
+            "max": 39
+          },
+          "responses": {
+            "reservation/normal/reservation/201/0/none/success": 500,
+            "checkout/normal/reservation/201/0/none/success": 490,
+            "checkout/normal/direct/201/0/none/success": 496,
+            "settlement/normal/direct/200/0/none/success": 475,
+            "settlement/normal/reservation/200/0/none/success": 480,
+            "checkout/replay/direct/201/0/none/success": 167,
+            "settlement/replay/direct/200/0/none/success": 167,
+            "checkout/replay/reservation/201/0/none/success": 164,
+            "settlement/replay/reservation/200/0/none/success": 164,
+            "settlement/normal/direct/500/1500/INTERNAL_ERROR/failure": 25,
+            "settlement/retry/direct/200/0/none/success": 22,
+            "settlement/normal/reservation/500/1500/INTERNAL_ERROR/failure": 15,
+            "settlement/retry/reservation/200/0/none/success": 9,
+            "checkout/normal/reservation/500/1500/INTERNAL_ERROR/failure": 10,
+            "settlement/retry/reservation/500/1500/INTERNAL_ERROR/failure": 6,
+            "checkout/retry/reservation/500/1500/INTERNAL_ERROR/failure": 5,
+            "checkout/retry/reservation/201/0/none/success": 5,
+            "settlement/retry/direct/500/1500/INTERNAL_ERROR/failure": 3,
+            "checkout/normal/direct/500/1500/INTERNAL_ERROR/failure": 4,
+            "checkout/retry/direct/201/0/none/success": 4
+          },
+          "maxActiveVUs": 20
+        },
+        "diagnostics": {
+          "poolWaiting": {
+            "count": 120,
+            "min": 0,
+            "median": 0,
+            "p95": 0,
+            "p99": 0,
+            "max": 2
+          },
+          "poolCheckedOut": {
+            "count": 120,
+            "min": 0,
+            "median": 0,
+            "p95": 3,
+            "p99": 4.810000000000002,
+            "max": 10
+          },
+          "lockWaiters": {
+            "count": 115,
+            "min": 0,
+            "median": 0,
+            "p95": 0,
+            "p99": 1,
+            "max": 4
+          },
+          "lockTypes": [
+            "transactionid"
+          ],
+          "redisObserverRttMs": {
+            "count": 115,
+            "min": 0.6119000000035157,
+            "median": 0.928700000004028,
+            "p95": 3.67627999999604,
+            "p99": 24.05637999999773,
+            "max": 25.604199999994307
+          },
+          "retriesScheduledInWindow": 278,
+          "hostCpuPercent": {
+            "count": 9,
+            "min": 8.828996282527878,
+            "median": 11.272352305022515,
+            "p95": 31.8910442947921,
+            "p99": 37.30444535306119,
+            "max": 38.657795617628466
+          },
+          "hostFreeBytes": {
+            "count": 9,
+            "min": 2784862208,
+            "median": 2820571136,
+            "p95": 2908068249.6,
+            "p99": 2931184107.52,
+            "max": 2936963072
+          },
+          "containers": {
+            "app": {
+              "cpuPercent": {
+                "count": 9,
+                "min": 9.44,
+                "median": 36.06,
+                "p95": 69.49799999999998,
+                "p99": 84.5796,
+                "max": 88.35
+              },
+              "memoryPercent": {
+                "count": 9,
+                "min": 15.93,
+                "median": 16.03,
+                "p95": 16.382,
+                "p99": 16.3884,
+                "max": 16.39
+              }
+            },
+            "postgres": {
+              "cpuPercent": {
+                "count": 9,
+                "min": 18.17,
+                "median": 19.45,
+                "p95": 49.72399999999999,
+                "p99": 61.49679999999999,
+                "max": 64.44
+              },
+              "memoryPercent": {
+                "count": 9,
+                "min": 10.9,
+                "median": 11.14,
+                "p95": 13.838,
+                "p99": 13.8636,
+                "max": 13.87
+              }
+            },
+            "redis": {
+              "cpuPercent": {
+                "count": 9,
+                "min": 5.68,
+                "median": 6.01,
+                "p95": 7.132,
+                "p99": 7.2664,
+                "max": 7.3
+              },
+              "memoryPercent": {
+                "count": 9,
+                "min": 2.28,
+                "median": 2.59,
+                "p95": 2.952,
+                "p99": 2.9744,
+                "max": 2.98
+              }
+            }
+          },
+          "generatorCpuSeconds": {
+            "count": 9,
+            "min": 0.15625,
+            "median": 0.25,
+            "p95": 0.33125,
+            "p99": 0.34125,
+            "max": 0.34375
+          },
+          "generatorMemoryBytes": {
+            "count": 9,
+            "min": 96866304,
+            "median": 117473280,
+            "p95": 125996236.8,
+            "p99": 128090767.36,
+            "max": 128614400
+          }
+        },
+        "sqlCounts": {
+          "offered": 1000,
+          "started": 1000,
+          "completed": 986,
+          "dropped": 0,
+          "paidOrders": 986,
+          "ordersByStatus": {
+            "paid": 986,
+            "pending": 9
+          },
+          "tickets": 1972,
+          "activeHolds": 10
+        },
+        "failedSmokeChecks": [
+          "noUnfinishedOrdersOrHolds",
+          "expectedPurchases",
+          "noUnexpectedFailures"
+        ]
+      }
+    },
+    {
+      "runId": "p2-v26-ample-r25-02",
+      "revision": "flash-sale-v2.6",
+      "commit": "33a74de24cef2493bf4f8e473a695910fc404c42",
+      "settings": {
+        "users": 1000,
+        "rate": 25,
+        "thinkMs": 20,
+        "retries": 1,
+        "retryDelayMs": 100,
+        "replayEvery": 3,
+        "quantity": 2,
+        "preVus": 100,
+        "maxVus": 100,
+        "poolMax": 10,
+        "sampleMs": 250,
+        "warmupSeconds": 10,
+        "drainSeconds": 30,
+        "limiterMax": 1000000,
+        "durationSeconds": 40,
+        "measurementSeconds": 30,
+        "stock": "ample",
+        "seats": 2000,
+        "runId": "p2-v26-ample-r25-02"
+      },
+      "startedAt": "2026-10-01T04:41:48.539Z",
+      "formal": true,
+      "acceptedFormal": true,
+      "archive": "../flash-sale-baseline-v26/p2-v26-ample-r25-02.zip",
+      "sha256": "96ddaa115c051ca1fa454faa980772818b832c861087cb7f939290316bfebc35",
+      "files": 23,
+      "verifiedArtifactHashes": 22,
+      "sourceHashes": {
+        "load-test/flash-sale.js": "f7a8e56f07f83fe86b4adc3e14efe5d1958c6610f51c248e9333b8eb39f378e6",
+        "load-test/flash-sale-fixture.mjs": "89901d5144f562bd0553e84730c74327a39702d86731bfa30bb689a2b69e4b1e",
+        "load-test/flash-sale-analysis.mjs": "8568000836a0ad98995eafb3bc51a3469f70bca646e330c3a08755e235901eb9",
+        "load-test/flash-sale-check.mjs": "316963391fa60897a50c8ede523a27d1f578eb38d63d302e3a2a278fbddf9966",
+        "docker-compose.flash-sale.yml": "192312953cb3b7d59ed563e16fb552ac91c312786aac9f0c9278840eb19acab5",
+        "Dockerfile": "947dab29bc64bd1593e04f9afcd3fde6c7cdf0d79f561966b9c615f95eef7a85",
+        "package-lock.json": "1788914f59b4f5b1d08da539e8097eee171f01114057769a71a3765e8f65d225",
+        "src/infra/config.ts": "bac9ddb9173e4777f9c60070dba08e3904aa93ae65fd43069911dae9085b2044",
+        "src/infra/postgres/client.ts": "86047dda0772689a28380b5e5d166a89fa9cb66ced2b3498ddb9ccad60370642"
+      },
+      "originalAnalysisRevision": "flash-sale-analysis-v2.6",
+      "originalClassification": "valid-overload",
+      "analysis": {
+        "revision": "flash-sale-v2.6",
+        "analysisRevision": "flash-sale-analysis-v2.6.1",
+        "runId": "p2-v26-ample-r25-02",
+        "classification": "valid-overload",
+        "smokePassed": false,
+        "k6ExitCode": 99,
+        "invalidReasons": [],
+        "evidence": {
+          "sourceClean": true,
+          "checkoutProtocol": true,
+          "paidIdentityObserved": true,
+          "checkoutAuditObserved": true,
+          "accounting": {
+            "checks": {
+              "offeredBuyers": true,
+              "attempts": true,
+              "journeys": true,
+              "arrivalMetrics": true,
+              "summaryCounts": true
+            },
+            "complete": true
+          },
+          "observer": {
+            "count": 118,
+            "first": 1790829743862,
+            "last": 1790829775046,
+            "maxGapMs": 347,
+            "errors": 0,
+            "complete": true
+          },
+          "pool": {
+            "count": 128,
+            "first": 1790829743792,
+            "last": 1790829775713,
+            "maxGapMs": 298,
+            "errors": 0,
+            "complete": true
+          },
+          "resources": {
+            "count": 11,
+            "first": 1790829740083,
+            "last": 1790829774852,
+            "maxGapMs": 4190,
+            "errors": 0,
+            "complete": true
+          },
+          "clockAligned": true,
+          "generatorObserved": true,
+          "containersObserved": true,
+          "clean": true,
+          "auth": true,
+          "lifecycle": true
+        },
+        "window": {
+          "start": "2026-10-01T04:42:24.715Z",
+          "endExclusive": "2026-10-01T04:42:54.715Z",
+          "seconds": 30,
+          "confirmedPaid": 631,
+          "paidPerSecond": 21.033333333333335,
+          "warmupSpillover": 3,
+          "firstHalfPaidPerSecond": 17.266666666666666,
+          "secondHalfPaidPerSecond": 24.8,
+          "nonReplayAttempts": 2104,
+          "failureAttempts": 390,
+          "failureFraction": 0.18536121673003803,
+          "responseKey": "stage/kind/flow/status/error_code/code/business",
+          "apiLatencyMs": {
+            "reservation/normal/reservation/201/0/none/success": {
+              "count": 377,
+              "min": 5.1628,
+              "median": 14.0845,
+              "p95": 106.38653999999995,
+              "p99": 183.99324800000002,
+              "max": 297.3566
+            },
+            "checkout/retry/reservation/500/1500/INTERNAL_ERROR/failure": {
+              "count": 38,
+              "min": 92.2552,
+              "median": 190.11865,
+              "p95": 513.3113149999999,
+              "p99": 570.4714520000001,
+              "max": 594.2552
+            },
+            "settlement/normal/direct/500/1500/INTERNAL_ERROR/failure": {
+              "count": 71,
+              "min": 68.2444,
+              "median": 157.4754,
+              "p95": 385.55975,
+              "p99": 471.10024999999985,
+              "max": 516.0973
+            },
+            "settlement/retry/direct/500/1500/INTERNAL_ERROR/failure": {
+              "count": 47,
+              "min": 93.6049,
+              "median": 169.0787,
+              "p95": 419.6321199999997,
+              "p99": 543.8118039999999,
+              "max": 610.5199
+            },
+            "checkout/normal/direct/201/0/none/success": {
+              "count": 337,
+              "min": 6.7736,
+              "median": 15.53,
+              "p95": 136.65848,
+              "p99": 234.2658119999994,
+              "max": 669.8781
+            },
+            "settlement/normal/reservation/500/1500/INTERNAL_ERROR/failure": {
+              "count": 64,
+              "min": 74.669,
+              "median": 130.89595,
+              "p95": 277.99960499999975,
+              "p99": 365.1869059999999,
+              "max": 387.4535
+            },
+            "settlement/retry/reservation/500/1500/INTERNAL_ERROR/failure": {
+              "count": 35,
+              "min": 81.1374,
+              "median": 171.2252,
+              "p95": 468.1779199999999,
+              "p99": 486.772654,
+              "max": 488.8694
+            },
+            "checkout/normal/direct/500/1500/INTERNAL_ERROR/failure": {
+              "count": 42,
+              "min": 103.6774,
+              "median": 186.76285000000001,
+              "p95": 526.2326249999999,
+              "p99": 573.3247059999998,
+              "max": 591.5875
+            },
+            "checkout/normal/reservation/500/1500/INTERNAL_ERROR/failure": {
+              "count": 71,
+              "min": 81.8196,
+              "median": 165.4056,
+              "p95": 482.61665,
+              "p99": 557.75311,
+              "max": 578.5555
+            },
+            "checkout/retry/reservation/201/0/none/success": {
+              "count": 38,
+              "min": 11.1403,
+              "median": 78.8203,
+              "p95": 193.4877699999999,
+              "p99": 289.4972120000001,
+              "max": 307.395
+            },
+            "settlement/retry/direct/200/0/none/success": {
+              "count": 27,
+              "min": 12.1073,
+              "median": 65.6313,
+              "p95": 193.27464999999998,
+              "p99": 274.85290999999984,
+              "max": 302.6889
+            },
+            "settlement/normal/reservation/200/0/none/success": {
+              "count": 284,
+              "min": 7.5927,
+              "median": 12.741150000000001,
+              "p95": 113.62177,
+              "p99": 166.5585620000001,
+              "max": 179.5847
+            },
+            "checkout/retry/direct/201/0/none/success": {
+              "count": 22,
+              "min": 20.6692,
+              "median": 94.3741,
+              "p95": 193.22999499999997,
+              "p99": 261.54125199999993,
+              "max": 279.5695
+            },
+            "checkout/retry/direct/500/1500/INTERNAL_ERROR/failure": {
+              "count": 22,
+              "min": 136.2409,
+              "median": 195.23145,
+              "p95": 514.6147699999999,
+              "p99": 561.707008,
+              "max": 571.8259
+            },
+            "checkout/normal/reservation/201/0/none/success": {
+              "count": 309,
+              "min": 6.793,
+              "median": 14.8536,
+              "p95": 131.67993999999993,
+              "p99": 214.07647600000004,
+              "max": 245.124
+            },
+            "settlement/normal/direct/200/0/none/success": {
+              "count": 290,
+              "min": 7.2965,
+              "median": 15.90155,
+              "p95": 137.09769500000002,
+              "p99": 239.15826900000002,
+              "max": 319.6578
+            },
+            "checkout/replay/reservation/201/0/none/success": {
+              "count": 107,
+              "min": 4.2136,
+              "median": 8.8338,
+              "p95": 34.88715999999997,
+              "p99": 79.14660599999999,
+              "max": 88.2489
+            },
+            "settlement/replay/reservation/200/0/none/success": {
+              "count": 107,
+              "min": 1.5486,
+              "median": 3.2143,
+              "p95": 22.924869999999906,
+              "p99": 61.504983999999936,
+              "max": 75.7015
+            },
+            "checkout/replay/direct/201/0/none/success": {
+              "count": 104,
+              "min": 4.0335,
+              "median": 8.04945,
+              "p95": 29.811159999999997,
+              "p99": 35.63435,
+              "max": 46.3241
+            },
+            "settlement/replay/direct/200/0/none/success": {
+              "count": 104,
+              "min": 1.5601,
+              "median": 3.1881500000000003,
+              "p95": 17.213809999999988,
+              "p99": 34.484231999999984,
+              "max": 41.6535
+            },
+            "settlement/retry/reservation/200/0/none/success": {
+              "count": 30,
+              "min": 8.9391,
+              "median": 45.9743,
+              "p95": 166.21905499999986,
+              "p99": 200.280403,
+              "max": 203.4267
+            }
+          }
+        },
+        "cohort": {
+          "offered": 750,
+          "started": 750,
+          "actualWindowArrivals": 750,
+          "confirmedPaid": 628,
+          "completionFraction": 0.8373333333333334,
+          "unfinished": 122,
+          "outcomes": {
+            "http_500": 122,
+            "paid": 628
+          },
+          "paidJourneyMs": {
+            "count": 628,
+            "min": 35,
+            "median": 80,
+            "p95": 489.0499999999996,
+            "p99": 722.9000000000005,
+            "max": 1063
+          },
+          "allFinishedJourneyMs": {
+            "count": 750,
+            "min": 35,
+            "median": 93,
+            "p95": 827.55,
+            "p99": 1156.08,
+            "max": 1514
+          },
+          "lastArrival": 1790829774676,
+          "lastConfirmedCompletion": 1790829774714,
+          "maximumDrainEnd": "2026-10-01T04:43:24.714Z"
+        },
+        "all": {
+          "offered": 1000,
+          "started": 1000,
+          "httpPaid": 688,
+          "sqlPaid": 688,
+          "sqlPaidWithoutHttp": 0,
+          "httpPaidWithoutSql": 0,
+          "missingPaidIdentity": 0,
+          "httpPaidIdentityMismatches": 0,
+          "duplicateStarts": 0,
+          "duplicateCompletions": 0,
+          "dropped": 0,
+          "scriptFailures": 0,
+          "protocolFailures": 0,
+          "replayFailures": 0,
+          "arrivalLagMs": {
+            "count": 1000,
+            "min": 0,
+            "median": 1,
+            "p95": 5.0499999999999545,
+            "p99": 26.029999999999973,
+            "max": 96
+          },
+          "responses": {
+            "reservation/normal/reservation/201/0/none/success": 500,
+            "checkout/normal/direct/201/0/none/success": 409,
+            "checkout/normal/reservation/201/0/none/success": 351,
+            "settlement/normal/reservation/200/0/none/success": 311,
+            "settlement/normal/direct/200/0/none/success": 316,
+            "checkout/replay/reservation/201/0/none/success": 117,
+            "settlement/replay/reservation/200/0/none/success": 117,
+            "checkout/replay/direct/201/0/none/success": 116,
+            "settlement/replay/direct/200/0/none/success": 116,
+            "settlement/normal/direct/500/1500/INTERNAL_ERROR/failure": 135,
+            "settlement/retry/direct/500/1500/INTERNAL_ERROR/failure": 105,
+            "settlement/normal/reservation/500/1500/INTERNAL_ERROR/failure": 91,
+            "checkout/normal/reservation/500/1500/INTERNAL_ERROR/failure": 149,
+            "settlement/retry/reservation/500/1500/INTERNAL_ERROR/failure": 60,
+            "checkout/normal/direct/500/1500/INTERNAL_ERROR/failure": 91,
+            "checkout/retry/reservation/500/1500/INTERNAL_ERROR/failure": 98,
+            "checkout/retry/direct/500/1500/INTERNAL_ERROR/failure": 49,
+            "checkout/retry/direct/201/0/none/success": 42,
+            "settlement/retry/direct/200/0/none/success": 30,
+            "checkout/retry/reservation/201/0/none/success": 51,
+            "settlement/retry/reservation/200/0/none/success": 31
+          },
+          "maxActiveVUs": 32
+        },
+        "diagnostics": {
+          "poolWaiting": {
+            "count": 120,
+            "min": 0,
+            "median": 0,
+            "p95": 0.04999999999999716,
+            "p99": 2.8100000000000023,
+            "max": 10
+          },
+          "poolCheckedOut": {
+            "count": 120,
+            "min": 0,
+            "median": 1,
+            "p95": 10,
+            "p99": 10,
+            "max": 10
+          },
+          "lockWaiters": {
+            "count": 112,
+            "min": 0,
+            "median": 0,
+            "p95": 4,
+            "p99": 5.890000000000001,
+            "max": 7
+          },
+          "lockTypes": [
+            "transactionid",
+            "tuple"
+          ],
+          "redisObserverRttMs": {
+            "count": 112,
+            "min": 0.6466999999975087,
+            "median": 1.1163000000015018,
+            "p95": 4.860039999998092,
+            "p99": 31.860544000002193,
+            "max": 43.64890000000014
+          },
+          "retriesScheduledInWindow": 1224,
+          "hostCpuPercent": {
+            "count": 8,
+            "min": 7.162655396690354,
+            "median": 30.725093653062814,
+            "p95": 46.700547519120704,
+            "p99": 48.13643512941806,
+            "max": 48.4954070319924
+          },
+          "hostFreeBytes": {
+            "count": 8,
+            "min": 1245663232,
+            "median": 2393733120,
+            "p95": 2849167974.4,
+            "p99": 2853022638.08,
+            "max": 2853986304
+          },
+          "containers": {
+            "app": {
+              "cpuPercent": {
+                "count": 8,
+                "min": 31.75,
+                "median": 59.9,
+                "p95": 85.41199999999999,
+                "p99": 87.45039999999999,
+                "max": 87.96
+              },
+              "memoryPercent": {
+                "count": 8,
+                "min": 15.04,
+                "median": 15.344999999999999,
+                "p95": 15.574,
+                "p99": 15.6188,
+                "max": 15.63
+              }
+            },
+            "postgres": {
+              "cpuPercent": {
+                "count": 8,
+                "min": 16.34,
+                "median": 34.55,
+                "p95": 57.519499999999994,
+                "p99": 60.439899999999994,
+                "max": 61.17
+              },
+              "memoryPercent": {
+                "count": 8,
+                "min": 13.1,
+                "median": 13.370000000000001,
+                "p95": 13.818,
+                "p99": 13.8516,
+                "max": 13.86
+              }
+            },
+            "redis": {
+              "cpuPercent": {
+                "count": 8,
+                "min": 5.47,
+                "median": 7.69,
+                "p95": 10.261,
+                "p99": 10.860199999999999,
+                "max": 11.01
+              },
+              "memoryPercent": {
+                "count": 8,
+                "min": 2.15,
+                "median": 2.4699999999999998,
+                "p95": 2.6525,
+                "p99": 2.6665,
+                "max": 2.67
+              }
+            }
+          },
+          "generatorCpuSeconds": {
+            "count": 8,
+            "min": 0.546875,
+            "median": 0.953125,
+            "p95": 1.08828125,
+            "p99": 1.09265625,
+            "max": 1.09375
+          },
+          "generatorMemoryBytes": {
+            "count": 8,
+            "min": 94621696,
+            "median": 115398656,
+            "p95": 123449753.6,
+            "p99": 124865003.52,
+            "max": 125218816
+          }
+        },
+        "sqlCounts": {
+          "offered": 1000,
+          "started": 1000,
+          "completed": 688,
+          "dropped": 0,
+          "paidOrders": 688,
+          "ordersByStatus": {
+            "paid": 688,
+            "pending": 165
+          },
+          "tickets": 1376,
+          "activeHolds": 196
+        },
+        "failedSmokeChecks": [
+          "noUnfinishedOrdersOrHolds",
+          "expectedPurchases",
+          "noUnexpectedFailures"
+        ]
+      }
+    },
+    {
+      "runId": "p2-v26-ample-r25-03",
+      "revision": "flash-sale-v2.6",
+      "commit": "33a74de24cef2493bf4f8e473a695910fc404c42",
+      "settings": {
+        "users": 1000,
+        "rate": 25,
+        "thinkMs": 20,
+        "retries": 1,
+        "retryDelayMs": 100,
+        "replayEvery": 3,
+        "quantity": 2,
+        "preVus": 100,
+        "maxVus": 100,
+        "poolMax": 10,
+        "sampleMs": 250,
+        "warmupSeconds": 10,
+        "drainSeconds": 30,
+        "limiterMax": 1000000,
+        "durationSeconds": 40,
+        "measurementSeconds": 30,
+        "stock": "ample",
+        "seats": 2000,
+        "runId": "p2-v26-ample-r25-03"
+      },
+      "startedAt": "2026-10-01T04:52:52.830Z",
+      "formal": true,
+      "acceptedFormal": true,
+      "archive": "../flash-sale-baseline-v26/p2-v26-ample-r25-03.zip",
+      "sha256": "540602779cc3d3a334bc8c91c23f5d3ac377eeb10eb049aea421d66ee8a6a84e",
+      "files": 23,
+      "verifiedArtifactHashes": 22,
+      "sourceHashes": {
+        "load-test/flash-sale.js": "f7a8e56f07f83fe86b4adc3e14efe5d1958c6610f51c248e9333b8eb39f378e6",
+        "load-test/flash-sale-fixture.mjs": "89901d5144f562bd0553e84730c74327a39702d86731bfa30bb689a2b69e4b1e",
+        "load-test/flash-sale-analysis.mjs": "8568000836a0ad98995eafb3bc51a3469f70bca646e330c3a08755e235901eb9",
+        "load-test/flash-sale-check.mjs": "316963391fa60897a50c8ede523a27d1f578eb38d63d302e3a2a278fbddf9966",
+        "docker-compose.flash-sale.yml": "192312953cb3b7d59ed563e16fb552ac91c312786aac9f0c9278840eb19acab5",
+        "Dockerfile": "947dab29bc64bd1593e04f9afcd3fde6c7cdf0d79f561966b9c615f95eef7a85",
+        "package-lock.json": "1788914f59b4f5b1d08da539e8097eee171f01114057769a71a3765e8f65d225",
+        "src/infra/config.ts": "bac9ddb9173e4777f9c60070dba08e3904aa93ae65fd43069911dae9085b2044",
+        "src/infra/postgres/client.ts": "86047dda0772689a28380b5e5d166a89fa9cb66ced2b3498ddb9ccad60370642"
+      },
+      "originalAnalysisRevision": "flash-sale-analysis-v2.6",
+      "originalClassification": "valid-stable",
+      "analysis": {
+        "revision": "flash-sale-v2.6",
+        "analysisRevision": "flash-sale-analysis-v2.6.1",
+        "runId": "p2-v26-ample-r25-03",
+        "classification": "valid-stable",
+        "smokePassed": false,
+        "k6ExitCode": 99,
+        "invalidReasons": [],
+        "evidence": {
+          "sourceClean": true,
+          "checkoutProtocol": true,
+          "paidIdentityObserved": true,
+          "checkoutAuditObserved": true,
+          "accounting": {
+            "checks": {
+              "offeredBuyers": true,
+              "attempts": true,
+              "journeys": true,
+              "arrivalMetrics": true,
+              "summaryCounts": true
+            },
+            "complete": true
+          },
+          "observer": {
+            "count": 120,
+            "first": 1790830407722,
+            "last": 1790830438719,
+            "maxGapMs": 275,
+            "errors": 0,
+            "complete": true
+          },
+          "pool": {
+            "count": 128,
+            "first": 1790830407664,
+            "last": 1790830439434,
+            "maxGapMs": 252,
+            "errors": 0,
+            "complete": true
+          },
+          "resources": {
+            "count": 11,
+            "first": 1790830405947,
+            "last": 1790830438002,
+            "maxGapMs": 3372,
+            "errors": 0,
+            "complete": true
+          },
+          "clockAligned": true,
+          "generatorObserved": true,
+          "containersObserved": true,
+          "clean": true,
+          "auth": true,
+          "lifecycle": true
+        },
+        "window": {
+          "start": "2026-10-01T04:53:28.519Z",
+          "endExclusive": "2026-10-01T04:53:58.519Z",
+          "seconds": 30,
+          "confirmedPaid": 747,
+          "paidPerSecond": 24.9,
+          "warmupSpillover": 0,
+          "firstHalfPaidPerSecond": 24.8,
+          "secondHalfPaidPerSecond": 25,
+          "nonReplayAttempts": 1889,
+          "failureAttempts": 17,
+          "failureFraction": 0.008999470619375331,
+          "responseKey": "stage/kind/flow/status/error_code/code/business",
+          "apiLatencyMs": {
+            "checkout/replay/direct/201/0/none/success": {
+              "count": 125,
+              "min": 3.0389,
+              "median": 5.8401,
+              "p95": 8.16972,
+              "p99": 14.999988000000009,
+              "max": 34.4416
+            },
+            "settlement/replay/direct/200/0/none/success": {
+              "count": 125,
+              "min": 1.5523,
+              "median": 2.6194,
+              "p95": 4.1959599999999995,
+              "p99": 14.39383600000005,
+              "max": 18.6009
+            },
+            "reservation/normal/reservation/201/0/none/success": {
+              "count": 375,
+              "min": 4.7227,
+              "median": 6.8215,
+              "p95": 21.68973,
+              "p99": 43.80784199999999,
+              "max": 115.0085
+            },
+            "checkout/normal/reservation/201/0/none/success": {
+              "count": 371,
+              "min": 6.8205,
+              "median": 8.6271,
+              "p95": 25.75725,
+              "p99": 107.5398900000001,
+              "max": 127.5734
+            },
+            "checkout/normal/direct/201/0/none/success": {
+              "count": 375,
+              "min": 6.3722,
+              "median": 8.0733,
+              "p95": 21.467850000000006,
+              "p99": 72.90834999999996,
+              "max": 113.8735
+            },
+            "settlement/normal/direct/200/0/none/success": {
+              "count": 370,
+              "min": 7.2995,
+              "median": 9.050450000000001,
+              "p95": 38.83050000000001,
+              "p99": 90.98764300000006,
+              "max": 174.4578
+            },
+            "settlement/normal/reservation/200/0/none/success": {
+              "count": 368,
+              "min": 7.1731,
+              "median": 9.06935,
+              "p95": 17.737035,
+              "p99": 45.15062599999996,
+              "max": 93.5
+            },
+            "checkout/replay/reservation/201/0/none/success": {
+              "count": 124,
+              "min": 4.1375,
+              "median": 5.4948,
+              "p95": 8.727374999999999,
+              "p99": 10.285979,
+              "max": 35.9227
+            },
+            "settlement/replay/reservation/200/0/none/success": {
+              "count": 124,
+              "min": 1.5529,
+              "median": 2.1765,
+              "p95": 5.294144999999999,
+              "p99": 7.534213999999995,
+              "max": 8.3507
+            },
+            "checkout/normal/reservation/500/1500/INTERNAL_ERROR/failure": {
+              "count": 4,
+              "min": 91.8885,
+              "median": 127.34774999999999,
+              "p95": 154.95593,
+              "p99": 158.571506,
+              "max": 159.4754
+            },
+            "checkout/retry/reservation/201/0/none/success": {
+              "count": 4,
+              "min": 8.0341,
+              "median": 25.5328,
+              "p95": 82.36240999999998,
+              "p99": 88.78296199999998,
+              "max": 90.3881
+            },
+            "settlement/normal/direct/500/1500/INTERNAL_ERROR/failure": {
+              "count": 4,
+              "min": 143.0505,
+              "median": 181.2231,
+              "p95": 212.07279499999999,
+              "p99": 214.426319,
+              "max": 215.0147
+            },
+            "settlement/normal/reservation/500/1500/INTERNAL_ERROR/failure": {
+              "count": 7,
+              "min": 84.415,
+              "median": 133.5322,
+              "p95": 222.31957,
+              "p99": 223.615834,
+              "max": 223.9399
+            },
+            "settlement/retry/direct/200/0/none/success": {
+              "count": 4,
+              "min": 16.8235,
+              "median": 34.4968,
+              "p95": 45.08573499999999,
+              "p99": 46.54722699999999,
+              "max": 46.9126
+            },
+            "settlement/retry/reservation/500/1500/INTERNAL_ERROR/failure": {
+              "count": 2,
+              "min": 102.0901,
+              "median": 123.6868,
+              "p95": 143.12383,
+              "p99": 144.851566,
+              "max": 145.2835
+            },
+            "settlement/retry/reservation/200/0/none/success": {
+              "count": 5,
+              "min": 10.1069,
+              "median": 13.2964,
+              "p95": 49.866659999999996,
+              "p99": 52.579172,
+              "max": 53.2573
+            }
+          }
+        },
+        "cohort": {
+          "offered": 750,
+          "started": 750,
+          "actualWindowArrivals": 750,
+          "confirmedPaid": 748,
+          "completionFraction": 0.9973333333333333,
+          "unfinished": 2,
+          "outcomes": {
+            "paid": 748,
+            "http_500": 2
+          },
+          "paidJourneyMs": {
+            "count": 748,
+            "min": 34,
+            "median": 63,
+            "p95": 116.29999999999995,
+            "p99": 359.17999999999984,
+            "max": 467
+          },
+          "allFinishedJourneyMs": {
+            "count": 750,
+            "min": 34,
+            "median": 63,
+            "p95": 120.54999999999995,
+            "p99": 372.64999999999986,
+            "max": 467
+          },
+          "lastArrival": 1790830438479,
+          "lastConfirmedCompletion": 1790830438522,
+          "maximumDrainEnd": "2026-10-01T04:54:28.518Z"
+        },
+        "all": {
+          "offered": 1000,
+          "started": 1000,
+          "httpPaid": 943,
+          "sqlPaid": 943,
+          "sqlPaidWithoutHttp": 0,
+          "httpPaidWithoutSql": 0,
+          "missingPaidIdentity": 0,
+          "httpPaidIdentityMismatches": 0,
+          "duplicateStarts": 0,
+          "duplicateCompletions": 0,
+          "dropped": 0,
+          "scriptFailures": 0,
+          "protocolFailures": 0,
+          "replayFailures": 0,
+          "arrivalLagMs": {
+            "count": 1000,
+            "min": 0,
+            "median": 1,
+            "p95": 1,
+            "p99": 3,
+            "max": 40
+          },
+          "responses": {
+            "reservation/normal/reservation/201/0/none/success": 500,
+            "checkout/normal/direct/201/0/none/success": 488,
+            "checkout/normal/reservation/201/0/none/success": 470,
+            "settlement/normal/direct/200/0/none/success": 452,
+            "settlement/normal/reservation/200/0/none/success": 455,
+            "checkout/replay/reservation/201/0/none/success": 156,
+            "settlement/replay/reservation/200/0/none/success": 156,
+            "checkout/replay/direct/201/0/none/success": 157,
+            "settlement/replay/direct/200/0/none/success": 157,
+            "checkout/normal/reservation/500/1500/INTERNAL_ERROR/failure": 30,
+            "checkout/retry/reservation/201/0/none/success": 22,
+            "settlement/normal/direct/500/1500/INTERNAL_ERROR/failure": 44,
+            "settlement/normal/reservation/500/1500/INTERNAL_ERROR/failure": 37,
+            "settlement/retry/direct/500/1500/INTERNAL_ERROR/failure": 23,
+            "settlement/retry/direct/200/0/none/success": 21,
+            "settlement/retry/reservation/500/1500/INTERNAL_ERROR/failure": 22,
+            "checkout/normal/direct/500/1500/INTERNAL_ERROR/failure": 12,
+            "checkout/retry/direct/500/1500/INTERNAL_ERROR/failure": 4,
+            "checkout/retry/direct/201/0/none/success": 8,
+            "settlement/retry/reservation/200/0/none/success": 15,
+            "checkout/retry/reservation/500/1500/INTERNAL_ERROR/failure": 8
+          },
+          "maxActiveVUs": 20
+        },
+        "diagnostics": {
+          "poolWaiting": {
+            "count": 120,
+            "min": 0,
+            "median": 0,
+            "p95": 0,
+            "p99": 0,
+            "max": 0
+          },
+          "poolCheckedOut": {
+            "count": 120,
+            "min": 0,
+            "median": 0,
+            "p95": 2,
+            "p99": 3.6200000000000045,
+            "max": 6
+          },
+          "lockWaiters": {
+            "count": 115,
+            "min": 0,
+            "median": 0,
+            "p95": 0,
+            "p99": 1,
+            "max": 1
+          },
+          "lockTypes": [
+            "transactionid"
+          ],
+          "redisObserverRttMs": {
+            "count": 115,
+            "min": 0.6296000000002095,
+            "median": 0.8689000000013039,
+            "p95": 1.4455599999972035,
+            "p99": 2.4359880000005063,
+            "max": 5.015800000001036
+          },
+          "retriesScheduledInWindow": 101,
+          "hostCpuPercent": {
+            "count": 10,
+            "min": 4.151097916773305,
+            "median": 6.579417990415243,
+            "p95": 15.040200467139204,
+            "p99": 17.255074012592907,
+            "max": 17.80879239895633
+          },
+          "hostFreeBytes": {
+            "count": 10,
+            "min": 2040168448,
+            "median": 2102507520,
+            "p95": 2252291891.2,
+            "p99": 2291646423.04,
+            "max": 2301485056
+          },
+          "containers": {
+            "app": {
+              "cpuPercent": {
+                "count": 10,
+                "min": 0.34,
+                "median": 34.325,
+                "p95": 53.01699999999997,
+                "p99": 63.363400000000006,
+                "max": 65.95
+              },
+              "memoryPercent": {
+                "count": 10,
+                "min": 16.11,
+                "median": 16.285,
+                "p95": 16.5995,
+                "p99": 16.7039,
+                "max": 16.73
+              }
+            },
+            "postgres": {
+              "cpuPercent": {
+                "count": 10,
+                "min": 1.69,
+                "median": 17.25,
+                "p95": 29.218499999999985,
+                "p99": 34.3557,
+                "max": 35.64
+              },
+              "memoryPercent": {
+                "count": 10,
+                "min": 12.95,
+                "median": 13.19,
+                "p95": 13.3755,
+                "p99": 13.379100000000001,
+                "max": 13.38
+              }
+            },
+            "redis": {
+              "cpuPercent": {
+                "count": 10,
+                "min": 2.23,
+                "median": 5.515,
+                "p95": 6.899999999999999,
+                "p99": 7.404,
+                "max": 7.53
+              },
+              "memoryPercent": {
+                "count": 10,
+                "min": 2.17,
+                "median": 2.645,
+                "p95": 3.2444999999999995,
+                "p99": 3.3849,
+                "max": 3.42
+              }
+            }
+          },
+          "generatorCpuSeconds": {
+            "count": 10,
+            "min": 0.1875,
+            "median": 0.28125,
+            "p95": 0.390625,
+            "p99": 0.390625,
+            "max": 0.390625
+          },
+          "generatorMemoryBytes": {
+            "count": 10,
+            "min": 93376512,
+            "median": 115369984,
+            "p95": 128503808,
+            "p99": 128533299.2,
+            "max": 128540672
+          }
+        },
+        "sqlCounts": {
+          "offered": 1000,
+          "started": 1000,
+          "completed": 943,
+          "dropped": 0,
+          "paidOrders": 943,
+          "ordersByStatus": {
+            "paid": 943,
+            "pending": 45
+          },
+          "tickets": 1886,
+          "activeHolds": 16
+        },
+        "failedSmokeChecks": [
+          "noUnfinishedOrdersOrHolds",
+          "expectedPurchases",
+          "noUnexpectedFailures"
+        ]
+      }
+    },
+    {
+      "runId": "p2-v26-limited-01",
+      "revision": "flash-sale-v2.6",
+      "commit": "33a74de24cef2493bf4f8e473a695910fc404c42",
+      "settings": {
+        "users": 300,
+        "rate": 10,
+        "thinkMs": 20,
+        "retries": 1,
+        "retryDelayMs": 100,
+        "replayEvery": 3,
+        "quantity": 2,
+        "preVus": 100,
+        "maxVus": 100,
+        "poolMax": 10,
+        "sampleMs": 250,
+        "warmupSeconds": 0,
+        "drainSeconds": 30,
+        "limiterMax": 1000000,
+        "durationSeconds": 30,
+        "measurementSeconds": 30,
+        "stock": "limited",
+        "seats": 60,
+        "runId": "p2-v26-limited-01"
+      },
+      "startedAt": "2026-10-01T04:54:57.115Z",
+      "formal": true,
+      "acceptedFormal": true,
+      "archive": "../flash-sale-baseline-v26/p2-v26-limited-01.zip",
+      "sha256": "07ebb29b0f791e00ad172f0fd3a5e49207c5db7b0e00cdcc4dfe4a4808a948e8",
+      "files": 23,
+      "verifiedArtifactHashes": 22,
+      "sourceHashes": {
+        "load-test/flash-sale.js": "f7a8e56f07f83fe86b4adc3e14efe5d1958c6610f51c248e9333b8eb39f378e6",
+        "load-test/flash-sale-fixture.mjs": "89901d5144f562bd0553e84730c74327a39702d86731bfa30bb689a2b69e4b1e",
+        "load-test/flash-sale-analysis.mjs": "8568000836a0ad98995eafb3bc51a3469f70bca646e330c3a08755e235901eb9",
+        "load-test/flash-sale-check.mjs": "316963391fa60897a50c8ede523a27d1f578eb38d63d302e3a2a278fbddf9966",
+        "docker-compose.flash-sale.yml": "192312953cb3b7d59ed563e16fb552ac91c312786aac9f0c9278840eb19acab5",
+        "Dockerfile": "947dab29bc64bd1593e04f9afcd3fde6c7cdf0d79f561966b9c615f95eef7a85",
+        "package-lock.json": "1788914f59b4f5b1d08da539e8097eee171f01114057769a71a3765e8f65d225",
+        "src/infra/config.ts": "bac9ddb9173e4777f9c60070dba08e3904aa93ae65fd43069911dae9085b2044",
+        "src/infra/postgres/client.ts": "86047dda0772689a28380b5e5d166a89fa9cb66ced2b3498ddb9ccad60370642"
+      },
+      "originalAnalysisRevision": "flash-sale-analysis-v2.6",
+      "originalClassification": "valid-limited",
+      "analysis": {
+        "revision": "flash-sale-v2.6",
+        "analysisRevision": "flash-sale-analysis-v2.6.1",
+        "runId": "p2-v26-limited-01",
+        "classification": "valid-limited",
+        "smokePassed": true,
+        "k6ExitCode": 0,
+        "invalidReasons": [],
+        "evidence": {
+          "sourceClean": true,
+          "checkoutProtocol": true,
+          "paidIdentityObserved": true,
+          "checkoutAuditObserved": true,
+          "accounting": {
+            "checks": {
+              "offeredBuyers": true,
+              "attempts": true,
+              "journeys": true,
+              "arrivalMetrics": true,
+              "summaryCounts": true
+            },
+            "complete": true
+          },
+          "observer": {
+            "count": 117,
+            "first": 1790830519972,
+            "last": 1790830550370,
+            "maxGapMs": 306,
+            "errors": 0,
+            "complete": true
+          },
+          "pool": {
+            "count": 127,
+            "first": 1790830519330,
+            "last": 1790830550848,
+            "maxGapMs": 251,
+            "errors": 0,
+            "complete": true
+          },
+          "resources": {
+            "count": 10,
+            "first": 1790830519973,
+            "last": 1790830547965,
+            "maxGapMs": 3267,
+            "errors": 0,
+            "complete": true
+          },
+          "clockAligned": true,
+          "generatorObserved": true,
+          "containersObserved": true,
+          "clean": true,
+          "auth": true,
+          "lifecycle": true
+        },
+        "window": {
+          "start": "2026-10-01T04:55:20.201Z",
+          "endExclusive": "2026-10-01T04:55:50.201Z",
+          "seconds": 30,
+          "confirmedPaid": 30,
+          "paidPerSecond": 1,
+          "warmupSpillover": 0,
+          "firstHalfPaidPerSecond": 2,
+          "secondHalfPaidPerSecond": 0,
+          "nonReplayAttempts": 345,
+          "failureAttempts": 0,
+          "failureFraction": 0,
+          "responseKey": "stage/kind/flow/status/error_code/code/business",
+          "apiLatencyMs": {
+            "reservation/normal/reservation/201/0/none/success": {
+              "count": 15,
+              "min": 7.4139,
+              "median": 10.7227,
+              "p95": 55.10167999999997,
+              "p99": 69.14121599999999,
+              "max": 72.6511
+            },
+            "checkout/normal/reservation/201/0/none/success": {
+              "count": 15,
+              "min": 8.9798,
+              "median": 10.3543,
+              "p95": 23.562949999999972,
+              "p99": 36.34522999999999,
+              "max": 39.5408
+            },
+            "settlement/normal/reservation/200/0/none/success": {
+              "count": 15,
+              "min": 10.1025,
+              "median": 12.2089,
+              "p95": 25.80368999999998,
+              "p99": 38.31369799999999,
+              "max": 41.4412
+            },
+            "checkout/normal/direct/201/0/none/success": {
+              "count": 15,
+              "min": 8.5612,
+              "median": 11.2549,
+              "p95": 58.258799999999866,
+              "p99": 126.00647999999993,
+              "max": 142.9434
+            },
+            "checkout/replay/reservation/201/0/none/success": {
+              "count": 5,
+              "min": 5.6191,
+              "median": 5.9536,
+              "p95": 22.73498,
+              "p99": 25.648836000000003,
+              "max": 26.3773
+            },
+            "settlement/replay/reservation/200/0/none/success": {
+              "count": 5,
+              "min": 2.64,
+              "median": 2.695,
+              "p95": 4.35522,
+              "p99": 4.507924,
+              "max": 4.5461
+            },
+            "settlement/normal/direct/200/0/none/success": {
+              "count": 15,
+              "min": 10.253,
+              "median": 12.8269,
+              "p95": 15.011299999999999,
+              "p99": 15.62954,
+              "max": 15.7841
+            },
+            "checkout/replay/direct/201/0/none/success": {
+              "count": 5,
+              "min": 5.2232,
+              "median": 5.807,
+              "p95": 6.8619200000000005,
+              "p99": 6.940224000000001,
+              "max": 6.9598
+            },
+            "settlement/replay/direct/200/0/none/success": {
+              "count": 5,
+              "min": 2.074,
+              "median": 2.6243,
+              "p95": 3.0821199999999997,
+              "p99": 3.1429839999999998,
+              "max": 3.1582
+            },
+            "reservation/normal/reservation/409/1409/INSUFFICIENT_INVENTORY/failure": {
+              "count": 135,
+              "min": 4.0176,
+              "median": 5.3525,
+              "p95": 7.595419999999998,
+              "p99": 10.455209999999996,
+              "max": 15.1425
+            },
+            "checkout/normal/direct/409/1409/INSUFFICIENT_INVENTORY/failure": {
+              "count": 135,
+              "min": 6.0559,
+              "median": 7.7392,
+              "p95": 11.415049999999999,
+              "p99": 36.36519999999997,
+              "max": 67.9211
+            }
+          }
+        },
+        "cohort": {
+          "offered": 300,
+          "started": 300,
+          "actualWindowArrivals": 300,
+          "confirmedPaid": 30,
+          "completionFraction": 0.1,
+          "unfinished": 270,
+          "outcomes": {
+            "paid": 30,
+            "stock_rejected": 270
+          },
+          "paidJourneyMs": {
+            "count": 30,
+            "min": 39,
+            "median": 70.5,
+            "p95": 142.64999999999998,
+            "p99": 168.85000000000002,
+            "max": 179
+          },
+          "allFinishedJourneyMs": {
+            "count": 300,
+            "min": 4,
+            "median": 7,
+            "p95": 70.05000000000001,
+            "p99": 138.02999999999997,
+            "max": 179
+          },
+          "lastArrival": 1790830550101,
+          "lastConfirmedCompletion": 1790830523152,
+          "maximumDrainEnd": "2026-10-01T04:56:20.200Z"
+        },
+        "all": {
+          "offered": 300,
+          "started": 300,
+          "httpPaid": 30,
+          "sqlPaid": 30,
+          "sqlPaidWithoutHttp": 0,
+          "httpPaidWithoutSql": 0,
+          "missingPaidIdentity": 0,
+          "httpPaidIdentityMismatches": 0,
+          "duplicateStarts": 0,
+          "duplicateCompletions": 0,
+          "dropped": 0,
+          "scriptFailures": 0,
+          "protocolFailures": 0,
+          "replayFailures": 0,
+          "arrivalLagMs": {
+            "count": 300,
+            "min": 0,
+            "median": 0,
+            "p95": 0,
+            "p99": 0.009999999999990905,
+            "max": 30
+          },
+          "responses": {
+            "reservation/normal/reservation/201/0/none/success": 15,
+            "checkout/normal/reservation/201/0/none/success": 15,
+            "settlement/normal/reservation/200/0/none/success": 15,
+            "checkout/normal/direct/201/0/none/success": 15,
+            "checkout/replay/reservation/201/0/none/success": 5,
+            "settlement/replay/reservation/200/0/none/success": 5,
+            "settlement/normal/direct/200/0/none/success": 15,
+            "checkout/replay/direct/201/0/none/success": 5,
+            "settlement/replay/direct/200/0/none/success": 5,
+            "reservation/normal/reservation/409/1409/INSUFFICIENT_INVENTORY/failure": 135,
+            "checkout/normal/direct/409/1409/INSUFFICIENT_INVENTORY/failure": 135
+          },
+          "maxActiveVUs": 2
+        },
+        "diagnostics": {
+          "poolWaiting": {
+            "count": 120,
+            "min": 0,
+            "median": 0,
+            "p95": 0,
+            "p99": 0,
+            "max": 0
+          },
+          "poolCheckedOut": {
+            "count": 120,
+            "min": 0,
+            "median": 0,
+            "p95": 0,
+            "p99": 0.8100000000000023,
+            "max": 2
+          },
+          "lockWaiters": {
+            "count": 115,
+            "min": 0,
+            "median": 0,
+            "p95": 0,
+            "p99": 0,
+            "max": 0
+          },
+          "lockTypes": [],
+          "redisObserverRttMs": {
+            "count": 115,
+            "min": 0.6691999999966356,
+            "median": 0.9362000000037369,
+            "p95": 1.287929999996413,
+            "p99": 1.530203999998339,
+            "max": 3.1323000000011234
+          },
+          "retriesScheduledInWindow": 1,
+          "hostCpuPercent": {
+            "count": 9,
+            "min": 8.932461873638342,
+            "median": 9.804191947049091,
+            "p95": 16.84654121088391,
+            "p99": 17.660265262826506,
+            "max": 17.863696275812156
+          },
+          "hostFreeBytes": {
+            "count": 9,
+            "min": 1968521216,
+            "median": 2081083392,
+            "p95": 2111032524.8,
+            "p99": 2117255823.36,
+            "max": 2118811648
+          },
+          "containers": {
+            "app": {
+              "cpuPercent": {
+                "count": 9,
+                "min": 3.99,
+                "median": 5.53,
+                "p95": 10.884,
+                "p99": 11.152800000000001,
+                "max": 11.22
+              },
+              "memoryPercent": {
+                "count": 9,
+                "min": 8.61,
+                "median": 9.73,
+                "p95": 10.356,
+                "p99": 10.3592,
+                "max": 10.36
+              }
+            },
+            "postgres": {
+              "cpuPercent": {
+                "count": 9,
+                "min": 4.81,
+                "median": 5.36,
+                "p95": 6.576,
+                "p99": 6.8992,
+                "max": 6.98
+              },
+              "memoryPercent": {
+                "count": 9,
+                "min": 8.28,
+                "median": 8.34,
+                "p95": 8.452,
+                "p99": 8.458400000000001,
+                "max": 8.46
+              }
+            },
+            "redis": {
+              "cpuPercent": {
+                "count": 9,
+                "min": 2.79,
+                "median": 3.31,
+                "p95": 3.612,
+                "p99": 3.6344000000000003,
+                "max": 3.64
+              },
+              "memoryPercent": {
+                "count": 9,
+                "min": 1.94,
+                "median": 2.08,
+                "p95": 2.192,
+                "p99": 2.1984000000000004,
+                "max": 2.2
+              }
+            }
+          },
+          "generatorCpuSeconds": {
+            "count": 9,
+            "min": 0.171875,
+            "median": 0.203125,
+            "p95": 0.24375,
+            "p99": 0.24875,
+            "max": 0.25
+          },
+          "generatorMemoryBytes": {
+            "count": 9,
+            "min": 74080256,
+            "median": 80060416,
+            "p95": 85404876.8,
+            "p99": 85435023.36,
+            "max": 85442560
+          }
+        },
+        "sqlCounts": {
+          "offered": 300,
+          "started": 300,
+          "completed": 30,
+          "dropped": 0,
+          "paidOrders": 30,
+          "ordersByStatus": {
+            "paid": 30
+          },
+          "tickets": 60,
+          "activeHolds": 0
+        },
+        "failedSmokeChecks": []
+      }
+    },
+    {
+      "runId": "p2-v26-limited-02",
+      "revision": "flash-sale-v2.6",
+      "commit": "598ad50bc389b47bcbcfc0175359735671718fe1",
+      "settings": {
+        "users": 300,
+        "rate": 10,
+        "thinkMs": 20,
+        "retries": 1,
+        "retryDelayMs": 100,
+        "replayEvery": 3,
+        "quantity": 2,
+        "preVus": 100,
+        "maxVus": 100,
+        "poolMax": 10,
+        "sampleMs": 250,
+        "warmupSeconds": 0,
+        "drainSeconds": 30,
+        "limiterMax": 1000000,
+        "durationSeconds": 30,
+        "measurementSeconds": 30,
+        "stock": "limited",
+        "seats": 60,
+        "runId": "p2-v26-limited-02"
+      },
+      "startedAt": "2026-10-02T01:58:30.659Z",
+      "formal": true,
+      "acceptedFormal": true,
+      "archive": "p2-v26-limited-02.zip",
+      "sha256": "8943d4752e3cb96e978bff787a852d5322f22d77c78437c1416d272bf57611f0",
+      "files": 23,
+      "verifiedArtifactHashes": 22,
+      "sourceHashes": {
+        "load-test/flash-sale.js": "f7a8e56f07f83fe86b4adc3e14efe5d1958c6610f51c248e9333b8eb39f378e6",
+        "load-test/flash-sale-fixture.mjs": "8a3909c4601f0cd9ed116bb083be30e314bc4178fa0ae81ec517d10320c57a7a",
+        "load-test/flash-sale-analysis.mjs": "fd7727da1d8417796c649c0752e44603e8491113dd0c1bfa3055a6501b24e45e",
+        "load-test/flash-sale-check.mjs": "a224daf3a5eb14966903a0c411a0e6d00302a284d58767e6de9c31c55a30965e",
+        "docker-compose.flash-sale.yml": "192312953cb3b7d59ed563e16fb552ac91c312786aac9f0c9278840eb19acab5",
+        "Dockerfile": "947dab29bc64bd1593e04f9afcd3fde6c7cdf0d79f561966b9c615f95eef7a85",
+        "package-lock.json": "1788914f59b4f5b1d08da539e8097eee171f01114057769a71a3765e8f65d225",
+        "src/infra/config.ts": "bac9ddb9173e4777f9c60070dba08e3904aa93ae65fd43069911dae9085b2044",
+        "src/infra/postgres/client.ts": "86047dda0772689a28380b5e5d166a89fa9cb66ced2b3498ddb9ccad60370642"
+      },
+      "originalAnalysisRevision": "flash-sale-analysis-v2.6.1",
+      "originalClassification": "valid-limited",
+      "analysis": {
+        "revision": "flash-sale-v2.6",
+        "analysisRevision": "flash-sale-analysis-v2.6.1",
+        "runId": "p2-v26-limited-02",
+        "classification": "valid-limited",
+        "smokePassed": true,
+        "k6ExitCode": 0,
+        "invalidReasons": [],
+        "evidence": {
+          "sourceClean": true,
+          "checkoutProtocol": true,
+          "paidIdentityObserved": true,
+          "checkoutAuditObserved": true,
+          "accounting": {
+            "checks": {
+              "offeredBuyers": true,
+              "attempts": true,
+              "journeys": true,
+              "arrivalMetrics": true,
+              "summaryCounts": true
+            },
+            "complete": true
+          },
+          "observer": {
+            "count": 116,
+            "first": 1790906335091,
+            "last": 1790906365309,
+            "maxGapMs": 290,
+            "errors": 0,
+            "complete": true
+          },
+          "pool": {
+            "count": 125,
+            "first": 1790906334454,
+            "last": 1790906365487,
+            "maxGapMs": 261,
+            "errors": 0,
+            "complete": true
+          },
+          "resources": {
+            "count": 10,
+            "first": 1790906335092,
+            "last": 1790906362708,
+            "maxGapMs": 3178,
+            "errors": 0,
+            "complete": true
+          },
+          "clockAligned": true,
+          "generatorObserved": true,
+          "containersObserved": true,
+          "clean": true,
+          "auth": true,
+          "lifecycle": true
+        },
+        "window": {
+          "start": "2026-10-02T01:58:55.252Z",
+          "endExclusive": "2026-10-02T01:59:25.252Z",
+          "seconds": 30,
+          "confirmedPaid": 30,
+          "paidPerSecond": 1,
+          "warmupSpillover": 0,
+          "firstHalfPaidPerSecond": 2,
+          "secondHalfPaidPerSecond": 0,
+          "nonReplayAttempts": 345,
+          "failureAttempts": 0,
+          "failureFraction": 0,
+          "responseKey": "stage/kind/flow/status/error_code/code/business",
+          "apiLatencyMs": {
+            "reservation/normal/reservation/201/0/none/success": {
+              "count": 15,
+              "min": 8.1461,
+              "median": 8.937,
+              "p95": 22.44846999999998,
+              "p99": 31.978493999999987,
+              "max": 34.361
+            },
+            "checkout/normal/reservation/201/0/none/success": {
+              "count": 15,
+              "min": 9.5354,
+              "median": 11.8879,
+              "p95": 19.32737,
+              "p99": 20.815793999999997,
+              "max": 21.1879
+            },
+            "settlement/normal/reservation/200/0/none/success": {
+              "count": 15,
+              "min": 10.5248,
+              "median": 11.8852,
+              "p95": 42.492419999999974,
+              "p99": 56.13872399999998,
+              "max": 59.5503
+            },
+            "checkout/replay/reservation/201/0/none/success": {
+              "count": 5,
+              "min": 6.8193,
+              "median": 8.4038,
+              "p95": 15.61032,
+              "p99": 16.285344000000002,
+              "max": 16.4541
+            },
+            "settlement/replay/reservation/200/0/none/success": {
+              "count": 5,
+              "min": 2.6526,
+              "median": 3.2638,
+              "p95": 4.1477200000000005,
+              "p99": 4.226664,
+              "max": 4.2464
+            },
+            "checkout/normal/direct/201/0/none/success": {
+              "count": 15,
+              "min": 9.543,
+              "median": 12.2831,
+              "p95": 30.586649999999995,
+              "p99": 32.033409999999996,
+              "max": 32.3951
+            },
+            "settlement/normal/direct/200/0/none/success": {
+              "count": 15,
+              "min": 9.3924,
+              "median": 13.2491,
+              "p95": 30.857559999999985,
+              "p99": 38.07831199999999,
+              "max": 39.8835
+            },
+            "checkout/replay/direct/201/0/none/success": {
+              "count": 5,
+              "min": 5.789,
+              "median": 7.4862,
+              "p95": 8.0503,
+              "p99": 8.07606,
+              "max": 8.0825
+            },
+            "settlement/replay/direct/200/0/none/success": {
+              "count": 5,
+              "min": 2.1055,
+              "median": 3.1331,
+              "p95": 4.51014,
+              "p99": 4.768428,
+              "max": 4.833
+            },
+            "reservation/normal/reservation/409/1409/INSUFFICIENT_INVENTORY/failure": {
+              "count": 135,
+              "min": 4.1967,
+              "median": 5.3277,
+              "p95": 7.180339999999999,
+              "p99": 11.380469999999987,
+              "max": 12.9773
+            },
+            "checkout/normal/direct/409/1409/INSUFFICIENT_INVENTORY/failure": {
+              "count": 135,
+              "min": 5.3449,
+              "median": 7.6027,
+              "p95": 10.10117,
+              "p99": 14.334445999999993,
+              "max": 39.7368
+            }
+          }
+        },
+        "cohort": {
+          "offered": 300,
+          "started": 300,
+          "actualWindowArrivals": 300,
+          "confirmedPaid": 30,
+          "completionFraction": 0.1,
+          "unfinished": 270,
+          "outcomes": {
+            "paid": 30,
+            "stock_rejected": 270
+          },
+          "paidJourneyMs": {
+            "count": 30,
+            "min": 41,
+            "median": 72,
+            "p95": 100.94999999999997,
+            "p99": 143.34000000000003,
+            "max": 159
+          },
+          "allFinishedJourneyMs": {
+            "count": 300,
+            "min": 5,
+            "median": 7,
+            "p95": 72,
+            "p99": 87.08999999999992,
+            "max": 159
+          },
+          "lastArrival": 1790906365152,
+          "lastConfirmedCompletion": 1790906338200,
+          "maximumDrainEnd": "2026-10-02T01:59:55.251Z"
+        },
+        "all": {
+          "offered": 300,
+          "started": 300,
+          "httpPaid": 30,
+          "sqlPaid": 30,
+          "sqlPaidWithoutHttp": 0,
+          "httpPaidWithoutSql": 0,
+          "missingPaidIdentity": 0,
+          "httpPaidIdentityMismatches": 0,
+          "duplicateStarts": 0,
+          "duplicateCompletions": 0,
+          "dropped": 0,
+          "scriptFailures": 0,
+          "protocolFailures": 0,
+          "replayFailures": 0,
+          "arrivalLagMs": {
+            "count": 300,
+            "min": 0,
+            "median": 0,
+            "p95": 1,
+            "p99": 1,
+            "max": 5
+          },
+          "responses": {
+            "reservation/normal/reservation/201/0/none/success": 15,
+            "checkout/normal/reservation/201/0/none/success": 15,
+            "settlement/normal/reservation/200/0/none/success": 15,
+            "checkout/replay/reservation/201/0/none/success": 5,
+            "settlement/replay/reservation/200/0/none/success": 5,
+            "checkout/normal/direct/201/0/none/success": 15,
+            "settlement/normal/direct/200/0/none/success": 15,
+            "checkout/replay/direct/201/0/none/success": 5,
+            "settlement/replay/direct/200/0/none/success": 5,
+            "reservation/normal/reservation/409/1409/INSUFFICIENT_INVENTORY/failure": 135,
+            "checkout/normal/direct/409/1409/INSUFFICIENT_INVENTORY/failure": 135
+          },
+          "maxActiveVUs": 2
+        },
+        "diagnostics": {
+          "poolWaiting": {
+            "count": 120,
+            "min": 0,
+            "median": 0,
+            "p95": 0,
+            "p99": 0,
+            "max": 0
+          },
+          "poolCheckedOut": {
+            "count": 120,
+            "min": 0,
+            "median": 0,
+            "p95": 0,
+            "p99": 1,
+            "max": 1
+          },
+          "lockWaiters": {
+            "count": 114,
+            "min": 0,
+            "median": 0,
+            "p95": 0,
+            "p99": 0,
+            "max": 0
+          },
+          "lockTypes": [],
+          "redisObserverRttMs": {
+            "count": 114,
+            "min": 0.6345000000001164,
+            "median": 0.9490500000010798,
+            "p95": 1.50820000000276,
+            "p99": 6.214006999999999,
+            "max": 9.267699999996694
+          },
+          "retriesScheduledInWindow": 1,
+          "hostCpuPercent": {
+            "count": 9,
+            "min": 5.185165825993776,
+            "median": 11.30935022931524,
+            "p95": 16.56513194830565,
+            "p99": 16.78456307936169,
+            "max": 16.8394208621257
+          },
+          "hostFreeBytes": {
+            "count": 9,
+            "min": 4408365056,
+            "median": 4444979200,
+            "p95": 4476311961.6,
+            "p99": 4477945118.72,
+            "max": 4478353408
+          },
+          "containers": {
+            "app": {
+              "cpuPercent": {
+                "count": 9,
+                "min": 4.54,
+                "median": 5.36,
+                "p95": 11.597999999999997,
+                "p99": 14.0876,
+                "max": 14.71
+              },
+              "memoryPercent": {
+                "count": 9,
+                "min": 9.58,
+                "median": 10.23,
+                "p95": 11.63,
+                "p99": 11.646,
+                "max": 11.65
+              }
+            },
+            "postgres": {
+              "cpuPercent": {
+                "count": 9,
+                "min": 4.42,
+                "median": 4.9,
+                "p95": 6.335999999999999,
+                "p99": 7.0112,
+                "max": 7.18
+              },
+              "memoryPercent": {
+                "count": 9,
+                "min": 8.3,
+                "median": 8.34,
+                "p95": 8.408,
+                "p99": 8.4176,
+                "max": 8.42
+              }
+            },
+            "redis": {
+              "cpuPercent": {
+                "count": 9,
+                "min": 2.75,
+                "median": 2.89,
+                "p95": 3.51,
+                "p99": 3.686,
+                "max": 3.73
+              },
+              "memoryPercent": {
+                "count": 9,
+                "min": 2.31,
+                "median": 2.47,
+                "p95": 2.562,
+                "p99": 2.5684,
+                "max": 2.57
+              }
+            }
+          },
+          "generatorCpuSeconds": {
+            "count": 9,
+            "min": 0.03125,
+            "median": 0.046875,
+            "p95": 0.046875,
+            "p99": 0.046875,
+            "max": 0.046875
+          },
+          "generatorMemoryBytes": {
+            "count": 9,
+            "min": 71847936,
+            "median": 79556608,
+            "p95": 83682099.2,
+            "p99": 83756810.24,
+            "max": 83775488
+          }
+        },
+        "sqlCounts": {
+          "offered": 300,
+          "started": 300,
+          "completed": 30,
+          "dropped": 0,
+          "paidOrders": 30,
+          "ordersByStatus": {
+            "paid": 30
+          },
+          "tickets": 60,
+          "activeHolds": 0
+        },
+        "failedSmokeChecks": []
+      }
+    },
+    {
+      "runId": "p2-v26-limited-03",
+      "revision": "flash-sale-v2.6",
+      "commit": "598ad50bc389b47bcbcfc0175359735671718fe1",
+      "settings": {
+        "users": 300,
+        "rate": 10,
+        "thinkMs": 20,
+        "retries": 1,
+        "retryDelayMs": 100,
+        "replayEvery": 3,
+        "quantity": 2,
+        "preVus": 100,
+        "maxVus": 100,
+        "poolMax": 10,
+        "sampleMs": 250,
+        "warmupSeconds": 0,
+        "drainSeconds": 30,
+        "limiterMax": 1000000,
+        "durationSeconds": 30,
+        "measurementSeconds": 30,
+        "stock": "limited",
+        "seats": 60,
+        "runId": "p2-v26-limited-03"
+      },
+      "startedAt": "2026-10-02T01:59:38.956Z",
+      "formal": true,
+      "acceptedFormal": true,
+      "archive": "p2-v26-limited-03.zip",
+      "sha256": "746d710a0887327c8041b4f054b833a587f4718bbe6760dc517e2d41fe3901cf",
+      "files": 23,
+      "verifiedArtifactHashes": 22,
+      "sourceHashes": {
+        "load-test/flash-sale.js": "f7a8e56f07f83fe86b4adc3e14efe5d1958c6610f51c248e9333b8eb39f378e6",
+        "load-test/flash-sale-fixture.mjs": "8a3909c4601f0cd9ed116bb083be30e314bc4178fa0ae81ec517d10320c57a7a",
+        "load-test/flash-sale-analysis.mjs": "fd7727da1d8417796c649c0752e44603e8491113dd0c1bfa3055a6501b24e45e",
+        "load-test/flash-sale-check.mjs": "a224daf3a5eb14966903a0c411a0e6d00302a284d58767e6de9c31c55a30965e",
+        "docker-compose.flash-sale.yml": "192312953cb3b7d59ed563e16fb552ac91c312786aac9f0c9278840eb19acab5",
+        "Dockerfile": "947dab29bc64bd1593e04f9afcd3fde6c7cdf0d79f561966b9c615f95eef7a85",
+        "package-lock.json": "1788914f59b4f5b1d08da539e8097eee171f01114057769a71a3765e8f65d225",
+        "src/infra/config.ts": "bac9ddb9173e4777f9c60070dba08e3904aa93ae65fd43069911dae9085b2044",
+        "src/infra/postgres/client.ts": "86047dda0772689a28380b5e5d166a89fa9cb66ced2b3498ddb9ccad60370642"
+      },
+      "originalAnalysisRevision": "flash-sale-analysis-v2.6.1",
+      "originalClassification": "valid-limited",
+      "analysis": {
+        "revision": "flash-sale-v2.6",
+        "analysisRevision": "flash-sale-analysis-v2.6.1",
+        "runId": "p2-v26-limited-03",
+        "classification": "valid-limited",
+        "smokePassed": true,
+        "k6ExitCode": 0,
+        "invalidReasons": [],
+        "evidence": {
+          "sourceClean": true,
+          "checkoutProtocol": true,
+          "paidIdentityObserved": true,
+          "checkoutAuditObserved": true,
+          "accounting": {
+            "checks": {
+              "offeredBuyers": true,
+              "attempts": true,
+              "journeys": true,
+              "arrivalMetrics": true,
+              "summaryCounts": true
+            },
+            "complete": true
+          },
+          "observer": {
+            "count": 116,
+            "first": 1790906399295,
+            "last": 1790906429564,
+            "maxGapMs": 303,
+            "errors": 0,
+            "complete": true
+          },
+          "pool": {
+            "count": 126,
+            "first": 1790906398573,
+            "last": 1790906429852,
+            "maxGapMs": 254,
+            "errors": 0,
+            "complete": true
+          },
+          "resources": {
+            "count": 10,
+            "first": 1790906399296,
+            "last": 1790906426669,
+            "maxGapMs": 3198,
+            "errors": 0,
+            "complete": true
+          },
+          "clockAligned": true,
+          "generatorObserved": true,
+          "containersObserved": true,
+          "clean": true,
+          "auth": true,
+          "lifecycle": true
+        },
+        "window": {
+          "start": "2026-10-02T01:59:59.427Z",
+          "endExclusive": "2026-10-02T02:00:29.427Z",
+          "seconds": 30,
+          "confirmedPaid": 30,
+          "paidPerSecond": 1,
+          "warmupSpillover": 0,
+          "firstHalfPaidPerSecond": 2,
+          "secondHalfPaidPerSecond": 0,
+          "nonReplayAttempts": 345,
+          "failureAttempts": 0,
+          "failureFraction": 0,
+          "responseKey": "stage/kind/flow/status/error_code/code/business",
+          "apiLatencyMs": {
+            "reservation/normal/reservation/201/0/none/success": {
+              "count": 15,
+              "min": 7.3846,
+              "median": 8.6734,
+              "p95": 12.000379999999994,
+              "p99": 14.421035999999997,
+              "max": 15.0262
+            },
+            "checkout/normal/reservation/201/0/none/success": {
+              "count": 15,
+              "min": 8.5186,
+              "median": 10.0678,
+              "p95": 17.902919999999998,
+              "p99": 18.958744,
+              "max": 19.2227
+            },
+            "settlement/normal/reservation/200/0/none/success": {
+              "count": 15,
+              "min": 8.8511,
+              "median": 10.7862,
+              "p95": 18.759029999999996,
+              "p99": 19.872925999999996,
+              "max": 20.1514
+            },
+            "checkout/replay/reservation/201/0/none/success": {
+              "count": 5,
+              "min": 5.8021,
+              "median": 7.3499,
+              "p95": 12.18774,
+              "p99": 12.734988,
+              "max": 12.8718
+            },
+            "settlement/replay/reservation/200/0/none/success": {
+              "count": 5,
+              "min": 2.0956,
+              "median": 3.1139,
+              "p95": 4.55354,
+              "p99": 4.714308,
+              "max": 4.7545
+            },
+            "checkout/normal/direct/201/0/none/success": {
+              "count": 15,
+              "min": 8.7035,
+              "median": 10.375,
+              "p95": 22.023719999999983,
+              "p99": 30.570663999999994,
+              "max": 32.7074
+            },
+            "settlement/normal/direct/200/0/none/success": {
+              "count": 15,
+              "min": 9.7435,
+              "median": 10.9269,
+              "p95": 13.217529999999998,
+              "p99": 13.583265999999998,
+              "max": 13.6747
+            },
+            "checkout/replay/direct/201/0/none/success": {
+              "count": 5,
+              "min": 5.918,
+              "median": 6.8627,
+              "p95": 7.46706,
+              "p99": 7.479732,
+              "max": 7.4829
+            },
+            "settlement/replay/direct/200/0/none/success": {
+              "count": 5,
+              "min": 2.6021,
+              "median": 2.6534,
+              "p95": 3.0473,
+              "p99": 3.1185,
+              "max": 3.1363
+            },
+            "reservation/normal/reservation/409/1409/INSUFFICIENT_INVENTORY/failure": {
+              "count": 135,
+              "min": 3.6066,
+              "median": 5.4036,
+              "p95": 9.368849999999997,
+              "p99": 14.712679999999995,
+              "max": 20.8464
+            },
+            "checkout/normal/direct/409/1409/INSUFFICIENT_INVENTORY/failure": {
+              "count": 135,
+              "min": 5.862,
+              "median": 7.6088,
+              "p95": 12.775839999999999,
+              "p99": 20.599775999999984,
+              "max": 29.2169
+            }
+          }
+        },
+        "cohort": {
+          "offered": 300,
+          "started": 300,
+          "actualWindowArrivals": 300,
+          "confirmedPaid": 30,
+          "completionFraction": 0.1,
+          "unfinished": 270,
+          "outcomes": {
+            "paid": 30,
+            "stock_rejected": 270
+          },
+          "paidJourneyMs": {
+            "count": 30,
+            "min": 40,
+            "median": 68,
+            "p95": 84.39999999999998,
+            "p99": 92.26,
+            "max": 94
+          },
+          "allFinishedJourneyMs": {
+            "count": 300,
+            "min": 4,
+            "median": 7,
+            "p95": 68,
+            "p99": 77.02999999999997,
+            "max": 94
+          },
+          "lastArrival": 1790906429328,
+          "lastConfirmedCompletion": 1790906402368,
+          "maximumDrainEnd": "2026-10-02T02:00:59.426Z"
+        },
+        "all": {
+          "offered": 300,
+          "started": 300,
+          "httpPaid": 30,
+          "sqlPaid": 30,
+          "sqlPaidWithoutHttp": 0,
+          "httpPaidWithoutSql": 0,
+          "missingPaidIdentity": 0,
+          "httpPaidIdentityMismatches": 0,
+          "duplicateStarts": 0,
+          "duplicateCompletions": 0,
+          "dropped": 0,
+          "scriptFailures": 0,
+          "protocolFailures": 0,
+          "replayFailures": 0,
+          "arrivalLagMs": {
+            "count": 300,
+            "min": 1,
+            "median": 1,
+            "p95": 1,
+            "p99": 1,
+            "max": 4
+          },
+          "responses": {
+            "reservation/normal/reservation/201/0/none/success": 15,
+            "checkout/normal/reservation/201/0/none/success": 15,
+            "settlement/normal/reservation/200/0/none/success": 15,
+            "checkout/replay/reservation/201/0/none/success": 5,
+            "settlement/replay/reservation/200/0/none/success": 5,
+            "checkout/normal/direct/201/0/none/success": 15,
+            "settlement/normal/direct/200/0/none/success": 15,
+            "checkout/replay/direct/201/0/none/success": 5,
+            "settlement/replay/direct/200/0/none/success": 5,
+            "reservation/normal/reservation/409/1409/INSUFFICIENT_INVENTORY/failure": 135,
+            "checkout/normal/direct/409/1409/INSUFFICIENT_INVENTORY/failure": 135
+          },
+          "maxActiveVUs": 2
+        },
+        "diagnostics": {
+          "poolWaiting": {
+            "count": 120,
+            "min": 0,
+            "median": 0,
+            "p95": 0,
+            "p99": 0,
+            "max": 0
+          },
+          "poolCheckedOut": {
+            "count": 120,
+            "min": 0,
+            "median": 0,
+            "p95": 0.04999999999999716,
+            "p99": 1,
+            "max": 1
+          },
+          "lockWaiters": {
+            "count": 114,
+            "min": 0,
+            "median": 0,
+            "p95": 0,
+            "p99": 0,
+            "max": 0
+          },
+          "lockTypes": [],
+          "redisObserverRttMs": {
+            "count": 114,
+            "min": 0.6157999999995809,
+            "median": 0.9170999999987544,
+            "p95": 1.269039999997767,
+            "p99": 3.272621999999356,
+            "max": 9.268399999993562
+          },
+          "retriesScheduledInWindow": 0,
+          "hostCpuPercent": {
+            "count": 9,
+            "min": 2.477115044714695,
+            "median": 9.638934976692736,
+            "p95": 14.566356007403558,
+            "p99": 15.805234310835125,
+            "max": 16.114953886693016
+          },
+          "hostFreeBytes": {
+            "count": 9,
+            "min": 5150339072,
+            "median": 5195489280,
+            "p95": 5211272806.4,
+            "p99": 5212759162.88,
+            "max": 5213130752
+          },
+          "containers": {
+            "app": {
+              "cpuPercent": {
+                "count": 9,
+                "min": 4.52,
+                "median": 6.28,
+                "p95": 13.025999999999996,
+                "p99": 15.9732,
+                "max": 16.71
+              },
+              "memoryPercent": {
+                "count": 9,
+                "min": 8.23,
+                "median": 9.64,
+                "p95": 14.455999999999998,
+                "p99": 16.6032,
+                "max": 17.14
+              }
+            },
+            "postgres": {
+              "cpuPercent": {
+                "count": 9,
+                "min": 4.97,
+                "median": 5.24,
+                "p95": 7.9319999999999995,
+                "p99": 8.6584,
+                "max": 8.84
+              },
+              "memoryPercent": {
+                "count": 9,
+                "min": 8.29,
+                "median": 8.37,
+                "p95": 8.440000000000001,
+                "p99": 8.472000000000001,
+                "max": 8.48
+              }
+            },
+            "redis": {
+              "cpuPercent": {
+                "count": 9,
+                "min": 2.78,
+                "median": 3.05,
+                "p95": 3.6719999999999997,
+                "p99": 3.7424,
+                "max": 3.76
+              },
+              "memoryPercent": {
+                "count": 9,
+                "min": 1.8,
+                "median": 1.99,
+                "p95": 2.146,
+                "p99": 2.1492,
+                "max": 2.15
+              }
+            }
+          },
+          "generatorCpuSeconds": {
+            "count": 9,
+            "min": 0.09375,
+            "median": 0.09375,
+            "p95": 0.109375,
+            "p99": 0.109375,
+            "max": 0.109375
+          },
+          "generatorMemoryBytes": {
+            "count": 9,
+            "min": 70819840,
+            "median": 80588800,
+            "p95": 84483276.8,
+            "p99": 84939407.36,
+            "max": 85053440
+          }
+        },
+        "sqlCounts": {
+          "offered": 300,
+          "started": 300,
+          "completed": 30,
+          "dropped": 0,
+          "paidOrders": 30,
+          "ordersByStatus": {
+            "paid": 30
+          },
+          "tickets": 60,
+          "activeHolds": 0
+        },
+        "failedSmokeChecks": []
+      }
+    },
+    {
+      "runId": "p2-v26-preflight-ample-01",
+      "revision": "flash-sale-v2.6",
+      "commit": "33a74de24cef2493bf4f8e473a695910fc404c42",
+      "settings": {
+        "users": 24,
+        "rate": 2,
+        "thinkMs": 20,
+        "retries": 1,
+        "retryDelayMs": 100,
+        "replayEvery": 3,
+        "quantity": 2,
+        "preVus": 10,
+        "maxVus": 20,
+        "poolMax": 10,
+        "sampleMs": 250,
+        "warmupSeconds": 0,
+        "drainSeconds": 30,
+        "limiterMax": 1000000,
+        "durationSeconds": 12,
+        "measurementSeconds": 12,
+        "stock": "ample",
+        "seats": 48,
+        "runId": "p2-v26-preflight-ample-01"
+      },
+      "startedAt": "2026-10-01T04:35:58.301Z",
+      "formal": false,
+      "acceptedFormal": false,
+      "archive": "../flash-sale-baseline-v26/p2-v26-preflight-ample-01.zip",
+      "sha256": "d4c3d0ba85a83045c104ca459e7f51c478bfd35d8e05f4f75ada21754799d6f0",
+      "files": 23,
+      "verifiedArtifactHashes": 22,
+      "sourceHashes": {
+        "load-test/flash-sale.js": "f7a8e56f07f83fe86b4adc3e14efe5d1958c6610f51c248e9333b8eb39f378e6",
+        "load-test/flash-sale-fixture.mjs": "89901d5144f562bd0553e84730c74327a39702d86731bfa30bb689a2b69e4b1e",
+        "load-test/flash-sale-analysis.mjs": "8568000836a0ad98995eafb3bc51a3469f70bca646e330c3a08755e235901eb9",
+        "load-test/flash-sale-check.mjs": "316963391fa60897a50c8ede523a27d1f578eb38d63d302e3a2a278fbddf9966",
+        "docker-compose.flash-sale.yml": "192312953cb3b7d59ed563e16fb552ac91c312786aac9f0c9278840eb19acab5",
+        "Dockerfile": "947dab29bc64bd1593e04f9afcd3fde6c7cdf0d79f561966b9c615f95eef7a85",
+        "package-lock.json": "1788914f59b4f5b1d08da539e8097eee171f01114057769a71a3765e8f65d225",
+        "src/infra/config.ts": "bac9ddb9173e4777f9c60070dba08e3904aa93ae65fd43069911dae9085b2044",
+        "src/infra/postgres/client.ts": "86047dda0772689a28380b5e5d166a89fa9cb66ced2b3498ddb9ccad60370642"
+      },
+      "originalAnalysisRevision": "flash-sale-analysis-v2.6",
+      "originalClassification": "valid-stable",
+      "analysis": {
+        "revision": "flash-sale-v2.6",
+        "analysisRevision": "flash-sale-analysis-v2.6.1",
+        "runId": "p2-v26-preflight-ample-01",
+        "classification": "valid-stable",
+        "smokePassed": true,
+        "k6ExitCode": 0,
+        "invalidReasons": [],
+        "evidence": {
+          "sourceClean": true,
+          "checkoutProtocol": true,
+          "paidIdentityObserved": true,
+          "checkoutAuditObserved": true,
+          "accounting": {
+            "checks": {
+              "offeredBuyers": true,
+              "attempts": true,
+              "journeys": true,
+              "arrivalMetrics": true,
+              "summaryCounts": true
+            },
+            "complete": true
+          },
+          "observer": {
+            "count": 48,
+            "first": 1790829390554,
+            "last": 1790829402963,
+            "maxGapMs": 307,
+            "errors": 0,
+            "complete": true
+          },
+          "pool": {
+            "count": 56,
+            "first": 1790829389974,
+            "last": 1790829403735,
+            "maxGapMs": 251,
+            "errors": 0,
+            "complete": true
+          },
+          "resources": {
+            "count": 5,
+            "first": 1790829390555,
+            "last": 1790829402731,
+            "maxGapMs": 3231,
+            "errors": 0,
+            "complete": true
+          },
+          "clockAligned": true,
+          "generatorObserved": true,
+          "containersObserved": true,
+          "clean": true,
+          "auth": true,
+          "lifecycle": true
+        },
+        "window": {
+          "start": "2026-10-01T04:36:30.786Z",
+          "endExclusive": "2026-10-01T04:36:42.786Z",
+          "seconds": 12,
+          "confirmedPaid": 24,
+          "paidPerSecond": 2,
+          "warmupSpillover": 0,
+          "firstHalfPaidPerSecond": 2,
+          "secondHalfPaidPerSecond": 2,
+          "nonReplayAttempts": 60,
+          "failureAttempts": 0,
+          "failureFraction": 0,
+          "responseKey": "stage/kind/flow/status/error_code/code/business",
+          "apiLatencyMs": {
+            "reservation/normal/reservation/201/0/none/success": {
+              "count": 12,
+              "min": 7.3123,
+              "median": 13.45385,
+              "p95": 25.166224999999997,
+              "p99": 28.620445000000007,
+              "max": 29.484
+            },
+            "checkout/normal/reservation/201/0/none/success": {
+              "count": 12,
+              "min": 8.3261,
+              "median": 9.93905,
+              "p95": 16.496065,
+              "p99": 16.971133000000002,
+              "max": 17.0899
+            },
+            "settlement/normal/reservation/200/0/none/success": {
+              "count": 12,
+              "min": 10.1511,
+              "median": 11.3338,
+              "p95": 30.723774999999975,
+              "p99": 45.37819500000002,
+              "max": 49.0418
+            },
+            "checkout/replay/reservation/201/0/none/success": {
+              "count": 4,
+              "min": 4.9152,
+              "median": 5.5317,
+              "p95": 16.588484999999995,
+              "p99": 18.116096999999996,
+              "max": 18.498
+            },
+            "settlement/replay/reservation/200/0/none/success": {
+              "count": 4,
+              "min": 2.6337,
+              "median": 3.48095,
+              "p95": 8.201234999999999,
+              "p99": 8.835206999999999,
+              "max": 8.9937
+            },
+            "checkout/normal/direct/201/0/none/success": {
+              "count": 12,
+              "min": 8.5553,
+              "median": 11.20835,
+              "p95": 14.044834999999997,
+              "p99": 15.681767000000002,
+              "max": 16.091
+            },
+            "settlement/normal/direct/200/0/none/success": {
+              "count": 12,
+              "min": 9.4014,
+              "median": 11.2756,
+              "p95": 14.926194999999998,
+              "p99": 16.324999000000002,
+              "max": 16.6747
+            },
+            "checkout/replay/direct/201/0/none/success": {
+              "count": 4,
+              "min": 5.5811,
+              "median": 6.524,
+              "p95": 7.358325,
+              "p99": 7.385504999999999,
+              "max": 7.3923
+            },
+            "settlement/replay/direct/200/0/none/success": {
+              "count": 4,
+              "min": 2.082,
+              "median": 2.87125,
+              "p95": 3.7174199999999997,
+              "p99": 3.7257239999999996,
+              "max": 3.7278
+            }
+          }
+        },
+        "cohort": {
+          "offered": 24,
+          "started": 24,
+          "actualWindowArrivals": 24,
+          "confirmedPaid": 24,
+          "completionFraction": 1,
+          "unfinished": 0,
+          "outcomes": {
+            "paid": 24
+          },
+          "paidJourneyMs": {
+            "count": 24,
+            "min": 39,
+            "median": 60.5,
+            "p95": 97.85,
+            "p99": 118.78999999999999,
+            "max": 125
+          },
+          "allFinishedJourneyMs": {
+            "count": 24,
+            "min": 39,
+            "median": 60.5,
+            "p95": 97.85,
+            "p99": 118.78999999999999,
+            "max": 125
+          },
+          "lastArrival": 1790829402286,
+          "lastConfirmedCompletion": 1790829402330,
+          "maximumDrainEnd": "2026-10-01T04:37:12.785Z"
+        },
+        "all": {
+          "offered": 24,
+          "started": 24,
+          "httpPaid": 24,
+          "sqlPaid": 24,
+          "sqlPaidWithoutHttp": 0,
+          "httpPaidWithoutSql": 0,
+          "missingPaidIdentity": 0,
+          "httpPaidIdentityMismatches": 0,
+          "duplicateStarts": 0,
+          "duplicateCompletions": 0,
+          "dropped": 0,
+          "scriptFailures": 0,
+          "protocolFailures": 0,
+          "replayFailures": 0,
+          "arrivalLagMs": {
+            "count": 24,
+            "min": 0,
+            "median": 0,
+            "p95": 0.8499999999999979,
+            "p99": 1,
+            "max": 1
+          },
+          "responses": {
+            "reservation/normal/reservation/201/0/none/success": 12,
+            "checkout/normal/reservation/201/0/none/success": 12,
+            "settlement/normal/reservation/200/0/none/success": 12,
+            "checkout/replay/reservation/201/0/none/success": 4,
+            "settlement/replay/reservation/200/0/none/success": 4,
+            "checkout/normal/direct/201/0/none/success": 12,
+            "settlement/normal/direct/200/0/none/success": 12,
+            "checkout/replay/direct/201/0/none/success": 4,
+            "settlement/replay/direct/200/0/none/success": 4
+          },
+          "maxActiveVUs": 1
+        },
+        "diagnostics": {
+          "poolWaiting": {
+            "count": 48,
+            "min": 0,
+            "median": 0,
+            "p95": 0,
+            "p99": 0,
+            "max": 0
+          },
+          "poolCheckedOut": {
+            "count": 48,
+            "min": 0,
+            "median": 0,
+            "p95": 0,
+            "p99": 0,
+            "max": 0
+          },
+          "lockWaiters": {
+            "count": 46,
+            "min": 0,
+            "median": 0,
+            "p95": 0,
+            "p99": 0,
+            "max": 0
+          },
+          "lockTypes": [],
+          "redisObserverRttMs": {
+            "count": 46,
+            "min": 0.6212000000014086,
+            "median": 0.9184000000022934,
+            "p95": 1.3621750000002066,
+            "p99": 3.975885000002371,
+            "max": 5.649300000004587
+          },
+          "retriesScheduledInWindow": 0,
+          "hostCpuPercent": {
+            "count": 4,
+            "min": 3.9768488745980712,
+            "median": 7.558922016062852,
+            "p95": 13.577893686094411,
+            "p99": 13.993102113236873,
+            "max": 14.096904220022488
+          },
+          "hostFreeBytes": {
+            "count": 4,
+            "min": 3295862784,
+            "median": 3321387008,
+            "p95": 3359293235.2,
+            "p99": 3362462064.64,
+            "max": 3363254272
+          },
+          "containers": {
+            "app": {
+              "cpuPercent": {
+                "count": 4,
+                "min": 0.29,
+                "median": 5.23,
+                "p95": 13.320999999999998,
+                "p99": 14.336199999999998,
+                "max": 14.59
+              },
+              "memoryPercent": {
+                "count": 4,
+                "min": 8.03,
+                "median": 8.365,
+                "p95": 15.198499999999996,
+                "p99": 16.159699999999997,
+                "max": 16.4
+              }
+            },
+            "postgres": {
+              "cpuPercent": {
+                "count": 4,
+                "min": 2.96,
+                "median": 4.91,
+                "p95": 5.3549999999999995,
+                "p99": 5.414999999999999,
+                "max": 5.43
+              },
+              "memoryPercent": {
+                "count": 4,
+                "min": 7.76,
+                "median": 7.82,
+                "p95": 7.9055,
+                "p99": 7.9091000000000005,
+                "max": 7.91
+              }
+            },
+            "redis": {
+              "cpuPercent": {
+                "count": 4,
+                "min": 2.49,
+                "median": 2.9299999999999997,
+                "p95": 3.146,
+                "p99": 3.1652,
+                "max": 3.17
+              },
+              "memoryPercent": {
+                "count": 4,
+                "min": 1.83,
+                "median": 1.995,
+                "p95": 2.105,
+                "p99": 2.117,
+                "max": 2.12
+              }
+            }
+          },
+          "generatorCpuSeconds": {
+            "count": 3,
+            "min": 0.078125,
+            "median": 0.078125,
+            "p95": 0.078125,
+            "p99": 0.078125,
+            "max": 0.078125
+          },
+          "generatorMemoryBytes": {
+            "count": 3,
+            "min": 48930816,
+            "median": 49963008,
+            "p95": 50420121.6,
+            "p99": 50460753.92,
+            "max": 50470912
+          }
+        },
+        "sqlCounts": {
+          "offered": 24,
+          "started": 24,
+          "completed": 24,
+          "dropped": 0,
+          "paidOrders": 24,
+          "ordersByStatus": {
+            "paid": 24
+          },
+          "tickets": 48,
+          "activeHolds": 0
+        },
+        "failedSmokeChecks": []
+      }
+    },
+    {
+      "runId": "p2-v26-preflight-limited-01",
+      "revision": "flash-sale-v2.6",
+      "commit": "33a74de24cef2493bf4f8e473a695910fc404c42",
+      "settings": {
+        "users": 24,
+        "rate": 2,
+        "thinkMs": 20,
+        "retries": 1,
+        "retryDelayMs": 100,
+        "replayEvery": 3,
+        "quantity": 2,
+        "preVus": 10,
+        "maxVus": 20,
+        "poolMax": 10,
+        "sampleMs": 250,
+        "warmupSeconds": 0,
+        "drainSeconds": 30,
+        "limiterMax": 1000000,
+        "durationSeconds": 12,
+        "measurementSeconds": 12,
+        "stock": "limited",
+        "seats": 6,
+        "runId": "p2-v26-preflight-limited-01"
+      },
+      "startedAt": "2026-10-01T04:36:58.427Z",
+      "formal": false,
+      "acceptedFormal": false,
+      "archive": "../flash-sale-baseline-v26/p2-v26-preflight-limited-01.zip",
+      "sha256": "0d4364fa94cc3893f443c48911cba6ab13e76e4635888bde5bd2f8422f820cee",
+      "files": 23,
+      "verifiedArtifactHashes": 22,
+      "sourceHashes": {
+        "load-test/flash-sale.js": "f7a8e56f07f83fe86b4adc3e14efe5d1958c6610f51c248e9333b8eb39f378e6",
+        "load-test/flash-sale-fixture.mjs": "89901d5144f562bd0553e84730c74327a39702d86731bfa30bb689a2b69e4b1e",
+        "load-test/flash-sale-analysis.mjs": "8568000836a0ad98995eafb3bc51a3469f70bca646e330c3a08755e235901eb9",
+        "load-test/flash-sale-check.mjs": "316963391fa60897a50c8ede523a27d1f578eb38d63d302e3a2a278fbddf9966",
+        "docker-compose.flash-sale.yml": "192312953cb3b7d59ed563e16fb552ac91c312786aac9f0c9278840eb19acab5",
+        "Dockerfile": "947dab29bc64bd1593e04f9afcd3fde6c7cdf0d79f561966b9c615f95eef7a85",
+        "package-lock.json": "1788914f59b4f5b1d08da539e8097eee171f01114057769a71a3765e8f65d225",
+        "src/infra/config.ts": "bac9ddb9173e4777f9c60070dba08e3904aa93ae65fd43069911dae9085b2044",
+        "src/infra/postgres/client.ts": "86047dda0772689a28380b5e5d166a89fa9cb66ced2b3498ddb9ccad60370642"
+      },
+      "originalAnalysisRevision": "flash-sale-analysis-v2.6",
+      "originalClassification": "valid-limited",
+      "analysis": {
+        "revision": "flash-sale-v2.6",
+        "analysisRevision": "flash-sale-analysis-v2.6.1",
+        "runId": "p2-v26-preflight-limited-01",
+        "classification": "valid-limited",
+        "smokePassed": true,
+        "k6ExitCode": 0,
+        "invalidReasons": [],
+        "evidence": {
+          "sourceClean": true,
+          "checkoutProtocol": true,
+          "paidIdentityObserved": true,
+          "checkoutAuditObserved": true,
+          "accounting": {
+            "checks": {
+              "offeredBuyers": true,
+              "attempts": true,
+              "journeys": true,
+              "arrivalMetrics": true,
+              "summaryCounts": true
+            },
+            "complete": true
+          },
+          "observer": {
+            "count": 48,
+            "first": 1790829440347,
+            "last": 1790829452739,
+            "maxGapMs": 292,
+            "errors": 0,
+            "complete": true
+          },
+          "pool": {
+            "count": 54,
+            "first": 1790829439545,
+            "last": 1790829452816,
+            "maxGapMs": 259,
+            "errors": 0,
+            "complete": true
+          },
+          "resources": {
+            "count": 4,
+            "first": 1790829440348,
+            "last": 1790829449839,
+            "maxGapMs": 3726,
+            "errors": 0,
+            "complete": true
+          },
+          "clockAligned": true,
+          "generatorObserved": true,
+          "containersObserved": true,
+          "clean": true,
+          "auth": true,
+          "lifecycle": true
+        },
+        "window": {
+          "start": "2026-10-01T04:37:20.537Z",
+          "endExclusive": "2026-10-01T04:37:32.537Z",
+          "seconds": 12,
+          "confirmedPaid": 3,
+          "paidPerSecond": 0.25,
+          "warmupSpillover": 0,
+          "firstHalfPaidPerSecond": 0.5,
+          "secondHalfPaidPerSecond": 0,
+          "nonReplayAttempts": 29,
+          "failureAttempts": 0,
+          "failureFraction": 0,
+          "responseKey": "stage/kind/flow/status/error_code/code/business",
+          "apiLatencyMs": {
+            "reservation/normal/reservation/201/0/none/success": {
+              "count": 2,
+              "min": 10.341,
+              "median": 16.8854,
+              "p95": 22.77536,
+              "p99": 23.298912,
+              "max": 23.4298
+            },
+            "checkout/normal/reservation/201/0/none/success": {
+              "count": 2,
+              "min": 9.1774,
+              "median": 18.004849999999998,
+              "p95": 25.949554999999997,
+              "p99": 26.655750999999995,
+              "max": 26.8323
+            },
+            "settlement/normal/reservation/200/0/none/success": {
+              "count": 2,
+              "min": 10.1531,
+              "median": 16.16825,
+              "p95": 21.581885,
+              "p99": 22.063097,
+              "max": 22.1834
+            },
+            "checkout/replay/reservation/201/0/none/success": {
+              "count": 1,
+              "min": 10.8214,
+              "median": 10.8214,
+              "p95": 10.8214,
+              "p99": 10.8214,
+              "max": 10.8214
+            },
+            "settlement/replay/reservation/200/0/none/success": {
+              "count": 1,
+              "min": 6.2096,
+              "median": 6.2096,
+              "p95": 6.2096,
+              "p99": 6.2096,
+              "max": 6.2096
+            },
+            "checkout/normal/direct/201/0/none/success": {
+              "count": 1,
+              "min": 15.5622,
+              "median": 15.5622,
+              "p95": 15.5622,
+              "p99": 15.5622,
+              "max": 15.5622
+            },
+            "settlement/normal/direct/200/0/none/success": {
+              "count": 1,
+              "min": 19.5586,
+              "median": 19.5586,
+              "p95": 19.5586,
+              "p99": 19.5586,
+              "max": 19.5586
+            },
+            "checkout/normal/direct/409/1409/INSUFFICIENT_INVENTORY/failure": {
+              "count": 11,
+              "min": 7.5807,
+              "median": 8.3549,
+              "p95": 60.0454,
+              "p99": 80.15148000000002,
+              "max": 85.178
+            },
+            "reservation/normal/reservation/409/1409/INSUFFICIENT_INVENTORY/failure": {
+              "count": 10,
+              "min": 5.3529,
+              "median": 6.422499999999999,
+              "p95": 11.603124999999999,
+              "p99": 11.858545,
+              "max": 11.9224
+            }
+          }
+        },
+        "cohort": {
+          "offered": 24,
+          "started": 24,
+          "actualWindowArrivals": 24,
+          "confirmedPaid": 3,
+          "completionFraction": 0.125,
+          "unfinished": 21,
+          "outcomes": {
+            "paid": 3,
+            "stock_rejected": 21
+          },
+          "paidJourneyMs": {
+            "count": 3,
+            "min": 59,
+            "median": 71,
+            "p95": 114.19999999999999,
+            "p99": 118.03999999999999,
+            "max": 119
+          },
+          "allFinishedJourneyMs": {
+            "count": 24,
+            "min": 5,
+            "median": 8.5,
+            "p95": 83.74999999999997,
+            "p99": 111.40999999999998,
+            "max": 119
+          },
+          "lastArrival": 1790829452037,
+          "lastConfirmedCompletion": 1790829441609,
+          "maximumDrainEnd": "2026-10-01T04:38:02.536Z"
+        },
+        "all": {
+          "offered": 24,
+          "started": 24,
+          "httpPaid": 3,
+          "sqlPaid": 3,
+          "sqlPaidWithoutHttp": 0,
+          "httpPaidWithoutSql": 0,
+          "missingPaidIdentity": 0,
+          "httpPaidIdentityMismatches": 0,
+          "duplicateStarts": 0,
+          "duplicateCompletions": 0,
+          "dropped": 0,
+          "scriptFailures": 0,
+          "protocolFailures": 0,
+          "replayFailures": 0,
+          "arrivalLagMs": {
+            "count": 24,
+            "min": 0,
+            "median": 1,
+            "p95": 1,
+            "p99": 12.549999999999994,
+            "max": 16
+          },
+          "responses": {
+            "reservation/normal/reservation/201/0/none/success": 2,
+            "checkout/normal/reservation/201/0/none/success": 2,
+            "settlement/normal/reservation/200/0/none/success": 2,
+            "checkout/replay/reservation/201/0/none/success": 1,
+            "settlement/replay/reservation/200/0/none/success": 1,
+            "checkout/normal/direct/201/0/none/success": 1,
+            "settlement/normal/direct/200/0/none/success": 1,
+            "checkout/normal/direct/409/1409/INSUFFICIENT_INVENTORY/failure": 11,
+            "reservation/normal/reservation/409/1409/INSUFFICIENT_INVENTORY/failure": 10
+          },
+          "maxActiveVUs": 1
+        },
+        "diagnostics": {
+          "poolWaiting": {
+            "count": 48,
+            "min": 0,
+            "median": 0,
+            "p95": 0,
+            "p99": 0,
+            "max": 0
+          },
+          "poolCheckedOut": {
+            "count": 48,
+            "min": 0,
+            "median": 0,
+            "p95": 0,
+            "p99": 1,
+            "max": 1
+          },
+          "lockWaiters": {
+            "count": 46,
+            "min": 0,
+            "median": 0,
+            "p95": 0,
+            "p99": 0,
+            "max": 0
+          },
+          "lockTypes": [],
+          "redisObserverRttMs": {
+            "count": 46,
+            "min": 0.723599999997532,
+            "median": 1.051900000000387,
+            "p95": 1.613074999998389,
+            "p99": 6.666935000000536,
+            "max": 10.103900000001886
+          },
+          "retriesScheduledInWindow": 0,
+          "hostCpuPercent": {
+            "count": 3,
+            "min": 12.424943535503774,
+            "median": 13.362165945851356,
+            "p95": 22.690613857615922,
+            "p99": 23.519809227550553,
+            "max": 23.72710807003421
+          },
+          "hostFreeBytes": {
+            "count": 3,
+            "min": 2997616640,
+            "median": 3171581952,
+            "p95": 3180587827.2,
+            "p99": 3181388349.44,
+            "max": 3181588480
+          },
+          "containers": {
+            "app": {
+              "cpuPercent": {
+                "count": 3,
+                "min": 1.4,
+                "median": 1.66,
+                "p95": 9.336999999999998,
+                "p99": 10.0194,
+                "max": 10.19
+              },
+              "memoryPercent": {
+                "count": 3,
+                "min": 7.92,
+                "median": 8.14,
+                "p95": 15.537999999999998,
+                "p99": 16.1956,
+                "max": 16.36
+              }
+            },
+            "postgres": {
+              "cpuPercent": {
+                "count": 3,
+                "min": 3.69,
+                "median": 4.81,
+                "p95": 4.963,
+                "p99": 4.9766,
+                "max": 4.98
+              },
+              "memoryPercent": {
+                "count": 3,
+                "min": 7.64,
+                "median": 7.78,
+                "p95": 7.798,
+                "p99": 7.7996,
+                "max": 7.8
+              }
+            },
+            "redis": {
+              "cpuPercent": {
+                "count": 3,
+                "min": 2.63,
+                "median": 2.64,
+                "p95": 2.757,
+                "p99": 2.7674,
+                "max": 2.77
+              },
+              "memoryPercent": {
+                "count": 3,
+                "min": 1.83,
+                "median": 1.95,
+                "p95": 2.013,
+                "p99": 2.0186,
+                "max": 2.02
+              }
+            }
+          },
+          "generatorCpuSeconds": {
+            "count": 3,
+            "min": 0.015625,
+            "median": 0.015625,
+            "p95": 0.015625,
+            "p99": 0.015625,
+            "max": 0.015625
+          },
+          "generatorMemoryBytes": {
+            "count": 3,
+            "min": 48443392,
+            "median": 49131520,
+            "p95": 49330585.6,
+            "p99": 49348280.32,
+            "max": 49352704
+          }
+        },
+        "sqlCounts": {
+          "offered": 24,
+          "started": 24,
+          "completed": 3,
+          "dropped": 0,
+          "paidOrders": 3,
+          "ordersByStatus": {
+            "paid": 3
+          },
+          "tickets": 6,
+          "activeHolds": 0
+        },
+        "failedSmokeChecks": []
+      }
+    }
+  ],
+  "candidateRunIds": [
+    "p2-v26-ample-r10-01",
+    "p2-v26-ample-r10-02",
+    "p2-v26-ample-r10-03",
+    "p2-v26-ample-r2-01",
+    "p2-v26-ample-r2-02",
+    "p2-v26-ample-r2-03",
+    "p2-v26-ample-r25-01",
+    "p2-v26-ample-r25-02",
+    "p2-v26-ample-r25-03",
+    "p2-v26-limited-01",
+    "p2-v26-limited-02",
+    "p2-v26-limited-03"
+  ],
+  "measurementCommits": [
+    "33a74de24cef2493bf4f8e473a695910fc404c42",
+    "598ad50bc389b47bcbcfc0175359735671718fe1"
+  ],
+  "formalCounts": {
+    "ample-2": 3,
+    "ample-10": 3,
+    "ample-25": 3,
+    "limited-10": 3
+  },
+  "startMemoryChecks": [
+    {
+      "runId": "p2-v26-limited-02",
+      "atEpoch": 1790906299.973041,
+      "freeBytes": 4725743616,
+      "attempt": 0,
+      "sample": 0
+    },
+    {
+      "runId": "p2-v26-limited-02",
+      "atEpoch": 1790906305.025041,
+      "freeBytes": 4677496832,
+      "attempt": 0,
+      "sample": 1
+    },
+    {
+      "runId": "p2-v26-limited-02",
+      "atEpoch": 1790906310.0825932,
+      "freeBytes": 4643864576,
+      "attempt": 0,
+      "sample": 2
+    },
+    {
+      "runId": "p2-v26-limited-03",
+      "atEpoch": 1790906368.4617128,
+      "freeBytes": 4508327936,
+      "attempt": 0,
+      "sample": 0
+    },
+    {
+      "runId": "p2-v26-limited-03",
+      "atEpoch": 1790906373.5149114,
+      "freeBytes": 4528975872,
+      "attempt": 0,
+      "sample": 1
+    },
+    {
+      "runId": "p2-v26-limited-03",
+      "atEpoch": 1790906378.566048,
+      "freeBytes": 4469600256,
+      "attempt": 0,
+      "sample": 2
+    }
+  ],
+  "previousStartMemoryChecks": "../flash-sale-baseline-v26/index.json#startMemoryChecks",
+  "executedOrder": [
+    "p2-v26-preflight-ample-01",
+    "p2-v26-preflight-limited-01",
+    "p2-v26-ample-r2-01",
+    "p2-v26-ample-r10-01",
+    "p2-v26-ample-r25-01",
+    "p2-v26-ample-r25-02",
+    "p2-v26-ample-r10-02",
+    "p2-v26-ample-r2-02",
+    "p2-v26-ample-r2-03",
+    "p2-v26-ample-r10-03",
+    "p2-v26-ample-r25-03",
+    "p2-v26-limited-01",
+    "p2-v26-limited-02",
+    "p2-v26-limited-03"
+  ],
+  "review": "Independent final source/plan/artifact/document review: No findings. Raw14 runs,322files,308artifact hashes,4174HTTP/SQL paid identities verified."
+}
