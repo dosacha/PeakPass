@@ -1,0 +1,125 @@
+{
+  "runId": "peakpass-p4-20261002",
+  "codeSha": "55a97fdae979353a8324cc97886263c83227e10a",
+  "baseSha": "f2a4674133cbeb50a65590f75bd9140efc32ff1d",
+  "archive": "p4-candidate-20261002.zip",
+  "archiveSha256": "86cc17627438fb3695b3b5176604a2e4be37eb5b556276df107cb34691d1166f",
+  "files": [
+    {
+      "name": "unit.log",
+      "bytes": 15885,
+      "sha256": "7e0d71a3165fee2c7bc5eaf2c59358e08750b17180413ace8b44b7d21b187d99"
+    },
+    {
+      "name": "lint.log",
+      "bytes": 1620,
+      "sha256": "2467872160fc3a90890df5738f281dd1300e6dd012567f0130b8706a1507d4c1"
+    },
+    {
+      "name": "build.log",
+      "bytes": 98,
+      "sha256": "53ce0d718cdd68c1afd54787dbc7b88fe7329e6a9eea69b8250d5c2dd69a2ad1"
+    },
+    {
+      "name": "integration-first.log",
+      "bytes": 562118,
+      "sha256": "9659be0f3f8bd7ed3b08e2aef9c5c09f3eaf5fcc9682584ef56c3c6031f9d287"
+    },
+    {
+      "name": "integration.log",
+      "bytes": 245705,
+      "sha256": "391e8d1f4aa7438a18333aa08acd9b92f9fe18bba36efbbaadf4631511419e07"
+    },
+    {
+      "name": "process.log",
+      "bytes": 1315,
+      "sha256": "9aa3fb40badf2ac216cc15b9d3689492c86afcb4bc5bd8478edcebc61c266d40"
+    },
+    {
+      "name": "limits.log",
+      "bytes": 1756,
+      "sha256": "d9a796356931eaf4183757c0bc51d5a4b8453402a1a92043a7bc3c6b2de9463e"
+    },
+    {
+      "name": "pg-http-green.log",
+      "bytes": 5305,
+      "sha256": "4c38e49b4dd52bf44a853925e777ff9cb4747fafa5a09bc045daf286f93d497b"
+    },
+    {
+      "name": "recovery-red.log",
+      "bytes": 5144,
+      "sha256": "b8bedf850bd26a5d4de5661164ae4af998f4608c227dcd8eeae6bad1a15c0976"
+    },
+    {
+      "name": "recovery-green.log",
+      "bytes": 355,
+      "sha256": "5c6cbd87c3ccca0d3a79af51bd0d1f6bc7c7c387d3b65f6f4fcfd2eec4b3592e"
+    },
+    {
+      "name": "http-boundaries-red.log",
+      "bytes": 6883,
+      "sha256": "65b2119d0660b7366092a8b347c97566e7e0f48efefdd845c43e2dd48572fa98"
+    },
+    {
+      "name": "image-build.log",
+      "bytes": 2734,
+      "sha256": "108d4120e66146557ddbb08275d2e4403a2e186a7840dc3ee9ec785e52ea2467"
+    },
+    {
+      "name": "image-off.log",
+      "bytes": 5749,
+      "sha256": "f11629ac0315cbb75318343a5de7d5dd9f31dfa08045d32b761922569bc6cf0d"
+    },
+    {
+      "name": "image-on.log",
+      "bytes": 5748,
+      "sha256": "987b52f9d6f1b9a76562514c59947e72e57a30cb54bf320250b122d90af63e1e"
+    },
+    {
+      "name": "migration-upgrade.log",
+      "bytes": 1689,
+      "sha256": "b1b23f6659be90c56bf054384faa09cc8c7b0c269048eee9c915b4f9df138fc7"
+    },
+    {
+      "name": "issue-9-final.log",
+      "bytes": 36646,
+      "sha256": "4e1ad4837b5817f80183c9c382282e75798204ce895ec43d1c5cd1078b03cb87"
+    },
+    {
+      "name": "issue-12-final.log",
+      "bytes": 32884,
+      "sha256": "a1436ec89a1134d8bed397bf67a9c4103679738ea98cf755a5f60f4bfb650822"
+    },
+    {
+      "name": "issue-13-final.log",
+      "bytes": 8981,
+      "sha256": "224f844134ec01cfc85a9cbb2ab6854edb563f1e6f9b78bd03465a9c0ff0c7fa"
+    },
+    {
+      "name": "issue-14-final.log",
+      "bytes": 7847,
+      "sha256": "b3eebb29459e34f823f9df4854e4d8aca52f025030aa58ca0a3300f872dc6965"
+    },
+    {
+      "name": "issue-15-final.log",
+      "bytes": 7788,
+      "sha256": "8dabcc69845b96158fdbff777ec39f63c9dbe54b455c963e9744dc41a16153d3"
+    },
+    {
+      "name": "issue-16-final.log",
+      "bytes": 7630,
+      "sha256": "2067b913451c8cb672f5ed48d17062696c1dc166dfb4ca57a0b628614601ad3f"
+    },
+    {
+      "name": "issue-17-final.log",
+      "bytes": 32005,
+      "sha256": "80c67b9301285f86d8ddd3309bd5edbcab4685db87d1e453644a374ceb900ba2"
+    },
+    {
+      "name": "issue-18-final.log",
+      "bytes": 7296,
+      "sha256": "e4549ecac1480772947173c4c7a5efc49df7b681de7aed873f85555a055f60b0"
+    }
+  ],
+  "note": "Local correctness fixtures. First failed integration retained. No performance baseline or product activation."
+}

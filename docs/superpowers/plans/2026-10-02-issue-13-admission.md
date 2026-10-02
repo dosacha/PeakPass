@@ -55,8 +55,8 @@ Interfaces: strict JWT admission routes and errors, scheduler stop():Promise<voi
 
 Files: production-image-check.mjs, .env.example, docs/ISSUE_13_VALIDATION.md and P5/P6 handoff.
 - [x] Update image migration/readiness assertions; run build/typecheck/lint/unit/targeted and full integration in owned resources.
-- [ ] Review entire change with independent read-only reviewer; fix reproducible issues and verify regressions.
-- [ ] Record implementation SHA, commands/results/skips, consumed tuple and remaining P5/P6/P7 scope. Commit locally; no automatic merge/deploy.
+- [x] Review entire change with independent read-only reviewer; fix reproducible issues and verify regressions.
+- [x] Record implementation SHA, commands/results/skips, consumed tuple and remaining P5/P6/P7 scope. Commit locally; no automatic merge/deploy.
 
 ## Execution ledger
 
@@ -75,3 +75,4 @@ Files: production-image-check.mjs, .env.example, docs/ISSUE_13_VALIDATION.md and
 - Final: fixed stale maintenance observation — epoch and phase regression cases RED→GREEN; shared observation choice covers both normal recovery and its retry path. Fresh build/typecheck/lint pass, unit160/160, full integration276 pass/10 legacy skips with rebuilt Docker image. Harness29/29 and callback isolation check pass.
 - Final: Ruling: P5 ledger/purchase safety, P6 browser, P7 real buyer fault cases and P8 capacity are explicitly successor work, so the review's declined scope remains unclaimed. Static review does not independently execute tests.
 - Ruling: ISSUE_13_HANDOFF final-SHA gate is satisfied by the same read-only Astra reviewer checking the fix delta at the final code SHA; no new whole-branch review or implementation agent.
+- Final gate: gpt-6-astra/high returned No findings for c51ebd6dc8219e000d9f35afefc49dbf849c284b after the fix delta. Final image off/on blank-DB checks passed. Evidence ZIPs/manifests and P5/P6 interface handoff are in ISSUE_13_VALIDATION.md. P4 remains a local candidate; external acceptance and successor gates are unchanged.

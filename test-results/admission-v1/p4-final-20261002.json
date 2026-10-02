@@ -1,0 +1,139 @@
+{
+  "runId": "peakpass-p4-20261002",
+  "codeSha": "c51ebd6dc8219e000d9f35afefc49dbf849c284b",
+  "candidateSha": "55a97fdae979353a8324cc97886263c83227e10a",
+  "archive": "p4-final-20261002.zip",
+  "archiveSha256": "b65e1d0c94a983d96ccf414f95e611a048b2415f69b4858b73579329082fad23",
+  "image": "peakpass:p4-issue13-final",
+  "imageId": "sha256:dde2a48f0822c88e75f1692841521a7f98672c7b78b9c5a4368b555d8d0f275a",
+  "results": {
+    "unitPassed": 160,
+    "integrationPassed": 276,
+    "integrationSkipped": 10,
+    "dockerLifecyclePassed": 5,
+    "harnessPassed": 29,
+    "build": "pass",
+    "typecheck": "pass",
+    "lintErrors": 0,
+    "lintWarnings": 10,
+    "productionImageOff": "pass",
+    "productionImageOn": "pass"
+  },
+  "review": {
+    "model": "gpt-6-astra",
+    "effort": "high",
+    "mode": "read-only static",
+    "wholeBranchTarget": "55a97fdae979353a8324cc97886263c83227e10a",
+    "wholeBranchFiles": 27,
+    "finding": "P2 stale PG/control observations re-reset a healthy epoch",
+    "fixTarget": "c51ebd6dc8219e000d9f35afefc49dbf849c284b",
+    "fixDeltaFiles": 3,
+    "finalVerdict": "No findings",
+    "independentTestExecution": false
+  },
+  "skippedTests": [
+    "terminal Redis recovery with real dedicated container and HTTP recovers after real retry exhaustion, shares failed/successful recreations, and restores HTTP/hold/lock use in the same PID",
+    "terminal Redis recovery with real dedicated container and HTTP bounds already-ready commands during actual Redis pause, retires their queue, and recovers in the same PID",
+    "terminal Redis recovery with real dedicated container and HTTP shutdown during real reconnect prevents later command/probe/explicit-init recreation",
+    "terminal Redis recovery with real dedicated container and HTTP initial Redis absence rejects startup and closes resources",
+    "terminal Redis recovery with real dedicated container and HTTP child process exits naturally during reconnecting with real Redis outage",
+    "terminal Redis recovery with real dedicated container and HTTP child process exits naturally during recreating with real Redis outage",
+    "terminal Redis recovery with real dedicated container and HTTP child process exits naturally during startup with real Redis outage",
+    "order-sweeper: commits orders during actual Redis outage and retries no committed business side effects",
+    "order-sweeper: a Redis disconnect triggered after COMMIT cannot turn an expired order into failed work",
+    "order-expiration-http: actual Redis stop after commit cannot undo expiration or reconciliation; recovery preserves replay"
+  ],
+  "files": [
+    {
+      "name": "final-build.log",
+      "bytes": 98,
+      "sha256": "53ce0d718cdd68c1afd54787dbc7b88fe7329e6a9eea69b8250d5c2dd69a2ad1"
+    },
+    {
+      "name": "final-lint.log",
+      "bytes": 1416,
+      "sha256": "727ec3e8329a78688c6b2087cdc83b577e9219ce61f0666b9de7674feb72c0e8"
+    },
+    {
+      "name": "final-typecheck.log",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "name": "final-unit.log",
+      "bytes": 15885,
+      "sha256": "e993f0800db15d3db89b29c6b3fae705044a213c04864c983256dfa7d341ceda"
+    },
+    {
+      "name": "final-integration.log",
+      "bytes": 258916,
+      "sha256": "920b9dcf32a6745f42413a72b8e0035916a0ddc18a91f087a3289459b7b16257"
+    },
+    {
+      "name": "final-harness.log",
+      "bytes": 3112,
+      "sha256": "358d3797324b77ae5fee72625adce2ba15610349bc792480afd6b9a884986589"
+    },
+    {
+      "name": "final-callback-harness.log",
+      "bytes": 267,
+      "sha256": "939e13f9548c94e6b7af15b7cab92d1c6bdf5eded20e539048ba9d8c2c33afb7"
+    },
+    {
+      "name": "final-review-red.log",
+      "bytes": 15658,
+      "sha256": "99e6c3e8b5a6e37f083b68993f3355ca541a084f30b821dc97739f340c2700ed"
+    },
+    {
+      "name": "final-review-green.log",
+      "bytes": 13648,
+      "sha256": "5f9434fddf0ad54a39855035a872de822d8e7e5d5616bda4afeeb981d921015d"
+    },
+    {
+      "name": "final-image-build.log",
+      "bytes": 2691,
+      "sha256": "2c643359b26521d264ac7d9d1afd1953fceb9c92c72d5257ce347150a35526ba"
+    },
+    {
+      "name": "final-image-off.log",
+      "bytes": 5750,
+      "sha256": "d269d1f1d57aed548d2cae39fa824d35a70659eadb775785428d410c8c954856"
+    },
+    {
+      "name": "final-image-on.log",
+      "bytes": 5753,
+      "sha256": "f06d7dcc8aabe9cad11ed5a53a3c977b49c14f12fcc358363a43a1e8b4b8cc2a"
+    },
+    {
+      "name": "final-skip-list.log",
+      "bytes": 4220,
+      "sha256": "ced5b7abb220934e75967066ff2335d2c2491be7467069b0760139aa5c211c2f"
+    },
+    {
+      "name": "final-skip-command.log",
+      "bytes": 243,
+      "sha256": "9625e58720b8073dcaedacc7c76808fde40616232816ab03423b3d15c6cf5a20"
+    },
+    {
+      "name": "admission-red.log",
+      "bytes": 1241,
+      "sha256": "1cbce7552fd02478edb42732548407d932d7a424823fd95b916c816d8832795f"
+    },
+    {
+      "name": "redis-red.log",
+      "bytes": 2933,
+      "sha256": "78b47b858319a8a835a1116eb7c5e7995adb5bf8ba1748bfe30581d6b158329d"
+    },
+    {
+      "name": "http-red.log",
+      "bytes": 3441,
+      "sha256": "a77f41c82119204bde6d44ceb6274744fd2f8953f9a694d970b09bd7d9bdc6f1"
+    },
+    {
+      "name": "scheduler-red.log",
+      "bytes": 1139,
+      "sha256": "095e7d388b16acebe9282d9454eee622afd31c98ac75749906f74987f299fc4f"
+    }
+  ],
+  "note": "Final correctness evidence; no capacity claim, protected activation, P5/P6 acceptance, merge or deployment."
+}

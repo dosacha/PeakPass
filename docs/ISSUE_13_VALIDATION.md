@@ -2,6 +2,8 @@
 
 Run: `peakpass-p4-20261002`. This is a local implementation candidate, **not an accepted P4 tuple or permission to activate a protected event**. Acceptance remains in [#9](https://github.com/dosacha/PeakPass/issues/9). No purchase service or durable result ledger is added by P4.
 
+Final code: `c51ebd6dc8219e000d9f35afefc49dbf849c284b`, branch `codex/issue-13-admission`. Read-only final reviewer: actual `gpt-6-astra/high`, **No findings** at that code SHA. The initial whole-branch review of `55a97fd` covered 27/27 changed files and found one P2 stale-observation reset race. Root reproduced both epoch/phase variants RED→GREEN, fixed the shared normal/retry decision, and reran the complete suites. The same reviewer checked the three-file fix delta. This is static review plus root-executed local validation, not independently rerun tests or product activation approval.
+
 ## Consumed input
 
 - Base main: `f2a4674133cbeb50a65590f75bd9140efc32ff1d`, containing handoff PR23 (`724aae1113c4c8dc31df093b1dbd9406f3c6ce2f`). User reviewed the design before authorizing implementation.
@@ -61,8 +63,8 @@ Owned environment: Windows host Node24.15.0; Docker Node18 Alpine image; Postgre
 
 | Check | Result / evidence boundary |
 | --- | --- |
-| Build / typecheck | `npm run build` passed. |
-| Lint | Zero errors; existing warnings and test-only annotations recorded in raw output. |
+| Build / typecheck | `npm run build` and `npx --no-install tsc --noEmit` passed. |
+| Lint | Zero errors,10 warnings (nine pre-existing and one test-only `any`). |
 | Unit | 160/160 passed, including admission sequential stop and admission-enabled repeated signal/listen-failure drain ordering. |
 | PostgreSQL | Real partial UNIQUE/check constraints,011 upgrade, backfill/lazy ensure404; blocked shared/exclusive gates observed by `pg_blocking_pids`; both existing-false/missing-policy SERIALIZABLE snapshots retried in distinct transactions. |
 | Redis/HTTP | Actual Redis and application loopback listen/fetch: concurrent10 join, owner privacy, active409, Retry-After, terminal replay, PG0 normal GET; two child workers share FIFO/rollingR/C; deadline claims retain slots; waiting/entry bounds and cleanup100. |
@@ -70,9 +72,16 @@ Owned environment: Windows host Node24.15.0; Docker Node18 Alpine image; Postgre
 | Crash recovery | Actual child SIGKILL at freeze, barrier commit, Redis initialization and PG-open commit. Parent resumes generation exactly once. Separate tests cover coordinator overlap, missing-control stale observer, partial structure loss and stale cleanup/publication CAS. |
 | Product guard | Actual startup refuses protected policy with flag false/true and refuses unsupported Redis policy. Protected fixture API tests do not start the product via an activation bypass. |
 | Production image | Two dedicated empty DBs: flag off and on; migrations001–012, unchanged rerun, readiness and signed GraphQL smoke passed. Existing011 DB applied only012. |
-| Full integration | 274 passed /10 skipped,28 suites passed. Includes all five production Docker order-worker lifecycle tests with `WAVE4_TEST_IMAGE=peakpass:p4-issue13`. First attempt:268 pass/1 failure/15 skip; failure was an existing subprocess inheriting host5432 instead of the dedicated DB. Explicit process environment corrected it; raw failed attempt retained. |
-| Skips | Legacy destructive Redis suite requires its exact old container identity and reserved port63532; it is not retargeted or claimed as run. P4 corruption/recovery fixtures are distinct evidence. |
+| Full integration | **276 passed /10 skipped**,28 suites passed after the final fix. Includes all five production Docker order-worker lifecycle tests with `WAVE4_TEST_IMAGE=peakpass:p4-issue13-final`. First attempt:268 pass/1 failure/15 skip; failure was an existing subprocess inheriting host5432 instead of the dedicated DB. Explicit process environment corrected it; raw failed attempt retained. |
+| Harness regression | `npm run test:flash-sale`:29/29; callback run-isolation check passed. These are harness checks, not load runs. |
+| Skips | Seven redis-recovery, two order-sweeper Redis outage, one order-expiration-http Redis-stop cases. They require their exact old container identity and reserved port63532; they are not retargeted or claimed as run. All ten names are in the final manifest. P4 corruption/recovery fixtures are distinct evidence. |
 
-Final reviewer, code SHA and archived raw-output hashes are recorded after the candidate review. A role named reviewer is not proof of model identity. Remote CI/merge, product purchase integration, Redis pause/stop/restart with a real buyer, browser behavior and P8 capacity comparisons remain outside this local proof.
+Raw outputs: [candidate manifest](../test-results/admission-v1/p4-candidate-20261002.json) / [candidate ZIP](../test-results/admission-v1/p4-candidate-20261002.zip), [final manifest](../test-results/admission-v1/p4-final-20261002.json) / [final ZIP](../test-results/admission-v1/p4-final-20261002.zip). Each manifest records the ZIP and uncompressed file SHA256 values. The candidate preserves the failed first full run and final #9/#12–#18 snapshots; the final archive preserves the review regression RED/GREEN, final suites/image results and the initial implementation RED outputs. The reviewer model is recorded from the actual spawn arguments, not its role label. No credentials or `.env` are archived.
+
+Cleanup: after final verification, both owned PostgreSQL/Redis container IDs and task labels were checked, then those two disposable containers were stopped and removed. No containers remain with this task label. The worktree, validation archives and final image remain available for review.
+
+Commands: `npm run build`; `npx --no-install tsc --noEmit`; `npm run lint`; `npm test -- --runInBand`; `npx jest --runInBand --config jest.integration.cjs`; `npm run test:flash-sale`; `node --experimental-vm-modules load-test/payment-callback-check.mjs`. Set `DB_HOST/PORT/USER/PASSWORD/NAME` and `REDIS_HOST/PORT` in the **parent process environment** against owned disposable resources, including for subprocesses; `.env` alone did not configure one existing subprocess. The Docker lifecycle opt-in uses the rebuilt image tag above. Image checks use separate empty DBs with `IMAGE_DB_HOST/IMAGE_REDIS_HOST=host.docker.internal` on this Windows host and run `node --import dotenv/config .github/scripts/production-image-check.mjs peakpass:p4-issue13-final` with `ENABLE_ADMISSION=false` and then `true`.
+
+Final source refresh: origin/main remains `f2a4674133cbeb50a65590f75bd9140efc32ff1d`; P3 ancestor/contract hash and P2 index hash match the consumed values. #9/#12–#18 have no new comments or changed gates. User checkout remains at `54ca75a` with its original untracked work preserved. Remote CI/merge, product purchase integration, Redis pause/stop/restart with a real buyer, browser behavior and P8 capacity comparisons remain outside this local proof.
 
 P5/P6 consume this implementation only after its accepted SHA is present in their checkout. P7 validates integrated fault behavior; P8 remeasures A/B/C, starting with A, at the same integrated SHA/environment (including new policy/gate and Redis profile). P9 consumes those accepted results. Unchanged P1/P2 source evidence stays valid; no successor is marked ready or complete solely by this document.
