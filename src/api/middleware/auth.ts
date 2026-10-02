@@ -51,9 +51,10 @@ export async function jwtAuthMiddleware(request: FastifyRequest, reply: FastifyR
     logger.warn({ requestId: request.id }, 'Authorization header present but JWT is invalid');
     return reply.code(401).send({
       error: {
-        code: 'INVALID_TOKEN',
+        code: request.routeOptions.config.admission ? 'UNAUTHENTICATED' : 'INVALID_TOKEN',
         message: 'Authorization token is invalid or expired',
       },
+      ...(request.routeOptions.config.admission ? { nextPollAfterMs: null } : {}),
     });
   }
 

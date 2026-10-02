@@ -1,0 +1,237 @@
+{
+  "runId": "peakpass-pr24-review-20261002",
+  "baseSha": "e6583fb70c14d0a99a19c530eeda1b178b64274d",
+  "fixShas": [
+    "e408fd246d7467af3b555d6a96707fafe10afde3",
+    "14dd4979ab17506b2aaac11a3f6e9eb7d3148812",
+    "0d42c0333b3415a1ce847dc13f7edb9579da43b6",
+    "51d331b026cc7d79bb0ab4d640960240f6adba4b"
+  ],
+  "codeSha": "51d331b026cc7d79bb0ab4d640960240f6adba4b",
+  "codeShaNote": "Every check except the baseline ran at codeSha.",
+  "archive": "p4-review-20261002.zip",
+  "archiveSha256": "154df4216506287b0ae7f95d6065c142f75021673a6dbeda69a1a3bb1181165a",
+  "reviews": [
+    {
+      "source": "GitHub chatgpt-codex-connector review 5388546072 on PR #24",
+      "reviewedCommit": "e6583fb70c14d0a99a19c530eeda1b178b64274d",
+      "findings": [
+        {
+          "comment": 4163076374,
+          "priority": "P2",
+          "path": "src/core/services/admission.service.ts",
+          "title": "Fence stale controls when protection is disabled"
+        },
+        {
+          "comment": 4163076377,
+          "priority": "P2",
+          "path": "src/core/services/admission.service.ts",
+          "title": "Probe intact Redis state before freezing after transient errors"
+        },
+        {
+          "comment": 4163076382,
+          "priority": "P2",
+          "path": "src/infra/redis/admission.ts",
+          "title": "Allow durable finalization after the epoch deadline"
+        }
+      ]
+    },
+    {
+      "source": "GitHub chatgpt-codex-connector review 5388842600 on PR #24",
+      "reviewedCommit": "2d138e940035443750506087da525073df9a728e",
+      "findings": [
+        {
+          "comment": 4163338476,
+          "priority": "P2",
+          "path": "src/core/services/admission.service.ts",
+          "title": "Retire admission controls when deleting events"
+        }
+      ]
+    },
+    {
+      "source": "GitHub chatgpt-codex-connector review 5389019700 on PR #24",
+      "reviewedCommit": "ab69ab7e9db95c4d92dcd041a06926b9d33e0e35",
+      "findings": [
+        {
+          "comment": 4163492010,
+          "priority": "P2",
+          "path": "src/infra/redis/admission.ts",
+          "title": "Delete all epoch namespaces when retiring an event"
+        }
+      ]
+    }
+  ],
+  "independentReviewOfFix": false,
+  "environment": {
+    "host": "Windows, Node 24.15.0",
+    "postgres": "16.12; 127.0.0.1:64369 for the baseline, 127.0.0.1:59308 for the runs at codeSha",
+    "redis": "7.4.8; 127.0.0.1:64370 for the baseline, 127.0.0.1:59309 for the runs at codeSha (appendonly no, save empty, maxmemory-policy noeviction, maxmemory 256mb)",
+    "containerLabel": "peakpass.task=peakpass-pr24-review-20261002"
+  },
+  "results": {
+    "baselineAdmissionPassedAtBase": 36,
+    "redFailed": 9,
+    "redPassed": 23,
+    "redSuitesFailedToCompile": 1,
+    "greenPassed": 37,
+    "build": "pass",
+    "typecheck": "pass",
+    "lintErrors": 0,
+    "lintWarnings": 10,
+    "unitPassed": 160,
+    "integrationPassed": 282,
+    "integrationSkipped": 15,
+    "integrationSuitesPassed": 27,
+    "integrationSuitesSkipped": 2,
+    "harnessPassed": 29,
+    "callbackIsolation": "pass",
+    "twoProcessSmoke": "pass"
+  },
+  "twoProcessSmoke": {
+    "app": "node dist/main.js built at codeSha, ENABLE_ADMISSION=true, real scheduler",
+    "coordinator": "review-smoke-fixture.ts in a second process; it forces one reset to leave an earlier epoch behind, then makes no maintain/recover call after the release or the event deletion",
+    "release": {
+      "servedWhileProtected": {
+        "get": 200,
+        "join": 201
+      },
+      "promotedByAppScheduler": "admitted",
+      "after": {
+        "finalStatus": 404,
+        "code": "ADMISSION_NOT_ENABLED",
+        "elapsedMs": 238,
+        "statusesSeen": {
+          "200": 7,
+          "404": 1
+        }
+      },
+      "control": null,
+      "resetBeforeChange": {
+        "mode": "ready",
+        "generation": "1"
+      },
+      "namespaceKeysLeft": 0,
+      "policy": {
+        "protected": false,
+        "phase": "recovering",
+        "generation": "2",
+        "epochChanged": true
+      }
+    },
+    "eventDeletion": {
+      "servedWhileProtected": {
+        "get": 200,
+        "join": 201
+      },
+      "promotedByAppScheduler": "admitted",
+      "after": {
+        "finalStatus": 404,
+        "code": "ADMISSION_NOT_ENABLED",
+        "elapsedMs": 223,
+        "statusesSeen": {
+          "200": 7,
+          "404": 1
+        }
+      },
+      "control": null,
+      "resetBeforeChange": {
+        "mode": "ready",
+        "generation": "1"
+      },
+      "namespaceKeysLeft": 0,
+      "policy": null
+    },
+    "note": "One local observation per scenario in a nearly empty Redis; elapsedMs is not a latency bound."
+  },
+  "skippedSuites": [
+    {
+      "file": "src/tests/integration/redis-recovery.test.ts",
+      "tests": 7,
+      "reason": "WAVE3_REDIS_DESTRUCTIVE unset; requires the fixed peakpass-wave3-0928-redis container on 127.0.0.1:63532"
+    },
+    {
+      "file": "src/tests/integration/order-sweeper-docker.test.ts",
+      "tests": 5,
+      "reason": "WAVE4_TEST_IMAGE unset; production image not rebuilt for this follow-up"
+    }
+  ],
+  "skippedTestsInRunningSuites": [
+    "order-sweeper: commits orders during actual Redis outage and retries no committed business side effects",
+    "order-sweeper: a Redis disconnect triggered after COMMIT cannot turn an expired order into failed work",
+    "order-expiration-http: actual Redis stop after commit cannot undo expiration or reconciliation; recovery preserves replay"
+  ],
+  "notRerun": [
+    "production image build and ENABLE_ADMISSION off/on empty-DB checks (local)",
+    "Docker order-worker lifecycle cases (5)",
+    "existing-011 database upgrade check",
+    "independent static review of the follow-up change"
+  ],
+  "files": [
+    {
+      "name": "review-baseline-admission.log",
+      "bytes": 22401,
+      "sha256": "71b122a2dbaf5b38ce3c79ccd55a21522b8ee5ee5324e8ec119ffc04b025fcf3"
+    },
+    {
+      "name": "review-red.log",
+      "bytes": 41752,
+      "sha256": "9fe141d2842acd6df7789513b3537ab8262a8150121460a82aa1e581c6a8f0c6"
+    },
+    {
+      "name": "review-green.log",
+      "bytes": 28310,
+      "sha256": "990a9f9d7613b61c406d79568872665e4249f778cfe8d5bf34fa5bcf3e0ea1d7"
+    },
+    {
+      "name": "review-build.log",
+      "bytes": 94,
+      "sha256": "b1549c2c034dd03e6b5ea3ea465f2ea87716fe6eaf9d08c5c2e361930a7701a0"
+    },
+    {
+      "name": "review-typecheck.log",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "name": "review-lint.log",
+      "bytes": 1411,
+      "sha256": "dd513080f2093d6c20af66ccd8b0fed54e0a38b5aef4f47e4cc9b6f38e915704"
+    },
+    {
+      "name": "review-unit.log",
+      "bytes": 16741,
+      "sha256": "49dd9747a23565353f22bf6c0d0a88f0cfe16793ebd033b1ff71b1cbe15e31fd"
+    },
+    {
+      "name": "review-integration.log",
+      "bytes": 538077,
+      "sha256": "15f0687f0b216b15a1e6fa9aeb795f40eb01f07c8a7ffdff84c617ef90b195e2"
+    },
+    {
+      "name": "review-harness.log",
+      "bytes": 3062,
+      "sha256": "23d4bbc849a943c6c6b89835d5ee7326ad73dcb9fa708020d29006e53a9bac3e"
+    },
+    {
+      "name": "review-callback-harness.log",
+      "bytes": 264,
+      "sha256": "132bae7fde274f3297fd5832e4866143b2132bc571614656ec34545a09c9f2cb"
+    },
+    {
+      "name": "review-smoke-app.log",
+      "bytes": 30294,
+      "sha256": "7cb9a9993c220d565a547590a51145b135a31a6b4f3eaac1bf07c1895449a8df"
+    },
+    {
+      "name": "review-smoke-client.log",
+      "bytes": 1383,
+      "sha256": "03a0e9600630f9f0aea9712d4865cc37599d2f8f99179683a13785212ec4a1da"
+    },
+    {
+      "name": "review-smoke-fixture.ts",
+      "bytes": 6668,
+      "sha256": "a74fba2208ede2aed929b47caf2d2b5b9e6befaf0a7cda846a7e4db6b91ecbfd"
+    }
+  ],
+  "note": "Follow-up correctness evidence for five review findings; no capacity claim, protected activation, P4 acceptance, merge or deployment."
+}

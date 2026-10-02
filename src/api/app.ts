@@ -119,6 +119,8 @@ export async function createApp() {
   await registerReservationRoutes(fastify);
   await registerCheckoutRoutes(fastify);
   await registerDemoSessionRoutes(fastify);
+  const { registerAdmissionRoutes } = await import('./rest/admissions');
+  await fastify.register(registerAdmissionRoutes);
   
   return fastify;
 }

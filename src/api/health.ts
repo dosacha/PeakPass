@@ -2,6 +2,8 @@ import { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
 import { getLogger } from '@/infra/logger';
 import { getPostgresPool } from '@/infra/postgres/client';
 import { withRedis } from '@/infra/redis/client';
+import { getConfig } from '@/infra/config';
+import { admissionService, assertP4AdmissionStartup } from '@/core/services/admission.service';
 
 const logger = getLogger();
 
@@ -17,6 +19,7 @@ export async function readinessProbe(_request: FastifyRequest, reply: FastifyRep
   const checks: Record<string, boolean> = {
     postgres: false,
     redis: false,
+    admission: false,
   };
 
   try {
@@ -35,6 +38,11 @@ export async function readinessProbe(_request: FastifyRequest, reply: FastifyRep
   } catch (err) {
     logger.warn({ err }, 'Redis not ready');
   }
+
+  try {
+    await assertP4AdmissionStartup();
+    checks.admission = !getConfig().ENABLE_ADMISSION || admissionService.isReady();
+  } catch (err) { logger.warn({err},'Admission not ready'); }
 
   const isReady = Object.values(checks).every(Boolean);
   if (!isReady) {

@@ -33,6 +33,7 @@ const containerEnv = [
   'NODE_ENV', 'JWT_SECRET', 'API_KEY', 'WEBHOOK_SIGNING_SECRET', 'LOG_LEVEL', 'PORT',
   'DB_PORT', 'DB_USER', 'DB_PASSWORD', 'DB_NAME', 'REDIS_PORT', 'REDIS_PASSWORD',
   'ENFORCE_AUTH_USER_MATCH', 'ENABLE_RATE_LIMITING', 'RATE_LIMIT_FAIL_MODE',
+  'ENABLE_ADMISSION',
 ].filter((name) => env[name] !== undefined).flatMap((name) => ['--env', name]);
 containerEnv.push('--env', `DB_HOST=${process.env.IMAGE_DB_HOST || process.env.DB_HOST}`,
   '--env', `REDIS_HOST=${process.env.IMAGE_REDIS_HOST || process.env.REDIS_HOST}`);
@@ -52,8 +53,8 @@ try {
   }
   console.log(docker(['run', '--rm', ...network, ...containerEnv, image, 'node', 'dist/infra/migrations/runner.js', 'up']));
   const applied = await history();
-  assert.deepEqual(applied.map((row) => row.version), [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11], 'Production image must apply migrations 001–011');
-  for (const name of ['users', 'events', 'reservations', 'orders', 'tickets', 'payment_records']) {
+  assert.deepEqual(applied.map((row) => row.version), [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12], 'Production image must apply migrations 001–012');
+  for (const name of ['users', 'events', 'reservations', 'orders', 'tickets', 'payment_records', 'admission_events']) {
     assert.equal((await pool.query('SELECT to_regclass($1) AS name', [`public.${name}`])).rows[0].name, name);
   }
   const rerun = docker(['run', '--rm', ...network, ...containerEnv, image, 'node', 'dist/infra/migrations/runner.js', 'up']);
@@ -70,7 +71,7 @@ try {
       const response = await fetch(`${baseUrl}/ready`, { signal: AbortSignal.timeout(1000) });
       if (response.status === 200) {
         const body = await response.json();
-        assert.deepEqual(body.checks, { postgres: true, redis: true });
+        assert.deepEqual(body.checks, { postgres: true, redis: true, admission: true });
         ready = true;
         break;
       }
@@ -87,7 +88,7 @@ try {
   });
   assert.equal(response.status, 200);
   assert.deepEqual(await response.json(), { data: { myOrders: [] } });
-  console.log('PASS: migrations 001–011, unchanged rerun, ready, signed GraphQL auth smoke');
+  console.log('PASS: migrations 001–012, unchanged rerun, ready, signed GraphQL auth smoke');
 } finally {
   if (container) docker(['stop', container]);
   await pool.end();

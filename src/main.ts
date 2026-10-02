@@ -6,10 +6,13 @@ import { createApp } from '@/api/app';
 import { startReservationSweeper, stopReservationSweeper } from '@/infra/cron/reservation-sweeper';
 
 import { startOrderSweeper } from '@/infra/cron/order-sweeper';
+import { startAdmissionScheduler } from '@/infra/cron/admission-scheduler';
+import { admissionService, assertP4AdmissionStartup } from '@/core/services/admission.service';
 
 let app: Awaited<ReturnType<typeof createApp>> | null = null;
 let sweeperHandle: NodeJS.Timeout | null = null;
 let orderSweeper: ReturnType<typeof startOrderSweeper> | null = null;
+let admissionScheduler: ReturnType<typeof startAdmissionScheduler> | null = null;
 let shuttingDown = false;
 
 async function gracefulShutdown(signal: string) {
@@ -20,6 +23,7 @@ async function gracefulShutdown(signal: string) {
   shuttingDown = true;
   const redisClosed = Promise.allSettled([closeRedis()]);
   const ordersStopped = orderSweeper?.stop();
+  const admissionStopped = admissionScheduler?.stop();
 
   const logger = getLogger() || console;
   logger.info(`${signal} 수신, 종료 절차 시작`);
@@ -36,6 +40,7 @@ async function gracefulShutdown(signal: string) {
     }
 
     await ordersStopped;
+    await admissionStopped;
     await closePostgresPool();
     logger.info('PostgreSQL 연결 종료');
 
@@ -67,6 +72,8 @@ async function main() {
 
     await initRedis();
     logger.info('Redis 연결 완료');
+    await assertP4AdmissionStartup();
+    if(config.ENABLE_ADMISSION) await admissionService.verifyEnvironment();
 
     app = await createApp();
 
@@ -75,6 +82,7 @@ async function main() {
 
     sweeperHandle = startReservationSweeper();
     orderSweeper = startOrderSweeper();
+    if(config.ENABLE_ADMISSION) admissionScheduler = startAdmissionScheduler();
 
     await app.listen({ port: config.PORT, host: '0.0.0.0' });
 
@@ -88,8 +96,9 @@ async function main() {
     // Fence Redis and scheduling immediately; finish the active order transaction before closing its pool.
     const redisClosed = Promise.allSettled([closeRedis()]);
     const ordersStopped = orderSweeper?.stop();
+    const admissionStopped = admissionScheduler?.stop();
     if (sweeperHandle) stopReservationSweeper(sweeperHandle);
-    await Promise.allSettled([ordersStopped, app ? app.close() : Promise.resolve()]);
+    await Promise.allSettled([ordersStopped, admissionStopped, app ? app.close() : Promise.resolve()]);
     await Promise.allSettled([closePostgresPool(), redisClosed]);
     process.exit(1);
   }

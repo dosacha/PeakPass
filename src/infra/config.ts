@@ -61,6 +61,7 @@ const envSchema = z.object({
   WEBHOOK_REPLAY_TOLERANCE_SECONDS: z.coerce.number().int().positive().default(300),
 
   // 기능 플래그
+  ENABLE_ADMISSION: booleanFromEnv(false),
   ENABLE_RATE_LIMITING: booleanFromEnv(true),
   // write 경로 (checkout, reservation, webhook) rate limit.
   // 결제·좌석 점유로 직접 이어지므로 보수적으로 짧은 윈도우와 낮은 한도를 둔다.

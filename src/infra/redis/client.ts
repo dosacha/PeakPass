@@ -6,6 +6,9 @@ let redisClient: RedisClientType | null = null;
 let connecting: Promise<RedisClientType> | null = null;
 let socketAbort: AbortController | null = null;
 let shuttingDown = false;
+let connectionVersion = 0;
+
+export function getRedisConnectionVersion(): number { return connectionVersion; }
 
 export async function initRedis(): Promise<RedisClientType> {
   if (shuttingDown) throw new Error('Redis is shutting down');
@@ -41,6 +44,7 @@ export async function initRedis(): Promise<RedisClientType> {
     if (!shuttingDown) logger.error({ err }, 'Redis connection error');
   });
   client.on('connect', () => logger.info('Redis connected'));
+  client.on('ready', () => { connectionVersion++; });
 
   // Bound acquisition, including a TCP peer that accepts but never completes the Redis handshake.
   const timeout = setTimeout(() => abort.abort(), 5000);
