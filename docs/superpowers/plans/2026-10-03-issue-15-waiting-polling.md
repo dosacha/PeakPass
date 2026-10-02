@@ -106,11 +106,11 @@ Interfaces:
 - `App` creates one controller per `(mode, apiBase, selectedEventId, live user)`, disposes it when any of them changes, and exposes `state.admission` (the view), `state.pollMode` and actions `joinQueue`, `cancelQueue`, `retryPurchase`, `setPollMode`.
 - `window.PeakPassAdmissionTrace.snapshot()` returns the page's trace with `{ runId, tabId }`.
 - `QueueCard` in `app-flow.jsx`; `StepCard` accepts an optional `statusLabel`.
-- [ ] Load the script; add timeout, abort and `Retry-After` to the live transport.
-- [ ] Controller lifecycle with automatic recovery on load; polling mode from the URL, storage and the toggle.
-- [ ] Step 3 sends `{admissionId, admissionEpoch}` when admitted, through the controller, and stays disabled for a protected event until then; step 4 is unchanged.
-- [ ] Queue card: states, fixed-user notice, join, cancel with confirmation, retry of an unconfirmed purchase, live regions, title change on admission.
-- [ ] Both existing check pages pass; `npm test` passes.
+- [x] Load the script; add timeout, abort and `Retry-After` to the live transport.
+- [x] Controller lifecycle with automatic recovery on load; polling mode from the URL, storage and the toggle.
+- [x] Step 3 sends `{admissionId, admissionEpoch}` when admitted, through the controller, and stays disabled for a protected event until then; step 4 is unchanged.
+- [x] Queue card: states, fixed-user notice, join, cancel with confirmation, retry of an unconfirmed purchase, live regions, title change on admission.
+- [x] Both existing check pages pass; `npm test` passes.
 
 ## Task 6: Real browser, HTTP and Redis
 
@@ -143,3 +143,10 @@ Files: new `docs/ISSUE_15_VALIDATION.md`, `docs/README.md`, `test-results/admiss
 - Task 4: Ruling: when several layer conditions hold, `reconnect` (first answer of a controller, failed requests before, or a promotion older than the visibility log) wins over `hidden`, and the raw flags are recorded next to the label — P8 can stratify differently from the flags — cost if wrong: a relabelling in the analysis, no new measurement.
 - Task 4: Ruling: the trace is a ring that drops the oldest event and counts it, and the visibility log keeps the last 64 changes — bounded memory for a page that stays open — cost if wrong: a very long session loses its oldest polls (visible as `dropped`) or files an old promotion under reconnect.
 - Task 4: mutation check of `frontend/admission-polling.js`: 38 mutations, each killed by its named test. Two single-guard mutants (the purchase pause in `poll()` and on a visibility return) are equivalent on their own because each guard covers the other; they are mutated together through their shared predicate.
+- Task 4: `2cfe947` instrumentation, `5543521` formatting. RED 10 failed (trace and recognition missing) → GREEN 55/55.
+- Task 5: Ruling: the queue context belongs to the last user a live session was issued for (`queueUserId`), not to the live session state — the existing code clears that state on Reset, on a rejected token and on a failed renewal, and a controller disposed by any of those would stop polling a waiting entry until its lease ran out — cost if wrong: a controller keeps running for a user whose session is gone; its requests then return no response and back off.
+- Task 5: Ruling: the card has an action that reads the reservation an admission was used for (`GET /reservations/:id`) and sets the tier and quantity from it — after a reload the page no longer holds that reservation and step 4 could not continue — cost if wrong: one unused button.
+- Task 5: Ruling: step 3 opens when the entry is admitted — the admission lives 30 s — cost if wrong: one step expands without a click.
+- Task 5: Ruling: the card uses its own banner class, not `.result-banner` — `task21-contract-check.html` reads the first `.result-banner` of the flow as the settlement result — cost if wrong: a few duplicated layout rules.
+- Task 5: a recorded poll delay showed 5000.1 ms in the browser (the planned delay was derived from two clock reads); the plan now carries the delay itself, with a unit test for the hidden interval.
+- Task 5: checked in a real browser against the real application (owned PostgreSQL and Redis): recovery on load, join, wait behind 20 synthetic users, admission, reservation with the admission fields, checkout and demo settlement, expiry in real time without a new join, cancel with confirmation, mode switch, and an unprotected event on the existing flow. Both existing check pages pass (Task21 10/10, Task22 four cases). Unit 216/216. The axe audit (WCAG 2 A/AA) reports nothing inside the queue card; the page's ten contrast findings and one scrollable-region finding are on elements this change does not touch.

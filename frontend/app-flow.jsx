@@ -23,7 +23,7 @@ const TicketCard = ({ ticket, event }) => {
 };
 
 // ---------- Step wrapper ----------
-const StepCard = ({ n, title, endpoint, method, status, active, onToggle, expanded, timing, children }) => {
+const StepCard = ({ n, title, endpoint, method, status, statusLabel, active, onToggle, expanded, timing, children }) => {
   const cls = `step ${status} ${active ? "active" : ""}`;
   return (
     <div className={cls}>
@@ -33,10 +33,11 @@ const StepCard = ({ n, title, endpoint, method, status, active, onToggle, expand
           <span className="step-title">{title}</span>
           <span className="step-meta">
             {endpoint && <span className={`endpoint-chip ${method === "GQL" || method === "GET" ? "read" : "write"}`}>{method} {endpoint}</span>}
-            {status === "idle" && <span style={{color:"var(--muted-2)"}}>대기 중</span>}
-            {status === "running" && <span style={{color:"var(--blue)"}}>실행 중…</span>}
-            {status === "done" && <span style={{color:"var(--green)"}}>완료</span>}
-            {status === "error" && <span style={{color:"var(--red)"}}>에러</span>}
+            {statusLabel}
+            {!statusLabel && status === "idle" && <span style={{color:"var(--muted-2)"}}>대기 중</span>}
+            {!statusLabel && status === "running" && <span style={{color:"var(--blue)"}}>실행 중…</span>}
+            {!statusLabel && status === "done" && <span style={{color:"var(--green)"}}>완료</span>}
+            {!statusLabel && status === "error" && <span style={{color:"var(--red)"}}>에러</span>}
           </span>
         </span>
         <span className="step-timing">
@@ -49,6 +50,290 @@ const StepCard = ({ n, title, endpoint, method, status, active, onToggle, expand
       {expanded && <div className="step-body">{children}</div>}
     </div>
   );
+};
+
+// ---------- Admission queue card (live mode) ----------
+// A state is told apart by its label and text, never by colour alone.
+const QUEUE_PHASES = {
+  loading:       { pill: "idle", label: "확인 중",       tone: "",        mark: "…" },
+  "not-enabled": { pill: "idle", label: "대기열 미적용", tone: "",        mark: "—" },
+  "not-joined":  { pill: "idle", label: "미등록",        tone: "",        mark: "+" },
+  waiting:       { pill: "info", label: "대기 중",       tone: "waiting", mark: "Q" },
+  admitted:      { pill: "ok",   label: "입장",          tone: "ok",      mark: "✓" },
+  processing:    { pill: "warn", label: "구매 처리 중",  tone: "waiting", mark: "…" },
+  consumed:      { pill: "idle", label: "사용됨",        tone: "",        mark: "✓" },
+  cancelled:     { pill: "idle", label: "취소됨",        tone: "",        mark: "×" },
+  expired:       { pill: "err",  label: "만료",          tone: "err",     mark: "!" },
+  reset:         { pill: "warn", label: "초기화됨",      tone: "err",     mark: "!" },
+};
+
+const QUEUE_NOTICES = {
+  JOIN_UNCONFIRMED: "등록 결과를 확인하지 못했습니다. 다시 누르면 같은 등록 요청을 한 번 더 보냅니다.",
+  CANCEL_UNCONFIRMED: "취소 결과를 확인하지 못했습니다. 아래 상태는 서버에서 다시 읽은 것입니다.",
+  ADMISSION_RESET: "대기열이 초기화되어 등록되지 않았습니다. 다시 등록해 주세요.",
+  ADMISSION_QUEUE_FULL: "대기열이 가득 찼습니다. 잠시 뒤 다시 등록해 주세요.",
+  ADMISSION_RATE_LIMITED: "요청 한도를 넘었습니다. 잠시 뒤 다시 시도해 주세요.",
+  ADMISSION_IN_PROGRESS: "구매를 처리하는 중이라 취소할 수 없습니다.",
+  ADMISSION_ALREADY_CONSUMED: "이미 사용된 입장 자격입니다. 대기 취소는 구매 취소가 아닙니다.",
+  ACTIVE_ADMISSION_EXISTS: "이미 진행 중인 등록이 있어 그 상태를 표시합니다.",
+};
+
+const QUEUE_PROBLEMS = {
+  network: "서버에 연결하지 못했습니다.",
+  unavailable: "대기열이 일시적으로 응답하지 않습니다.",
+  "rate-limited": "요청이 많아 잠시 기다립니다.",
+  unauthenticated: "Live demo 세션이 유효하지 않아 상태를 읽지 못했습니다.",
+  invalid: "요청이 거절되었습니다.",
+};
+
+// What needs the user now is announced at once.
+const QUEUE_ALERTS = {
+  admitted: "입장했습니다. 남은 시간 안에 Step 3에서 예약을 시작하세요.",
+  expired: "대기 또는 입장 시간이 지나 만료되었습니다.",
+  reset: "대기열이 초기화되었습니다. 계속하려면 다시 등록해야 합니다.",
+};
+
+// Positions at which a waiting user is told again. Announcing every poll would be noise.
+const QUEUE_MARKS = [1, 2, 3, 5, 10, 20, 50, 100];
+
+function queueConsumedText(outcome) {
+  if (outcome?.kind === "reservation")
+    return ["입장 자격을 예약에 사용했습니다.", `reservation ${fmtShort(outcome.resourceId || "", 8)}`];
+  if (outcome?.kind === "direct-checkout")
+    return ["입장 자격을 주문에 사용했습니다.", `order ${fmtShort(outcome.resourceId || "", 8)}`];
+  if (outcome?.kind === "rejected")
+    return [`구매가 거절되었습니다 (${outcome.code || "사유 없음"}).`,
+            "같은 요청은 같은 답을 받습니다. 다시 시도하려면 새로 등록해야 합니다."];
+  return ["입장 자격을 사용했습니다.", "구매 결과는 구매 응답이 기준입니다."];
+}
+
+const QueueCard = ({ state, actions }) => {
+  const { admission: view, queueEnabled, pollMode, queueUserId, liveSessionStatus, reservation, expandedSteps } = state;
+  const phase = view?.phase || "loading";
+  const entry = view?.admission || null;
+  const problem = view?.problem || null;
+  const purchase = view?.purchase || null;
+  const meta = QUEUE_PHASES[phase] || QUEUE_PHASES.loading;
+
+  const [confirming, setConfirming] = useStateF(false);
+  const [, setTick] = useStateF(0);
+  const [spoken, setSpoken] = useStateF({ status: "", alert: "" });
+
+  // The countdowns read the local monotonic clock twice a second. They send nothing.
+  const ticking = view?.deadlineAt != null || problem?.retryAt != null;
+  useEffectF(() => {
+    if (!ticking) return undefined;
+    const id = setInterval(() => setTick(n => n + 1), 500);
+    return () => clearInterval(id);
+  }, [ticking]);
+  const secondsUntil = (at) => at == null ? null : Math.max(0, Math.ceil((at - performance.now()) / 1000));
+  const left = secondsUntil(view?.deadlineAt);
+  const retryIn = secondsUntil(problem?.retryAt);
+
+  useEffectF(() => { setConfirming(false); }, [phase]);
+
+  // Screen readers hear the position at a few marks, not on every poll.
+  const mark = phase === "waiting" && entry?.position ? (QUEUE_MARKS.find(m => entry.position <= m) || 0) : null;
+  useEffectF(() => {
+    if (mark !== null) setSpoken(s => ({ ...s, status: `대기 ${entry.position}번째입니다.` }));
+  }, [mark]);
+  useEffectF(() => {
+    if (QUEUE_ALERTS[phase]) setSpoken(s => ({ ...s, alert: QUEUE_ALERTS[phase] }));
+  }, [phase]);
+  useEffectF(() => {
+    if (purchase?.status === "unconfirmed")
+      setSpoken(s => ({ ...s, alert: "구매 결과를 확인하지 못했습니다. 새로 등록하지 말고 같은 요청으로 다시 확인하세요." }));
+  }, [purchase?.status]);
+  useEffectF(() => {
+    if (problem) setSpoken(s => ({ ...s, status: QUEUE_PROBLEMS[problem.kind] || QUEUE_PROBLEMS.invalid }));
+  }, [problem?.kind]);
+
+  // A user who is looking at another tab sees the admission in the tab title, and the
+  // reservation step opens so that the 30 s are not spent finding it.
+  useEffectF(() => {
+    if (phase !== "admitted") return undefined;
+    const title = document.title;
+    document.title = "입장했습니다 · PeakPass";
+    actions.gotoStep?.(3);
+    return () => { document.title = title; };
+  }, [phase]);
+
+  const outcome = entry?.outcome || null;
+  const [title, sub] = {
+    loading: ["대기열 상태를 확인하고 있습니다.", "상태는 항상 서버에서 다시 읽습니다."],
+    "not-enabled": ["이 이벤트는 대기열 없이 바로 예약할 수 있습니다.", "Step 3을 그대로 실행하면 됩니다."],
+    "not-joined": ["아직 대기열에 등록하지 않았습니다.", "등록하면 접수한 순서대로 입장합니다."],
+    waiting: [`현재 ${entry?.position ?? "—"}번째로 대기 중입니다.`,
+              `접수 순번 ${entry?.sequence ?? "—"} · 입장하면 이 화면과 탭 제목으로 알려 드립니다. 확인이 2분 넘게 끊기면 대기가 만료됩니다.`],
+    admitted: ["입장했습니다.", "남은 시간 안에 아래 Step 3에서 예약을 시작하세요. 시간이 지나면 입장 자격이 만료됩니다."],
+    processing: ["구매 요청을 처리하고 있습니다.",
+                 "결과는 구매 응답으로 확정됩니다. 대기열에 반영되기를 기다리는 표시이며 실패가 아닙니다."],
+    consumed: queueConsumedText(outcome),
+    cancelled: ["대기를 취소했습니다.", "다시 등록하면 맨 뒤 순번을 받습니다."],
+    expired: ["대기 또는 입장 시간이 지나 만료되었습니다.", "자동으로 다시 등록하지 않습니다. 계속하려면 다시 등록해 주세요."],
+    reset: ["대기열이 초기화되었습니다.", "이전 순번은 복원되지 않습니다. 계속하려면 다시 등록해 주세요."],
+  }[phase] || ["대기열 상태를 확인하고 있습니다.", ""];
+
+  const joinable = ["not-joined", "reset", "consumed", "cancelled", "expired"].includes(phase);
+  const cancellable = phase === "waiting" || phase === "admitted";
+  // A join or cancel waits out an error wait of the queue API, and an open purchase comes first.
+  const held = !!view?.busy || !!purchase || (retryIn != null && retryIn > 0);
+  const statusLabel = (
+    <span className={`status-pill ${queueEnabled ? meta.pill : "idle"}`}>
+      <span className="dot"/>{queueEnabled ? meta.label : "이벤트 미선택"}
+    </span>
+  );
+
+  return (
+    <StepCard
+      n="Q" title="입장 대기열"
+      endpoint="/events/:eventId/admissions/me" method="GET"
+      status={!queueEnabled ? "idle" : phase === "admitted" ? "done" : phase === "expired" ? "error" : "idle"}
+      statusLabel={statusLabel}
+      active={queueEnabled && (phase === "waiting" || phase === "admitted")}
+      expanded={expandedSteps?.sq !== false}
+      onToggle={() => actions.toggleStep("sq")}
+    >
+      <div className="queue-lead">
+        대기열을 쓰는 이벤트는 여기서 입장한 뒤에만 예약할 수 있습니다. 순번과 입장 여부는 항상 서버에서 다시 읽고, 브라우저에 저장한 값으로 판단하지 않습니다.
+      </div>
+
+      {!queueEnabled ? (
+        <div className="queue-banner">
+          <div className="qb-mark" aria-hidden="true">—</div>
+          <div>
+            <div className="qb-title">이벤트를 먼저 선택하세요.</div>
+            <div className="qb-sub">Step 1에서 Live API의 이벤트를 불러와 선택하면 그 이벤트의 대기열 상태를 확인합니다.</div>
+          </div>
+        </div>
+      ) : !view ? (
+        <div className={`queue-banner ${liveSessionStatus === "error" ? "err" : ""}`}>
+          <div className="qb-mark" aria-hidden="true">{liveSessionStatus === "error" ? "!" : "…"}</div>
+          <div>
+            <div className="qb-title">
+              {liveSessionStatus === "error" ? "Live demo 세션을 시작하지 못했습니다." : "Live demo 세션을 준비하고 있습니다."}
+            </div>
+            <div className="qb-sub">
+              {liveSessionStatus === "error"
+                ? "API 주소와 서버의 ENABLE_DEMO_SESSION 설정을 확인한 뒤 다시 시도하세요."
+                : "세션이 준비되면 대기열 상태를 서버에서 읽습니다."}
+            </div>
+          </div>
+          {liveSessionStatus === "error" && (
+            <button type="button" className="btn btn-secondary" onClick={actions.recheckQueue}>다시 시도</button>
+          )}
+        </div>
+      ) : (
+        <>
+          <div className="queue-hint" style={{marginTop:10}}>
+            Live demo는 <b>고정 사용자 1명</b>(<code style={{fontFamily:"var(--font-mono)"}}>{fmtShort(queueUserId, 8)}</code>)으로 동작합니다.
+            같은 사용자로 열린 다른 탭이나 다른 사람의 등록·취소·구매가 이 화면에도 그대로 반영됩니다.
+          </div>
+
+          <div className="queue-mode" role="group" aria-label="상태 확인 주기">
+            <span className="field-label">Polling</span>
+            {[["adaptive", "Adaptive 1–5s + jitter"], ["fixed", "Fixed 1s"]].map(([value, label]) => (
+              <button type="button" key={value} className="queue-mode-option"
+                      aria-pressed={pollMode === value} onClick={() => actions.setPollMode(value)}>
+                {label}
+              </button>
+            ))}
+            <span className="queue-hint">두 방식은 같은 API와 같은 입장 자격을 씁니다. 숨겨진 탭은 둘 다 15초 간격입니다.</span>
+          </div>
+
+          <div className={`queue-banner ${meta.tone}`}>
+            <div className="qb-mark" aria-hidden="true">{meta.mark}</div>
+            <div>
+              <div className="qb-title">{title}</div>
+              <div className="qb-sub">{sub}</div>
+            </div>
+            {phase === "waiting" && entry?.position != null && (
+              <div className="qb-stat"><div className="n">{entry.position}</div><div className="l">번째</div></div>
+            )}
+            {phase === "admitted" && left != null && (
+              <div className="qb-stat"><div className="n">{left}</div><div className="l">초 남음</div></div>
+            )}
+          </div>
+
+          {problem && (
+            <div className="queue-note err">
+              {QUEUE_PROBLEMS[problem.kind] || QUEUE_PROBLEMS.invalid}
+              {problem.code ? ` (${problem.code})` : ""}
+              {retryIn != null && (retryIn > 0 ? ` ${retryIn}초 뒤 자동으로 다시 확인합니다.` : " 다시 확인하는 중입니다.")}
+              {retryIn != null && entry ? " 등록 정보는 그대로 둡니다." : ""}
+              {retryIn == null && (
+                <button type="button" className="btn btn-ghost" onClick={actions.recheckQueue}>다시 확인</button>
+              )}
+            </div>
+          )}
+
+          {view.notice && (
+            <div className="queue-note">
+              {QUEUE_NOTICES[view.notice] || `요청이 처리되지 않았습니다 (${view.notice}).`}
+            </div>
+          )}
+
+          {purchase && purchase.status !== "unconfirmed" && (
+            <div className="queue-note">
+              구매 요청을 보내는 중입니다.
+              {purchase.attempts > 1 && ` 결과를 확인하지 못해 같은 요청을 다시 보내고 있습니다 (${purchase.attempts}번째).`}
+            </div>
+          )}
+          {purchase?.status === "unconfirmed" && (
+            <div className="queue-note err">
+              {purchase.restored ? "이전에 보낸 구매 요청의 결과가 확인되지 않았습니다. " : "구매 결과를 아직 확인하지 못했습니다. "}
+              새로 등록하지 말고 같은 요청으로 다시 확인하세요.
+              <button type="button" className="btn btn-secondary" style={{marginLeft:10}} onClick={actions.retryPurchase}>
+                같은 요청으로 다시 확인
+              </button>
+            </div>
+          )}
+
+          <div className="btn-row" style={{marginTop:12}}>
+            {joinable && (
+              <button type="button" className="btn btn-accent" onClick={actions.joinQueue} disabled={held}>
+                {view.busy === "join" ? "등록 중…" : phase === "not-joined" ? "대기열 등록" : "다시 등록"}
+              </button>
+            )}
+            {cancellable && !confirming && (
+              <button type="button" className="btn btn-secondary" onClick={() => setConfirming(true)} disabled={held}>
+                {view.busy === "cancel" ? "취소 중…" : "대기 취소"}
+              </button>
+            )}
+            {cancellable && confirming && (
+              <>
+                <span className="queue-confirm">취소하면 순번을 잃습니다. 취소할까요?</span>
+                <button type="button" className="btn btn-danger" disabled={held}
+                        onClick={() => { setConfirming(false); actions.cancelQueue(); }}>
+                  취소 확정
+                </button>
+                <button type="button" className="btn btn-ghost" onClick={() => setConfirming(false)}>돌아가기</button>
+              </>
+            )}
+            {phase === "consumed" && outcome?.kind === "reservation" && !reservation && (
+              <button type="button" className="btn btn-secondary" onClick={actions.loadReservation}>예약 불러오기</button>
+            )}
+          </div>
+        </>
+      )}
+
+      <div className="sr-only" role="status" aria-live="polite">{spoken.status}</div>
+      <div className="sr-only" role="alert">{spoken.alert}</div>
+    </StepCard>
+  );
+};
+
+// What the purchase answered, in words. Codes are from admission-v1 §3 and the purchase paths.
+const PURCHASE_ERRORS = {
+  ADMISSION_INVALID_INPUT: "입장 자격이 필요하거나 요청 형식이 맞지 않습니다. 입장 대기열의 상태를 확인하세요.",
+  UNAUTHENTICATED: "인증이 필요합니다. Live demo 세션을 다시 시작한 뒤 시도하세요.",
+  ADMISSION_NOT_FOUND: "이 입장 자격은 사용할 수 없습니다.",
+  ADMISSION_NOT_READY: "아직 입장 전입니다. 대기열에서 입장을 기다리세요.",
+  ADMISSION_REQUEST_MISMATCH: "이 입장 자격은 다른 구매 요청에 이미 묶여 있습니다.",
+  ADMISSION_EXPIRED: "입장 자격이 만료되었습니다. 이 요청으로 예약된 것은 없습니다. 계속하려면 대기열에 다시 등록하세요.",
+  ADMISSION_CANCELLED: "취소된 입장 자격입니다. 이 요청으로 예약된 것은 없습니다. 계속하려면 대기열에 다시 등록하세요.",
+  ADMISSION_RESET: "대기열이 초기화되었습니다. 이 요청으로 예약된 것은 없습니다. 계속하려면 대기열에 다시 등록하세요.",
+  INSUFFICIENT_INVENTORY: "좌석이 부족해 예약이 거절되었습니다. 다시 시도하려면 대기열에 새로 등록해야 합니다.",
 };
 
 // ---------- The 7-step flow ----------
@@ -71,6 +356,17 @@ const DemoFlow = ({ state, actions }) => {
   const tickets = settlement?.tickets || order?.tickets || [];
   const isLiveDemo = mode === "live";
   const liveSessionReady = !isLiveDemo || !!liveSessionUserId;
+
+  // Admission queue (live mode). An event that uses the queue can be reserved only while the
+  // entry is admitted, and the reservation then carries the admission.
+  const queue = state.admission || null;
+  const queueEnabled = !!state.queueEnabled;
+  const queueOpen = !queueEnabled || queue?.phase === "not-enabled" || queue?.phase === "admitted";
+  const purchaseOpen = !!queue?.purchase;
+  const purchaseError = state.purchaseError || null;
+  const admissionFields = queueEnabled && queue?.phase === "admitted" && queue.admission
+    ? { admissionId: queue.admission.admissionId, admissionEpoch: queue.admission.epoch }
+    : null;
 
   const pct = Math.round((Object.values(stepStatus).filter(s => s === "done").length / 7) * 100);
 
@@ -237,6 +533,9 @@ const DemoFlow = ({ state, actions }) => {
             )}
           </StepCard>
 
+          {/* Admission queue: live mode only. Mock mode has no queue. */}
+          {isLiveDemo && <QueueCard state={state} actions={actions}/>}
+
           {/* STEP 3 */}
           <StepCard
             n="3" title="Reservation Hold 생성"
@@ -260,7 +559,8 @@ const DemoFlow = ({ state, actions }) => {
                   eventId: selectedEvent.id,
                   userId: userId || "Issued by live demo session",
                   quantity,
-                  tierId: selectedTier.tierId
+                  tierId: selectedTier.tierId,
+                  ...(admissionFields || {})
                 } : null}/>
               </div>
               <div>
@@ -270,10 +570,24 @@ const DemoFlow = ({ state, actions }) => {
             </div>
             <div className="btn-row" style={{marginTop:12}}>
               <button className="btn btn-danger" onClick={actions.step3}
-                      disabled={!selectedTier || (mode === "mock" && !userId) || stepStatus.s3 === "running"}>
+                      disabled={!selectedTier || (mode === "mock" && !userId) || stepStatus.s3 === "running" || !queueOpen || purchaseOpen}>
                 <Icon name="play" size={11}/> POST /reservations
               </button>
             </div>
+            {!queueOpen && !reservation && (
+              <div className="queue-hint" style={{marginTop:8}}>
+                <Icon name="warn" size={11}/> 대기열을 쓰는 이벤트일 수 있습니다. 위 <b>입장 대기열</b>에서 입장한 뒤 실행할 수 있습니다.
+              </div>
+            )}
+            {purchaseError && (
+              <div className="result-banner err" role="alert">
+                <div className="rb-icon">!</div>
+                <div>
+                  <div className="rb-title">예약이 처리되지 않았습니다 · {purchaseError.status} {purchaseError.code || ""}</div>
+                  <div className="rb-sub">{PURCHASE_ERRORS[purchaseError.code] || purchaseError.message || "요청이 거절되었습니다."}</div>
+                </div>
+              </div>
+            )}
             {reservation && (
               <div className="result-banner pending">
                 <div className="rb-icon">H</div>
@@ -544,6 +858,10 @@ const StateInspector = ({ state }) => {
     ["selectedTier", state.events?.find(e => e.id === state.selectedEventId)?.pricing?.find(p => p.tierId === state.selectedTierId)?.name || "—"],
     ["userId", state.userId || "—"],
     ["quantity", state.quantity],
+    ["queue.phase", state.admission?.phase || "—"],
+    ["queue.position", state.admission?.admission?.position ?? "—"],
+    ["queue.pollMode", state.queueEnabled ? state.pollMode : "—"],
+    ["queue.polls", state.admission?.polls ?? "—"],
     ["reservationId", state.reservation?.id || "—"],
     ["reservation.status", state.reservation?.status || "—"],
     ["checkoutIdempotencyKey", state.checkoutIdemKey ? fmtShort(state.checkoutIdemKey, 16) : "—"],
@@ -590,6 +908,7 @@ const EXPLANATION_NOTES = {
     { b: "HOLD", t: "예약은 Redis hold TTL로 빠르게 좌석을 잡고, PostgreSQL에도 동시에 기록합니다." },
     { b: "SOT", t: "Redis는 빠른 캐시/락 계층이지만 최종 정합성 기준은 PostgreSQL입니다." },
     { b: "RETRY", t: "TTL 만료 시 reservation 레코드도 EXPIRED로 전환됩니다." },
+    { b: "ADMIT", t: "대기열을 쓰는 이벤트는 입장 자격(admissionId · admissionEpoch)을 예약 요청에 함께 보냅니다." },
   ],
   4: [
     { b: "PENDING", t: "checkout은 pending order만 만들고 ticket은 만들지 않습니다." },
@@ -682,4 +1001,4 @@ const RequestLog = ({ requests, onClear }) => {
   );
 };
 
-Object.assign(window, { DemoFlow, StateInspector, ExplanationNotes, RequestLog, TicketCard, StepCard });
+Object.assign(window, { DemoFlow, StateInspector, ExplanationNotes, RequestLog, TicketCard, StepCard, QueueCard });

@@ -3,7 +3,7 @@
 const { useState: useS, useEffect: useE, useMemo: useM, useRef: useR, useCallback: useC } = React;
 
 // ---------- API layer ----------
-async function callLive(apiBase, method, path, body, headers = {}, isGraphQL = false) {
+async function callLive(apiBase, method, path, body, headers = {}, isGraphQL = false, signal) {
   const t0 = performance.now();
   try {
     const base = apiBase.replace(/\/+$/, "");
@@ -11,11 +11,15 @@ async function callLive(apiBase, method, path, body, headers = {}, isGraphQL = f
       method,
       headers: { "Content-Type": "application/json", ...headers },
       body: body ? JSON.stringify(body) : undefined,
+      signal,
     });
     const elapsed = Math.round(performance.now() - t0);
     const text = await res.text();
     let json; try { json = JSON.parse(text); } catch { json = text; }
-    return { ok: res.ok, status: res.status, elapsed, data: json };
+    // A cross-origin page can read Retry-After only when the server exposes it. The admission
+    // error body carries the same wait as nextPollAfterMs, so nothing depends on this header.
+    const retryAfterMs = window.PeakPassAdmission.parseRetryAfter(res.headers.get("Retry-After"));
+    return { ok: res.ok, status: res.status, elapsed, data: json, retryAfterMs };
   } catch (e) {
     const elapsed = Math.round(performance.now() - t0);
     return { ok: false, status: 0, elapsed, data: { error: "Network error", message: e.message } };
@@ -149,6 +153,63 @@ function createMockServer() {
 
 const mockServer = createMockServer();
 
+// ---------- Admission queue (live mode only) ----------
+// The queue has no mock: a simulated wait would look like a measurement. Mock mode renders no
+// queue card and writes nothing to the trace.
+const isUuid = (value) =>
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(value || "");
+const pageParams = new URLSearchParams(window.location.search);
+const POLL_MODES = ["adaptive", "fixed"];
+
+// `?poll=fixed|adaptive` pins the mode of a measured run; otherwise the stored choice applies.
+function initialPollMode() {
+  const fromUrl = pageParams.get("poll");
+  if (POLL_MODES.includes(fromUrl)) return fromUrl;
+  const saved = localStorage.getItem("pp_poll_mode");
+  return POLL_MODES.includes(saved) ? saved : "adaptive";
+}
+
+// What this page did, for the measurements of admission-v1 §7. `runId` comes from `?run=`,
+// `tabId` only labels this page load; neither is sent to the server.
+const admissionTrace = window.PeakPassAdmission.createTrace({
+  limit: 5000,
+  meta: {
+    runId: pageParams.get("run") || "local",
+    tabId: window.uuid(),
+    startedAt: new Date().toISOString(),
+  },
+});
+window.PeakPassAdmissionTrace = { snapshot: () => admissionTrace.snapshot() };
+
+// Marks an admission whose first recognition was recorded, shared by the tabs of this browser
+// profile so that a reload or a second tab does not count it again. It decides nothing else.
+const seenAdmissions = {
+  read() {
+    try { return JSON.parse(localStorage.getItem("pp_admission_seen")) || []; } catch { return []; }
+  },
+  has(key) { return this.read().includes(key); },
+  add(key) {
+    localStorage.setItem("pp_admission_seen", JSON.stringify([...this.read(), key].slice(-50)));
+  },
+};
+
+// The template of a purchase whose outcome is still open, so that the same request can be
+// repeated after a reload. It holds no token and proves nothing: the server authenticates the
+// JWT and answers 404 for an admission of another user.
+const pendingPurchases = {
+  get: (key) => sessionStorage.getItem(`pp_pending_purchase:${key}`),
+  set: (key, value) => sessionStorage.setItem(`pp_pending_purchase:${key}`, value),
+  remove: (key) => sessionStorage.removeItem(`pp_pending_purchase:${key}`),
+};
+
+const pageVisibility = {
+  hidden: () => document.visibilityState === "hidden",
+  subscribe(listener) {
+    document.addEventListener("visibilitychange", listener);
+    return () => document.removeEventListener("visibilitychange", listener);
+  },
+};
+
 // ---------- Main App ----------
 function defaultApiBase() {
   const saved = localStorage.getItem("pp_api_base");
@@ -192,8 +253,20 @@ const App = () => {
   const [stepStatus, setStepStatus] = useS({ s1:"idle",s2:"idle",s3:"idle",s4:"idle",s5:"idle",s6:"idle",s7:"idle" });
   const [stepTiming, setStepTiming] = useS({});
   const [activeStep, setActiveStep] = useS(1);
-  const [expandedSteps, setExpandedSteps] = useS({ s1: true, s2: false, s3: false, s4: false, s5: false, s6: false, s7: false });
+  const [expandedSteps, setExpandedSteps] = useS({ s1: true, s2: false, sq: true, s3: false, s4: false, s5: false, s6: false, s7: false });
   const [requests, setRequests] = useS([]);
+
+  // Admission queue of the live mode: the controller's view, the polling mode and the user
+  // the queue context belongs to.
+  const [pollMode, setPollMode] = useS(initialPollMode);
+  const [admission, setAdmission] = useS(null);
+  const [purchaseError, setPurchaseError] = useS(null);
+  const [queueUserId, setQueueUserId] = useS("");
+  const [queueNonce, setQueueNonce] = useS(0);
+  const admissionRef = useR(null);
+  const pollModeRef = useR(pollMode);
+  const lastPollRef = useR(null);
+  pollModeRef.current = pollMode;
 
   // [FIX] Per-button in-flight indicator for Step 6 (Duplicate / Retry).
   // A and B each track their own busy state so one button's pending request
@@ -285,6 +358,104 @@ const App = () => {
 
   const logReq = (entry) => setRequests(prev => [...prev, entry]);
 
+  // ------- admission queue (live mode) -------
+  useE(() => localStorage.setItem("pp_poll_mode", pollMode), [pollMode]);
+  // Switching the mode changes only how the next poll is scheduled: the entry, the join key
+  // and a request in flight stay as they are.
+  useE(() => { admissionRef.current?.setMode(pollMode); }, [pollMode]);
+
+  // The queue context follows the last user a live session was issued for. A session that
+  // expired or was cleared keeps it; another user, API base or mode replaces it.
+  useE(() => { if (liveSession?.userId) setQueueUserId(liveSession.userId); }, [liveSession]);
+  useE(() => { setQueueUserId(""); }, [apiBase, mode]);
+
+  // One controller per context (API base, user, event). It is disposed before the next one
+  // starts, so a response of an earlier context has nowhere to land, and the new one always
+  // begins by reading the state from the server.
+  useE(() => {
+    if (mode !== "live" || !isUuid(selectedEventId)) return undefined;
+    if (!queueUserId) {
+      // Recover without a click, so that a waiting user who reloads keeps polling. The delay
+      // keeps a half-typed API base from being probed on every keystroke.
+      const timer = setTimeout(() => { ensureLiveDemoSession().catch(() => {}); }, 400);
+      return () => clearTimeout(timer);
+    }
+
+    const none = { status: 0, data: null, retryAfterMs: null };
+    // Sends with the session of this context's user. A rejected token is replaced once, and
+    // only by a session of the same user.
+    const authorized = async (send) => {
+      let session = await ensureLiveDemoSession();
+      if (session.userId !== queueUserId) return none;
+      let response = await send({ Authorization: `Bearer ${session.token}` });
+      if (response.status === 401) {
+        liveSessionRef.current = null;
+        session = await ensureLiveDemoSession();
+        if (session.userId !== queueUserId) return none;
+        response = await send({ Authorization: `Bearer ${session.token}` });
+      }
+      return response;
+    };
+
+    const controller = window.PeakPassAdmission.createController({
+      userId: queueUserId,
+      eventId: selectedEventId,
+      mode: pollModeRef.current,
+      uuid: window.uuid,
+      visibility: pageVisibility,
+      pending: pendingPurchases,
+      seen: seenAdmissions,
+      async transport({ method, path, body, signal }) {
+        try {
+          const response = await authorized((headers) =>
+            callLive(apiBase, method, path, body, headers, false, signal));
+          const entry = { method, url: path, status: response.status, elapsed: response.elapsed || 0,
+                          request: body || null, response: response.data };
+          if (method === "GET") lastPollRef.current = entry;
+          else logReq(entry);
+          return response;
+        } catch {
+          return none;
+        }
+      },
+      async sendPurchase(body, signal) {
+        try {
+          const response = await authorized((headers) =>
+            callLive(apiBase, "POST", "/reservations", body, headers, false, signal));
+          logReq({ method: "POST", url: "/reservations", status: response.status, elapsed: response.elapsed || 0,
+                   request: body, response: response.data });
+          if (response.elapsed) setStepTiming(prev => ({ ...prev, s3: response.elapsed }));
+          return response;
+        } catch {
+          return none;
+        }
+      },
+      onChange: setAdmission,
+      onTrace(event) {
+        admissionTrace.push(event);
+        // The request log lists a status poll only when it changed what the card shows.
+        if (event.type === "poll" && event.changed && lastPollRef.current) logReq(lastPollRef.current);
+      },
+      onPurchaseResult({ status, data }) {
+        if (status >= 200 && status < 300) {
+          setReservation(data);
+          setPurchaseError(null);
+          setStepStatus(prev => ({ ...prev, s3: "done" }));
+        } else {
+          setPurchaseError({ status, code: data?.error?.code || null, message: data?.error?.message || "" });
+          setStepStatus(prev => ({ ...prev, s3: "error" }));
+        }
+      },
+    });
+    admissionRef.current = controller;
+    controller.start();
+    return () => {
+      controller.dispose();
+      admissionRef.current = null;
+      setAdmission(null);
+    };
+  }, [mode, apiBase, selectedEventId, queueUserId, queueNonce, ensureLiveDemoSession]);
+
   const api = {
     async graphql(query, variables) {
       if (mode === "mock") return mockServer.graphql(query, variables);
@@ -343,6 +514,38 @@ const App = () => {
     regenCheckoutKey: () => setCheckoutIdemKey(uuid()),
     regenSettlementKey: () => setSettlementIdemKey(uuid()),
 
+    // Queue actions are explicit: nothing joins, cancels or buys again by itself.
+    joinQueue: () => { admissionRef.current?.join(); },
+    cancelQueue: () => { admissionRef.current?.cancel(); },
+    retryPurchase: () => {
+      if (admissionRef.current?.retryPurchase()) { setPurchaseError(null); setStep("s3", "running"); }
+    },
+    setPollMode,
+    // Starts the queue context again: a new session if needed, then a GET.
+    recheckQueue: () => {
+      if (queueUserId) setQueueNonce(n => n + 1);
+      else ensureLiveDemoSession().catch(() => {});
+    },
+    // After a reload the page no longer holds the reservation an admission was used for.
+    loadReservation: async () => {
+      const id = admission?.admission?.outcome?.resourceId;
+      if (!id) return;
+      try {
+        const session = await ensureLiveDemoSession();
+        const res = await callLive(apiBase, "GET", `/reservations/${id}`, null,
+          { "Authorization": `Bearer ${session.token}` });
+        logReq({ method: "GET", url: `/reservations/${id}`, status: res.status, elapsed: res.elapsed || 0,
+                 request: null, response: res.data });
+        if (!res.ok) return;
+        // Step 4 sends the tier and quantity of the reservation, not what the form shows now.
+        setReservation(res.data);
+        setQuantity(res.data.quantity);
+        setSelectedTierId(res.data.tierId);
+        setPurchaseError(null);
+        setStep("s3", "done");
+      } catch {}
+    },
+
     reset: () => {
       setReservation(null); setOrder(null); setSettlement(null);
       setDuplicateReplay(null); setDuplicateSemantic(null); setTicketByCode(null);
@@ -351,8 +554,10 @@ const App = () => {
       setCheckoutIdemKey(""); setSettlementIdemKey(""); setProviderTxnId("");
       setRequests([]); setLookupCode("");
       setActiveStep(1);
-      setExpandedSteps({ s1:true,s2:false,s3:false,s4:false,s5:false,s6:false,s7:false });
+      setExpandedSteps({ s1:true,s2:false,sq:true,s3:false,s4:false,s5:false,s6:false,s7:false });
       setDupBusy({ A: false, B: false }); // [FIX] reset per-button busy flags
+      setPurchaseError(null);
+      // Reset is local: an entry in the queue stays on the server and is read again.
       clearLiveDemoSession();
     },
 
@@ -378,6 +583,26 @@ const App = () => {
 
     step3: async () => {
       if (!selectedEvent || !selectedTier) return;
+      const queue = admissionRef.current;
+      const queued = queue?.view();
+      if (mode === "live" && queued?.phase === "admitted") {
+        // A protected event: the reservation carries the admission (admission-v1 §3). The
+        // controller sends it as one frozen request and, when the outcome is unknown, repeats
+        // exactly that request. The result arrives through onPurchaseResult.
+        const body = {
+          eventId: selectedEvent.id,
+          userId: queueUserId,
+          quantity,
+          tierId: selectedTier.tierId,
+          admissionId: queued.admission.admissionId,
+          admissionEpoch: queued.admission.epoch,
+        };
+        if (!queue.purchase(body)) return;
+        setPurchaseError(null);
+        setStep("s3", "running");
+        actions.gotoStep(3);
+        return;
+      }
       setStep("s3", "running"); setActiveStep(3);
       actions.gotoStep(3);
       try {
@@ -729,7 +954,10 @@ const App = () => {
     reservation, order, settlement, duplicateReplay, duplicateSemantic, ticketByCode, lookupCode,
     stepStatus, stepTiming, activeStep, expandedSteps, requests,
     checkoutIdemKey, settlementIdemKey, providerTxnId,
-    dupBusy // [FIX] expose per-button busy state to DemoFlow
+    dupBusy, // [FIX] expose per-button busy state to DemoFlow
+    // admission queue (live mode): the controller's view and what the card needs around it
+    admission, pollMode, purchaseError, queueUserId,
+    queueEnabled: mode === "live" && isUuid(selectedEventId)
   };
 
   return (

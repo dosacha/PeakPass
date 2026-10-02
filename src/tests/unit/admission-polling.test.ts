@@ -1437,6 +1437,23 @@ describe('instrumentation', () => {
     });
   });
 
+  it('records the delay of a poll that was moved out to the hidden interval', async () => {
+    const t = tab(api, { mode: 'adaptive', random: () => 0.25 });
+    t.onRequest(() => t.ok(entry('waiting'), 5000));
+    t.controller.start();
+    await t.advance(500);
+    t.setHidden(true);
+    await t.advance(14500);
+    expect(t.times()).toEqual([0, 15000]);
+    expect(t.traced('poll')[1]).toMatchObject({
+      reason: 'timer',
+      hidden: true,
+      plannedDelayMs: 15000,
+      actualDelayMs: 15000,
+      baseMs: 5000,
+    });
+  });
+
   it('records a poll that an action pre-empted as aborted, not as answered', async () => {
     const t = tab(api);
     t.onRequest((call) => {

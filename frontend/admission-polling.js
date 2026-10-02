@@ -215,7 +215,7 @@
       pollPlan = plan || null;
       pollTimer = setTimer(() => {
         pollTimer = null;
-        poll(reason, pollPlan && Object.assign({ delayMs: pollDue - lastDone }, pollPlan));
+        poll(reason, pollPlan);
       }, delayMs);
     }
 
@@ -371,7 +371,8 @@
       const hidden = visibility.hidden();
       const u = mode === "adaptive" && !hidden ? draw() : 0;
       const baseMs = data.nextPollAfterMs;
-      schedule(successDelay({ mode, hidden, baseMs, u }), "timer", { baseMs, u });
+      const delayMs = successDelay({ mode, hidden, baseMs, u });
+      schedule(delayMs, "timer", { baseMs, u, delayMs });
     }
 
     function unqueued() {
@@ -398,7 +399,7 @@
         code: response.status === 200 ? "PROTOCOL" : codeOf(response),
         retryAt: notBefore,
       };
-      schedule(delay, "retry", { baseMs: null, u });
+      schedule(delay, "retry", { baseMs: null, u, delayMs: delay });
     }
 
     function onStatus(response, timing) {
@@ -605,8 +606,11 @@
       trace("visibility", { hidden });
       if (hidden) {
         // A pending poll moves out to the hidden interval. It never moves earlier.
-        if (pollTimer !== null)
-          schedule(Math.max(pollDue, lastDone + POLICY.hiddenMs) - now(), pollReason, pollPlan);
+        if (pollTimer !== null) {
+          const due = Math.max(pollDue, lastDone + POLICY.hiddenMs);
+          const plan = pollPlan && Object.assign({}, pollPlan, { delayMs: Math.round(due - lastDone) });
+          schedule(due - now(), pollReason, plan);
+        }
         return;
       }
       // One request on return. An error wait keeps its time, and an event without a queue is
