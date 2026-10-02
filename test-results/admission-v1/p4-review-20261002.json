@@ -4,12 +4,13 @@
   "fixShas": [
     "e408fd246d7467af3b555d6a96707fafe10afde3",
     "14dd4979ab17506b2aaac11a3f6e9eb7d3148812",
-    "0d42c0333b3415a1ce847dc13f7edb9579da43b6"
+    "0d42c0333b3415a1ce847dc13f7edb9579da43b6",
+    "51d331b026cc7d79bb0ab4d640960240f6adba4b"
   ],
-  "codeSha": "0d42c0333b3415a1ce847dc13f7edb9579da43b6",
+  "codeSha": "51d331b026cc7d79bb0ab4d640960240f6adba4b",
   "codeShaNote": "Every check except the baseline ran at codeSha.",
   "archive": "p4-review-20261002.zip",
-  "archiveSha256": "d34ccd25a351b6f6c1f69798de2bf9e60b25999e55dc819e2ba3947b858e7985",
+  "archiveSha256": "154df4216506287b0ae7f95d6065c142f75021673a6dbeda69a1a3bb1181165a",
   "reviews": [
     {
       "source": "GitHub chatgpt-codex-connector review 5388546072 on PR #24",
@@ -46,13 +47,25 @@
           "title": "Retire admission controls when deleting events"
         }
       ]
+    },
+    {
+      "source": "GitHub chatgpt-codex-connector review 5389019700 on PR #24",
+      "reviewedCommit": "ab69ab7e9db95c4d92dcd041a06926b9d33e0e35",
+      "findings": [
+        {
+          "comment": 4163492010,
+          "priority": "P2",
+          "path": "src/infra/redis/admission.ts",
+          "title": "Delete all epoch namespaces when retiring an event"
+        }
+      ]
     }
   ],
   "independentReviewOfFix": false,
   "environment": {
     "host": "Windows, Node 24.15.0",
-    "postgres": "16.12; 127.0.0.1:64369 for the baseline, 127.0.0.1:63635 for the runs at codeSha",
-    "redis": "7.4.8; 127.0.0.1:64370 for the baseline, 127.0.0.1:63637 for the runs at codeSha (appendonly no, save empty, maxmemory-policy noeviction, maxmemory 256mb)",
+    "postgres": "16.12; 127.0.0.1:64369 for the baseline, 127.0.0.1:59308 for the runs at codeSha",
+    "redis": "7.4.8; 127.0.0.1:64370 for the baseline, 127.0.0.1:59309 for the runs at codeSha (appendonly no, save empty, maxmemory-policy noeviction, maxmemory 256mb)",
     "containerLabel": "peakpass.task=peakpass-pr24-review-20261002"
   },
   "results": {
@@ -76,7 +89,7 @@
   },
   "twoProcessSmoke": {
     "app": "node dist/main.js built at codeSha, ENABLE_ADMISSION=true, real scheduler",
-    "coordinator": "review-smoke-fixture.ts in a second process; no maintain/recover call after the release or the event deletion",
+    "coordinator": "review-smoke-fixture.ts in a second process; it forces one reset to leave an earlier epoch behind, then makes no maintain/recover call after the release or the event deletion",
     "release": {
       "servedWhileProtected": {
         "get": 200,
@@ -86,18 +99,22 @@
       "after": {
         "finalStatus": 404,
         "code": "ADMISSION_NOT_ENABLED",
-        "elapsedMs": 262,
+        "elapsedMs": 238,
         "statusesSeen": {
-          "200": 8,
+          "200": 7,
           "404": 1
         }
       },
       "control": null,
-      "epochKeysLeft": 0,
+      "resetBeforeChange": {
+        "mode": "ready",
+        "generation": "1"
+      },
+      "namespaceKeysLeft": 0,
       "policy": {
         "protected": false,
         "phase": "recovering",
-        "generation": "1",
+        "generation": "2",
         "epochChanged": true
       }
     },
@@ -110,14 +127,18 @@
       "after": {
         "finalStatus": 404,
         "code": "ADMISSION_NOT_ENABLED",
-        "elapsedMs": 267,
+        "elapsedMs": 223,
         "statusesSeen": {
-          "200": 8,
+          "200": 7,
           "404": 1
         }
       },
       "control": null,
-      "epochKeysLeft": 0,
+      "resetBeforeChange": {
+        "mode": "ready",
+        "generation": "1"
+      },
+      "namespaceKeysLeft": 0,
       "policy": null
     },
     "note": "One local observation per scenario in a nearly empty Redis; elapsedMs is not a latency bound."
@@ -153,13 +174,13 @@
     },
     {
       "name": "review-red.log",
-      "bytes": 36191,
-      "sha256": "f652a93722d14f8eb5224263aea522ad0e975495c7b82664f59fe11bc1626c39"
+      "bytes": 41752,
+      "sha256": "9fe141d2842acd6df7789513b3537ab8262a8150121460a82aa1e581c6a8f0c6"
     },
     {
       "name": "review-green.log",
-      "bytes": 28302,
-      "sha256": "6b0522cf6d40b1f423219a00d04ddd644625b4e7d3f42a86ec9f5c530fd29257"
+      "bytes": 28310,
+      "sha256": "990a9f9d7613b61c406d79568872665e4249f778cfe8d5bf34fa5bcf3e0ea1d7"
     },
     {
       "name": "review-build.log",
@@ -178,39 +199,39 @@
     },
     {
       "name": "review-unit.log",
-      "bytes": 16739,
-      "sha256": "7027a362f8bfa22db6416de5b7a3572ffd1a2e9600c9f8842c260aadd8f151c5"
+      "bytes": 16741,
+      "sha256": "49dd9747a23565353f22bf6c0d0a88f0cfe16793ebd033b1ff71b1cbe15e31fd"
     },
     {
       "name": "review-integration.log",
-      "bytes": 537924,
-      "sha256": "d5d296f68e11d957ea99d56e60fc4450c21c9637919251215469886757d60eb5"
+      "bytes": 538077,
+      "sha256": "15f0687f0b216b15a1e6fa9aeb795f40eb01f07c8a7ffdff84c617ef90b195e2"
     },
     {
       "name": "review-harness.log",
-      "bytes": 3068,
-      "sha256": "f11fbd9db4be4b5ea556140ed57112e5bbff20e3b7c6fcc60107ae792359763a"
+      "bytes": 3062,
+      "sha256": "23d4bbc849a943c6c6b89835d5ee7326ad73dcb9fa708020d29006e53a9bac3e"
     },
     {
       "name": "review-callback-harness.log",
       "bytes": 264,
-      "sha256": "993e0f58e21e5c7ad7b6ddf6a10e6e5bc8dfead17f659fd48090649aebc9303b"
+      "sha256": "132bae7fde274f3297fd5832e4866143b2132bc571614656ec34545a09c9f2cb"
     },
     {
       "name": "review-smoke-app.log",
-      "bytes": 29573,
-      "sha256": "6b18e6e037c5730df0bb375845839cbcbb5313aecdfb055be67c54bb4fefd431"
+      "bytes": 30294,
+      "sha256": "7cb9a9993c220d565a547590a51145b135a31a6b4f3eaac1bf07c1895449a8df"
     },
     {
       "name": "review-smoke-client.log",
-      "bytes": 1267,
-      "sha256": "7d915f693f3fed777a79493aab1fdfcc4b1e5116922f9f483d31c0e65d520376"
+      "bytes": 1383,
+      "sha256": "03a0e9600630f9f0aea9712d4865cc37599d2f8f99179683a13785212ec4a1da"
     },
     {
       "name": "review-smoke-fixture.ts",
-      "bytes": 6042,
-      "sha256": "5a80a8087d79a107b70b77f4a86056f239388a3afcb263ece22f86b85289213c"
+      "bytes": 6668,
+      "sha256": "a74fba2208ede2aed929b47caf2d2b5b9e6befaf0a7cda846a7e4db6b91ecbfd"
     }
   ],
-  "note": "Follow-up correctness evidence for four review findings; no capacity claim, protected activation, P4 acceptance, merge or deployment."
+  "note": "Follow-up correctness evidence for five review findings; no capacity claim, protected activation, P4 acceptance, merge or deployment."
 }
