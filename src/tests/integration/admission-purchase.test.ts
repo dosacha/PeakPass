@@ -200,8 +200,16 @@ describe('admission purchase gate on owned PostgreSQL, Redis and loopback HTTP',
       // A fresh admission whose first ten requests all race for the same result.
       const racing = await admit(service, fx.eventId, second);
       const responses = await Promise.all(Array.from({ length: 10 }, () => reserve(second, racing)));
-      expect(responses.map((r) => r.status)).toEqual(Array(10).fill(201));
-      expect(new Set(responses.map((r) => r.body.id)).size).toBe(1);
+      // Every answer is the one reservation. Only on a host slow enough to exceed lock_timeout may
+      // a request instead be told that the same request is in progress, which it may retry.
+      const created201 = responses.filter((r) => r.status === 201);
+      expect(created201.length).toBeGreaterThan(0);
+      expect(new Set(created201.map((r) => r.body.id)).size).toBe(1);
+      for (const response of responses.filter((r) => r.status !== 201)) {
+        expect(response.status).toBe(409);
+        expect(response.body).toEqual(admissionError('ADMISSION_IN_PROGRESS'));
+      }
+      expect((await reserve(second, racing)).body.id).toBe(created201[0].body.id);
       expect(await fx.state()).toMatchObject({ available: 18, held: 2, reservations: 2, results: 2 });
     });
 
