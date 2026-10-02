@@ -20,6 +20,7 @@ import {
   assertAdmissionLink,
   occupyThroughAdmission,
   openAdmissionGate,
+  ownResult,
   purchaseCommand,
   storedRejection,
 } from './admission-consumption';
@@ -81,16 +82,14 @@ export class CheckoutService {
     //
     // 잠금 순서: event gate → policy → admission → checkout-key → 기존 row. 그래서 gate와
     // 제출된 admission의 영속 결과 조회가 아래 checkout-key 잠금보다 먼저 온다. 이 단계는
-    // 정책을 읽을 뿐이고 기존 주문 replay를 거절하지 않는다.
+    // 읽기만 하고 아무것도 거절하지 않는다. 기존 주문 replay는 admission 면제 경로라서
+    // 제출된 admission이 어떤 상태든 영향을 받지 않아야 하기 때문이다.
     //
     // reservationId가 있는 checkout은 새 좌석을 점유하지 않으므로 gate를 타지 않고 기존
     // 잠금 순서와 응답을 유지한다. 무효한 reservation은 아래에서 오류로 끝나며 직접 점유로
     // 넘어가지 않는다.
     const command = purchaseCommand('direct-checkout', input, input.idempotencyKey, admission);
     const gate = input.reservationId ? null : await openAdmissionGate(client, command);
-    if (gate?.prior?.outcome === 'rejected') {
-      return { rejected: storedRejection(gate.prior) };
-    }
 
     // 동일 idempotency_key 동시 진입 race를 차단한다.
     //
@@ -151,7 +150,8 @@ export class CheckoutService {
       }
 
       // 기존 주문은 admission TTL/reset과 무관하게 replay된다. admission 필드를 제출했다면
-      // 그 주문의 영속 연결과 같아야 한다.
+      // 그 주문의 영속 연결과만 비교한다. 연결이 없는 주문이면 제출된 admission이 다른 요청에
+      // 이미 쓰였더라도 무시한다.
       await assertAdmissionLink(
         client,
         admission,
@@ -166,7 +166,13 @@ export class CheckoutService {
       const tickets = await this.ticketService.getTicketsByOrderId(existingOrder.id, client);
       return { order: existingOrder, tickets };
     }
-    if (gate?.prior) {
+    // 여기부터는 기존 주문 replay가 아니다. 제출된 admission의 영속 결과를 이 요청과 대조한다:
+    // 타인·다른 event는 404, 다른 요청은 409, closed는 410, 같은 요청의 거절은 그대로 재생한다.
+    const prior = gate && ownResult(gate, command);
+    if (prior?.outcome === 'rejected') {
+      return { rejected: storedRejection(prior) };
+    }
+    if (prior) {
       // consumed 결과의 fingerprint는 이 checkout key를 포함하므로 주문이 반드시 있어야 한다.
       throw new Error('Admission result exists without its order');
     }
@@ -180,10 +186,6 @@ export class CheckoutService {
     //     row lock + 조건 검증 + 상태 전환을 한 쿼리로 묶는다.
     //   - affected = 0이면 invalid (released/expired/만료시간 초과/payload mismatch).
     if (input.reservationId) {
-      // 유효한 기존 reservation은 admission이 면제된다. 제출된 admission 필드는 그 reservation의
-      // 영속 연결과 비교만 하고, 다르면 전환 전에 409로 끝낸다.
-      await assertAdmissionLink(client, admission, null, input.reservationId);
-
       const convertResult = await client.query(
         `UPDATE reservations
          SET status = 'converted'
@@ -231,6 +233,11 @@ export class CheckoutService {
         );
         throw new ConflictError('Checkout payload does not match reservation');
       }
+
+      // 유효한 기존 reservation은 admission이 면제된다. 제출된 admission 필드는 그 reservation의
+      // 영속 연결과 비교만 한다. 소유·payload 검증이 끝난 뒤에 비교하므로 타인의 reservation에
+      // 연결이 있는지는 드러나지 않고, 다르면 409로 끝나며 위 전환은 함께 rollback된다.
+      await assertAdmissionLink(client, admission, null, input.reservationId);
 
       return this.createOrder(input, client, true);
     }

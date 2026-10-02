@@ -16,6 +16,7 @@ import {
   Occupation,
   occupyThroughAdmission,
   openAdmissionGate,
+  ownResult,
   purchaseCommand,
   purchaseTransaction,
   settleAdmission,
@@ -62,10 +63,11 @@ export class ReservationService {
     const outcome = await purchaseTransaction(
       async (client): Promise<Occupation<Reservation> & { replayed?: true }> => {
         const gate = await openAdmissionGate(client, command);
-        if (gate.prior?.outcome === 'rejected') return { rejected: storedRejection(gate.prior) };
-        if (gate.prior) {
+        const prior = ownResult(gate, command);
+        if (prior?.outcome === 'rejected') return { rejected: storedRejection(prior) };
+        if (prior) {
           // Replay answers with the current DB state; the Redis hold is only a read cache.
-          const reservation = await this.findReservation(gate.prior.reservationId!, client);
+          const reservation = await this.findReservation(prior.reservationId!, client);
           return { value: reservation!, replayed: true };
         }
         return occupyThroughAdmission(client, gate, command, async () => {

@@ -29,6 +29,7 @@ import {
   inspect,
   age,
   slots,
+  sleep,
   TIER,
   Json,
 } from './admission-purchase-fixture';
@@ -510,14 +511,23 @@ describe('admission purchase gate on owned PostgreSQL, Redis and loopback HTTP',
       fx = await fixture(20, true, 5);
       for (const user of fx.users) {
         const admission = await admit(service, fx.eventId, user);
+        const key = randomUUID();
         const responses = await Promise.all([
           reserve(user, admission),
-          checkout(user, randomUUID(), admission),
+          checkout(user, key, admission),
         ]);
         expect(responses.map((r) => r.status).sort()).toEqual([201, 409]);
-        expect(responses.find((r) => r.status === 409)!.body).toEqual(
-          admissionError('ADMISSION_REQUEST_MISMATCH'),
+        const lostReservation = responses[0].status === 409;
+        // The loser is the other command. Only a host slow enough to exceed lock_timeout may tell
+        // it "in progress" first; asked again, it is told that the admission was used differently.
+        expect(responses[lostReservation ? 0 : 1].body.error.code).toMatch(
+          /^ADMISSION_(REQUEST_MISMATCH|IN_PROGRESS)$/,
         );
+        const again = lostReservation
+          ? await reserve(user, admission)
+          : await checkout(user, key, admission);
+        expect(again.status).toBe(409);
+        expect(again.body).toEqual(admissionError('ADMISSION_REQUEST_MISMATCH'));
       }
       const state = await fx.state();
       expect(state.reservations + state.orders).toBe(5);
@@ -768,9 +778,12 @@ describe('admission purchase gate on owned PostgreSQL, Redis and loopback HTTP',
       expect(unknown.status).toBe(401);
       expect(unknown.body).toEqual(admissionError('UNAUTHENTICATED'));
       const admission = await admit(service, fx.eventId, user);
-      const oversized = await reserve(user, admission, { tierId: 't'.repeat(51) });
-      expect(oversized.status).toBe(400);
-      expect(oversized.body).toEqual(admissionError('ADMISSION_INVALID_INPUT'));
+      // Longer than the tier column, or carrying a NUL that the stored rejection text could not hold.
+      for (const tierId of ['t'.repeat(51), 'vip\u0000']) {
+        const impossible = await reserve(user, admission, { tierId });
+        expect(impossible.status).toBe(400);
+        expect(impossible.body).toEqual(admissionError('ADMISSION_INVALID_INPUT'));
+      }
       // Neither request claimed: both admissions are untouched and no result exists.
       for (const a of [ghostAdmission, admission])
         expect(await inspect(fx.eventId, a.admissionEpoch, a.admissionId)).toMatchObject({
@@ -882,6 +895,98 @@ describe('admission purchase gate on owned PostgreSQL, Redis and loopback HTTP',
       // Admission exemption is not limiter exemption; once the limiter answers, no queue is needed.
       expect((await checkout(user, key, {}, conversion)).status).toBe(201);
       expect(await fx.state()).toMatchObject({ available: 19, held: 0, ordered: 1, results: 1 });
+    });
+
+    it('replays an unlinked order whatever became of the submitted admission, and still refuses a new order with it', async () => {
+      fx = await fixture(20, false);
+      const [user, other] = fx.users,
+        orderKey = randomUUID();
+      const legacy = await checkout(user, orderKey);
+      expect(legacy.status).toBe(201);
+      await setProtected(fx.eventId, true);
+      await service.recover(fx.eventId);
+      // The user's own admission, consumed by a reservation, and another user's consumed admission.
+      const own = await admit(service, fx.eventId, user);
+      const foreign = await admit(service, fx.eventId, other);
+      expect((await reserve(user, own)).status).toBe(201);
+      expect((await reserve(other, foreign)).status).toBe(201);
+      for (const fields of [own, foreign]) {
+        const replay = await checkout(user, orderKey, fields);
+        expect(replay.status).toBe(201);
+        expect(replay.body.order.id).toBe(legacy.body.order.id);
+      }
+      const reused = await checkout(user, randomUUID(), own);
+      expect(reused.status).toBe(409);
+      expect(reused.body).toEqual(admissionError('ADMISSION_REQUEST_MISMATCH'));
+      const stolen = await checkout(user, randomUUID(), foreign);
+      expect(stolen.status).toBe(404);
+      expect(stolen.body).toEqual(admissionError('ADMISSION_NOT_FOUND'));
+      expect(await fx.state()).toMatchObject({ available: 17, held: 2, ordered: 1, results: 2 });
+    });
+
+    it('answers a stranger the existing reservation conflict whether or not that reservation has an admission link', async () => {
+      fx = await fixture(20, false);
+      const [owner, stranger] = fx.users;
+      const unlinked = await reserve(owner);
+      await setProtected(fx.eventId, true);
+      await service.recover(fx.eventId);
+      const linked = await reserve(owner, await admit(service, fx.eventId, owner));
+      expect([unlinked.status, linked.status]).toEqual([201, 201]);
+      const guess = { admissionId: randomUUID(), admissionEpoch: randomUUID() };
+      for (const reservation of [unlinked, linked]) {
+        const response = await checkout(stranger, randomUUID(), guess, {
+          reservationId: reservation.body.id,
+        });
+        expect(response.status).toBe(409);
+        expect(response.body.error).toMatchObject({
+          code: 'CONFLICT',
+          message: 'Checkout payload does not match reservation',
+        });
+      }
+      expect(await fx.state()).toMatchObject({ available: 18, held: 2, orders: 0, results: 1 });
+    });
+
+    it('answers 503 and stays alive when PostgreSQL ends the session while the purchase waits on Redis', async () => {
+      fx = await fixture();
+      const [user] = fx.users,
+        admission = await admit(service, fx.eventId, user);
+      const claim = service.claim.bind(service);
+      jest.spyOn(service, 'claim').mockImplementationOnce(async (input) => {
+        // The purchase session is idle between two queries, as it is while Redis is slow. The
+        // server ends it for real: the same FATAL that the idle-in-transaction bound produces.
+        const idle = await pool.query(
+          `SELECT pid FROM pg_stat_activity WHERE datname=current_database()
+          AND state='idle in transaction' AND query LIKE 'SELECT 1 FROM users%'`,
+        );
+        expect(idle.rows).toHaveLength(1);
+        await pool.query('SELECT pg_terminate_backend($1)', [idle.rows[0].pid]);
+        await sleep(200);
+        return claim(input);
+      });
+      const response = await reserve(user, admission);
+      expect(response.status).toBe(503);
+      expect(response.body).toEqual(admissionError('ADMISSION_UNAVAILABLE', 1000));
+      expect(await fx.state()).toMatchObject({ available: 20, reservations: 0, results: 0 });
+      // The claim was approved; the same request continues it on a new connection.
+      expect((await reserve(user, admission)).status).toBe(201);
+      expect(await fx.state()).toMatchObject({ available: 19, reservations: 1, results: 1 });
+    });
+
+    it('answers 503 when an admission purchase cannot obtain a connection, and the existing 500 without admission', async () => {
+      fx = await fixture();
+      const [user] = fx.users,
+        admission = await admit(service, fx.eventId, user);
+      // Fault injection: pg-pool's acquire timeout, an error without a code.
+      const exhausted = () => new Error('timeout exceeded when trying to connect');
+      const connect = jest.spyOn(pool, 'connect');
+      connect.mockRejectedValueOnce(exhausted() as never);
+      const refused = await reserve(user, admission);
+      expect(refused.status).toBe(503);
+      expect(refused.body).toEqual(admissionError('ADMISSION_UNAVAILABLE', 1000));
+      connect.mockRejectedValueOnce(exhausted() as never);
+      expect((await reserve(user)).status).toBe(500);
+      connect.mockRestore();
+      expect((await reserve(user, admission)).status).toBe(201);
     });
   });
 
@@ -1036,7 +1141,68 @@ describe('admission purchase gate on owned PostgreSQL, Redis and loopback HTTP',
       expect(await slots(redis, fx.eventId, admission.admissionEpoch)).toBe(1);
     });
 
-    it('keeps a consumer whose snapshot predates the closed commit from occupying', async () => {
+    it('lets a stale snapshot occupy again only up to the ledger key, then replays the committed rejection', async () => {
+      fx = await fixture(1);
+      const [buyer, user] = fx.users;
+      expect((await reserve(buyer, await admit(service, fx.eventId, buyer))).status).toBe(201);
+      const admission = await admit(service, fx.eventId, user);
+      // Injected pauses only: the first request is held at its claim, inside its transaction and
+      // holding the admission lock, and later between its COMMIT and its Redis finalization, so
+      // Redis still approves the same claim. PostgreSQL locks, snapshots and commits are real.
+      let resume!: () => void;
+      const held = new Promise<void>((resolve) => (resume = resolve));
+      let reached!: () => void;
+      const claiming = new Promise<void>((resolve) => (reached = resolve));
+      const claim = service.claim.bind(service);
+      const claims = jest.spyOn(service, 'claim').mockImplementationOnce(async (input) => {
+        reached();
+        await held;
+        return claim(input);
+      });
+      let finalize!: () => void;
+      const unreflected = new Promise<void>((resolve) => (finalize = resolve));
+      const complete = service.complete.bind(service);
+      jest.spyOn(service, 'complete').mockImplementationOnce(async (...args) => {
+        await unreflected;
+        return complete(...args);
+      });
+      const first = reserve(user, admission);
+      await claiming;
+      const holder = (
+        await pool.query(
+          `SELECT pid FROM pg_stat_activity WHERE datname=current_database()
+          AND state='idle in transaction' AND query LIKE 'SELECT 1 FROM users%'`,
+        )
+      ).rows[0].pid;
+      // The second request takes its SERIALIZABLE snapshot now and waits for the admission lock.
+      const second = reserve(user, admission);
+      await blocked(pool, holder);
+      resume();
+      // Its snapshot could not see the committed rejection, Redis approved the same claim again,
+      // and it ran the occupation a second time. The ledger key stopped it; a fresh transaction
+      // then replayed the stored result.
+      const late = await second;
+      expect(claims).toHaveBeenCalledTimes(2);
+      finalize();
+      const responses = [await first, late];
+      expect(await slots(redis, fx.eventId, admission.admissionEpoch)).toBe(0);
+      for (const response of responses) {
+        expect(response.status).toBe(409);
+        expect(response.body.error).toEqual(responses[0].body.error);
+        expect(response.body.error.code).toBe('INSUFFICIENT_INVENTORY');
+      }
+      expect((await fx.results()).filter((r) => r.admissionId === admission.admissionId)).toEqual([
+        expect.objectContaining({ outcome: 'rejected', errorCode: 'INSUFFICIENT_INVENTORY' }),
+      ]);
+      expect(await fx.state()).toMatchObject({
+        available: 0,
+        held: 1,
+        reservations: 1,
+        results: 2,
+      });
+    });
+
+    it('keeps a late request that waited behind the reclaimer from occupying after the closed commit', async () => {
       fx = await fixture();
       const [user] = fx.users,
         admission = await admit(service, fx.eventId, user);

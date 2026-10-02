@@ -28,6 +28,15 @@ export async function initPostgresPool(): Promise<Pool> {
   pool.on('error', (err) => {
     logger.error({ err }, 'Unexpected PostgreSQL pool error');
   });
+  // pg-pool listens for errors of idle clients only. When PostgreSQL ends the session of a
+  // checked-out client between two queries (restart, idle-in-transaction timeout), node-postgres
+  // emits 'error' on that client, and an unheard 'error' ends the process. Hear it here: the
+  // client's next query fails, so its transaction still ends with an error for its caller.
+  pool.on('connect', (client) => {
+    client.on('error', (err) => {
+      logger.error({ err }, 'PostgreSQL client connection lost');
+    });
+  });
 
   const client = await pool.connect();
   await client.query('SELECT NOW()');

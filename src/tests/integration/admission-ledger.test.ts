@@ -192,15 +192,41 @@ describe('admission_results ledger constraints on owned PostgreSQL (migration 01
   it('keeps every referenced user, event, reservation and order from being deleted', async () => {
     await insert(row({ ...consumed, reservationId }));
     await insert(row({ ...consumed, operation: 'direct-checkout', orderId }));
-    for (const [table, id] of [
-      ['reservations', reservationId],
-      ['orders', orderId],
-      ['events', eventId],
-      ['users', userId],
-    ]) {
-      await expect(pool.query(`DELETE FROM ${table} WHERE id=$1`, [id])).rejects.toMatchObject({
-        code: '23503',
-      });
+    // A user and an event that nothing but a rejected result references: only the ledger's own
+    // foreign keys can refuse these two deletes.
+    const loneUser = randomUUID(),
+      loneEvent = randomUUID();
+    await pool.query('INSERT INTO users(id,email) VALUES($1,$2)', [
+      loneUser,
+      `${loneUser}@ledger.test`,
+    ]);
+    await pool.query(
+      `INSERT INTO events(id,name,starts_at,ends_at,total_seats,available_seats)
+      VALUES($1,'p5 ledger lone',NOW(),NOW()+interval '1 day',1,1)`,
+      [loneEvent],
+    );
+    await pool.query(
+      `INSERT INTO admission_results(admission_id,user_id,event_id,epoch,operation,fingerprint,
+        outcome,error_code,http_status,error_message)
+      VALUES($1,$2,$3,$4,'reservation','[]','rejected','CONFLICT',409,'conflict')`,
+      [randomUUID(), loneUser, loneEvent, epoch],
+    );
+    try {
+      for (const [table, id, constraint] of [
+        ['reservations', reservationId, 'admission_results_reservation_id_fkey'],
+        ['orders', orderId, 'admission_results_order_id_fkey'],
+        ['events', loneEvent, 'admission_results_event_id_fkey'],
+        ['users', loneUser, 'admission_results_user_id_fkey'],
+      ]) {
+        await expect(pool.query(`DELETE FROM ${table} WHERE id=$1`, [id])).rejects.toMatchObject({
+          code: '23503',
+          constraint,
+        });
+      }
+    } finally {
+      await pool.query('DELETE FROM admission_results WHERE event_id=$1', [loneEvent]);
+      await pool.query('DELETE FROM events WHERE id=$1', [loneEvent]);
+      await pool.query('DELETE FROM users WHERE id=$1', [loneUser]);
     }
   });
   it('rejects UPDATE of a committed result and still allows owned cleanup by DELETE', async () => {

@@ -106,15 +106,15 @@ const TIMEOUTS = `SET LOCAL statement_timeout = '5s'; SET LOCAL lock_timeout = '
 
 export interface AdmissionGate {
   policy: AdmissionPolicy;
-  /** The committed consumed or rejected result of the submitted admission for this same request. */
+  /** The ledger row of the submitted admission, not yet judged against this request. */
   prior: AdmissionResult | null;
 }
 
 /**
- * Steps 2–3: shared event gate, policy locking read, admission lock, durable result.
- * Nothing here looks at Redis, the epoch or the feature flag, so a committed result is recovered
- * whatever happened to the queue since. A result of another owner or event answers 404, a
- * different request 409, a closed admission its stored 410.
+ * Step 2 and the read of step 3: shared event gate, policy locking read, admission lock, ledger
+ * row. Nothing here looks at Redis, the epoch or the feature flag, so a committed result is
+ * recovered whatever happened to the queue since. Nothing is rejected here either: the replay of
+ * an existing order is exempt from admission and must not depend on the submitted admission.
  */
 export async function openAdmissionGate(
   client: PoolClient,
@@ -132,14 +132,23 @@ export async function openAdmissionGate(
       throw new AdmissionError('ADMISSION_IN_PROGRESS', 409);
     throw error;
   }
-  const prior = await readResult(client, admission.admissionId);
-  if (!prior) return { policy, prior };
+  return { policy, prior: await readResult(client, admission.admissionId) };
+}
+
+/**
+ * The judgment of step 3, for a request that is not the replay of an existing order. A result of
+ * another owner or event answers 404, of another request 409, a closed admission its stored 410.
+ * What remains is the committed consumed or rejected result of this same request, if any.
+ */
+export function ownResult(gate: AdmissionGate, command: PurchaseCommand): AdmissionResult | null {
+  const { prior } = gate;
+  if (!prior) return null;
   if (prior.userId !== command.userId || prior.eventId !== command.eventId)
     throw new AdmissionError('ADMISSION_NOT_FOUND', 404);
   if (prior.fingerprint !== admissionFingerprint(command))
     throw new AdmissionError('ADMISSION_REQUEST_MISMATCH', 409);
   if (prior.outcome === 'closed') throw new AdmissionError(prior.errorCode!, prior.httpStatus!);
-  return { policy, prior };
+  return prior;
 }
 
 /**
@@ -188,8 +197,9 @@ export async function occupyThroughAdmission<T>(
   const { policy } = gate;
   if (!policy.protected) return { value: (await occupy()).value };
   const admission = command.admission;
-  // tier_id is VARCHAR(50); the fingerprint is stored in Redis, so a longer value never claims.
-  if (!admission || command.tierId.length > 50)
+  // A tier that cannot exist never claims: tier_id is VARCHAR(50) and the fingerprint is stored
+  // in Redis, and a NUL would make the rejection text of the unknown tier impossible to store.
+  if (!admission || command.tierId.length > 50 || command.tierId.includes('\u0000'))
     throw new AdmissionError('ADMISSION_INVALID_INPUT', 400);
   // An instance with the feature off never opens a protected event; ENV is not a release.
   if (!getConfig().ENABLE_ADMISSION) throw new AdmissionError('ADMISSION_UNAVAILABLE', 503, 1000);
@@ -286,9 +296,9 @@ const isPurchaseRace = (error: unknown) =>
   isAdmissionPolicyEventRace(error) ||
   (error instanceof AdmissionError && error.code === 'ADMISSION_ALREADY_CONSUMED');
 
-// What a retry of the same request can outlive: serialization failure and deadlock once the
+// Codes a retry of the same request can outlive: serialization failure and deadlock once the
 // attempts are used up, the races above, this transaction's own lock, statement and idle bounds,
-// and a lost connection. Anything else (data, integrity, programming error) is a defect.
+// and a session or connection that PostgreSQL ended.
 function isTransient(error: unknown): boolean {
   const code = String((error as { code?: unknown } | null)?.code ?? '');
   return (
@@ -302,24 +312,37 @@ function isTransient(error: unknown): boolean {
 /**
  * Runs one purchase transaction: SERIALIZABLE with the existing three attempts and backoff.
  * `readCommitted` keeps a reservation without admission fields on its existing isolation level.
- * With an admission, a transient failure that outlasts the attempts is 503 and the request keeps
- * its identity; a defect stays the existing 500.
+ *
+ * With an admission, an outage answers 503 and the request keeps its identity, while a defect
+ * stays the existing 500. An outage is a failure with a transient code, or one that did not come
+ * from the purchase work at all: no connection, or BEGIN, COMMIT or ROLLBACK failing because the
+ * session is gone. Those errors of the driver carry no code.
  */
 export async function purchaseTransaction<T>(
   work: (client: PoolClient) => Promise<T>,
   options: { admission?: AdmissionRef; readCommitted?: boolean } = {},
 ): Promise<T> {
+  let workError: unknown;
+  const tracked = async (client: PoolClient) => {
+    try {
+      return await work(client);
+    } catch (error) {
+      workError = error;
+      throw error;
+    }
+  };
   try {
     if (!options.readCommitted)
-      return await serializableTransactionWithRetry(work, { retryIf: isPurchaseRace });
+      return await serializableTransactionWithRetry(tracked, { retryIf: isPurchaseRace });
     try {
-      return await transaction(work);
+      return await transaction(tracked);
     } catch (error) {
       if (!isAdmissionPolicyEventRace(error)) throw error;
-      return await transaction(work);
+      return await transaction(tracked);
     }
   } catch (error) {
-    if (!options.admission || error instanceof AppError || !isTransient(error)) throw error;
+    if (!options.admission || error instanceof AppError) throw error;
+    if (error === workError && !isTransient(error)) throw error;
     getLogger().warn(
       { err: error, admissionId: options.admission.admissionId },
       'Admission purchase failed transiently; the same request may be retried',
