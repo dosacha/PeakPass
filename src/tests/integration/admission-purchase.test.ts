@@ -5,11 +5,14 @@ import { once } from 'events';
 import http from 'http';
 import type { PoolClient } from 'pg';
 import { initRedis, closeRedis } from '@/infra/redis/client';
+import * as commands from '@/infra/redis/commands';
 import { initPostgresPool, closePostgresPool } from '@/infra/postgres/client';
+import * as policy from '@/infra/postgres/admission-policy';
 import { readAdmissionPolicy, lockAdmission } from '@/infra/postgres/admission-policy';
 import { getConfig } from '@/infra/config';
 import { initLogger } from '@/infra/logger';
 import { admissionKeys } from '@/infra/redis/admission';
+import { InternalServerError } from '@/core/errors';
 import { InventoryService } from '@/core/services/inventory.service';
 import { ReservationService } from '@/core/services/reservation.service';
 import {
@@ -303,6 +306,11 @@ describe('admission purchase gate on owned PostgreSQL, Redis and loopback HTTP',
       const claimed = await inspect(fx.eventId, admission.admissionEpoch, admission.admissionId);
       expect(claimed).toMatchObject({ state: 'admitted', phase: 'processing' });
       expect(await slots(redis, fx.eventId, admission.admissionEpoch)).toBe(1);
+      // An application 5xx is not a business rejection either: nothing is stored for it.
+      adjust.mockRejectedValueOnce(new InternalServerError('injected failure'));
+      const failed = await reserve(second, admission);
+      expect(failed.status).toBe(500);
+      expect(await fx.state()).toMatchObject({ available: 19, reservations: 1, results: 1 });
       const resumed = await reserve(second, admission);
       expect(resumed.status).toBe(201);
       expect(await fx.state()).toMatchObject({ available: 18, reservations: 2, results: 2 });
@@ -569,6 +577,191 @@ describe('admission purchase gate on owned PostgreSQL, Redis and loopback HTTP',
     });
   });
 
+  describe('policy states and transitions', () => {
+    it('answers 503 while recovering and 410 for a retired epoch, and still replays a committed result', async () => {
+      fx = await fixture();
+      const [done, pending, fresh] = fx.users;
+      const consumed = await admit(service, fx.eventId, done);
+      const reservation = await reserve(done, consumed);
+      expect(reservation.status).toBe(201);
+      const waiting = await admit(service, fx.eventId, pending);
+      // Reset step 1 (real freeze): Redis stops approving claims before PostgreSQL moves on.
+      const control = (await service.control(fx.eventId))!;
+      await service.freeze(fx.eventId, control);
+      const frozen = await reserve(pending, waiting);
+      expect(frozen.status).toBe(503);
+      expect(frozen.body).toEqual(admissionError('ADMISSION_RECOVERING', 1000));
+      // The reset completes: PostgreSQL has left the epoch for good.
+      await service.recover(fx.eventId, control);
+      const current = (await service.control(fx.eventId))!;
+      expect(current.epoch).not.toBe(control.epoch);
+      const retired = await reserve(pending, waiting);
+      expect(retired.status).toBe(410);
+      expect(retired.body).toEqual(admissionError('ADMISSION_RESET'));
+      const replay = await reserve(done, consumed);
+      expect(replay.status).toBe(201);
+      expect(replay.body.id).toBe(reservation.body.id);
+      // Synthetic PostgreSQL phase: recovering is written directly; the request path is real.
+      await pool.query("UPDATE admission_events SET phase='recovering' WHERE event_id=$1", [
+        fx.eventId,
+      ]);
+      const recovering = await reserve(fresh, {
+        admissionId: randomUUID(),
+        admissionEpoch: current.epoch,
+      });
+      expect(recovering.status).toBe(503);
+      expect(recovering.body).toEqual(admissionError('ADMISSION_RECOVERING', 1000));
+      expect(await fx.state()).toMatchObject({ available: 19, reservations: 1, results: 1 });
+    });
+
+    it('fences an old epoch by the durable policy alone, while Redis still answers ready for it', async () => {
+      fx = await fixture();
+      const [user] = fx.users,
+        admission = await admit(service, fx.eventId, user);
+      // Synthetic barrier: PostgreSQL has left the epoch but Redis was not frozen or retired.
+      await pool.query(
+        'UPDATE admission_events SET generation=generation+1,epoch=$2 WHERE event_id=$1',
+        [fx.eventId, randomUUID()],
+      );
+      const response = await reserve(user, admission);
+      expect(response.status).toBe(410);
+      expect(response.body).toEqual(admissionError('ADMISSION_RESET'));
+      expect(await inspect(fx.eventId, admission.admissionEpoch, admission.admissionId)).toMatchObject({
+        state: 'admitted',
+        phase: 'idle',
+      });
+      expect(await fx.state()).toMatchObject({ available: 20, reservations: 0, results: 0 });
+    });
+
+    it('rejects an unknown subject and an impossible tier before any claim', async () => {
+      fx = await fixture();
+      const [user] = fx.users,
+        ghost = randomUUID();
+      const ghostAdmission = await admit(service, fx.eventId, ghost);
+      const unknown = await request(
+        'POST',
+        '/reservations',
+        { eventId: fx.eventId, userId: ghost, tierId: TIER, quantity: 1, ...ghostAdmission },
+        { authorization: fx.token(ghost) },
+      );
+      expect(unknown.status).toBe(401);
+      expect(unknown.body).toEqual(admissionError('UNAUTHENTICATED'));
+      const admission = await admit(service, fx.eventId, user);
+      const oversized = await reserve(user, admission, { tierId: 't'.repeat(51) });
+      expect(oversized.status).toBe(400);
+      expect(oversized.body).toEqual(admissionError('ADMISSION_INVALID_INPUT'));
+      // Neither request claimed: both admissions are untouched and no result exists.
+      for (const a of [ghostAdmission, admission])
+        expect(await inspect(fx.eventId, a.admissionEpoch, a.admissionId)).toMatchObject({
+          state: 'admitted',
+          phase: 'idle',
+        });
+      expect(await fx.state()).toMatchObject({ available: 20, reservations: 0, results: 0 });
+      expect((await reserve(user, admission)).status).toBe(201);
+    });
+
+    it('bounds lock waits: 409 while the admission is locked, 503 while the event row is, then the same request succeeds', async () => {
+      fx = await fixture();
+      const [user] = fx.users,
+        admission = await admit(service, fx.eventId, user);
+      const holder = await pool.connect();
+      try {
+        // Another request for this admission is still inside its transaction (real lock).
+        await holder.query('BEGIN');
+        await lockAdmission(holder, admission.admissionId);
+        const locked = await reserve(user, admission);
+        expect(locked.status).toBe(409);
+        expect(locked.body).toEqual(admissionError('ADMISSION_IN_PROGRESS'));
+        await holder.query('ROLLBACK');
+        // The event row stays locked past lock_timeout: a transient failure after the claim.
+        await holder.query('BEGIN');
+        await holder.query('SELECT id FROM events WHERE id=$1 FOR UPDATE', [fx.eventId]);
+        const delayed = await reserve(user, admission);
+        expect(delayed.status).toBe(503);
+        expect(delayed.body).toEqual(admissionError('ADMISSION_UNAVAILABLE', 1000));
+        expect(await inspect(fx.eventId, admission.admissionEpoch, admission.admissionId)).toMatchObject({
+          state: 'admitted',
+          phase: 'processing',
+        });
+        expect(await fx.state()).toMatchObject({ available: 20, reservations: 0, results: 0 });
+        await holder.query('ROLLBACK');
+      } finally {
+        await holder.query('ROLLBACK').catch(() => undefined);
+        holder.release();
+      }
+      expect((await reserve(user, admission)).status).toBe(201);
+      expect(await fx.state()).toMatchObject({ available: 19, reservations: 1, results: 1 });
+    });
+
+    it('applies a protection that commits while both purchase paths wait for the event gate', async () => {
+      fx = await fixture(20, false);
+      const [user] = fx.users;
+      const policyReads = jest.spyOn(policy, 'readAdmissionPolicy');
+      const activation = await pool.connect();
+      let pending: Array<ReturnType<typeof reserve>> = [];
+      try {
+        // The contract's activation: exclusive gate and a real UPDATE, not yet committed.
+        await activation.query('BEGIN ISOLATION LEVEL SERIALIZABLE');
+        const pid = (await activation.query('SELECT pg_backend_pid() AS pid')).rows[0].pid;
+        await readAdmissionPolicy(activation, fx.eventId, 'exclusive');
+        await activation.query('UPDATE admission_events SET protected=true WHERE event_id=$1', [
+          fx.eventId,
+        ]);
+        policyReads.mockClear();
+        pending = [reserve(user), checkout(user, randomUUID())];
+        await blocked(pool, pid, 2);
+        await activation.query('COMMIT');
+        for (const response of await Promise.all(pending)) {
+          expect(response.status).toBe(400);
+          expect(response.body).toEqual(admissionError('ADMISSION_INVALID_INPUT'));
+        }
+        // READ COMMITTED reads the new policy after the wait; the SERIALIZABLE checkout fails
+        // its stale snapshot and reads again in a new transaction.
+        expect(policyReads).toHaveBeenCalledTimes(3);
+        expect(await fx.state()).toMatchObject({ available: 20, reservations: 0, orders: 0 });
+      } finally {
+        await activation.query('ROLLBACK').catch(() => undefined);
+        activation.release();
+        await Promise.allSettled(pending);
+      }
+    });
+
+    it('answers 404 when an admission consumed for another event is sent here', async () => {
+      fx = await fixture();
+      const [user] = fx.users,
+        admission = await admit(service, fx.eventId, user);
+      expect((await reserve(user, admission)).status).toBe(201);
+      const other = await fixture(5, false);
+      const response = await reserve(user, admission, { eventId: other.eventId });
+      expect(response.status).toBe(404);
+      expect(response.body).toEqual(admissionError('ADMISSION_NOT_FOUND'));
+      expect(await other.state()).toMatchObject({ available: 5, reservations: 0, results: 0 });
+    });
+
+    it('keeps the limiter outage answer distinct from admission on an exempt reservation checkout', async () => {
+      fx = await fixture();
+      const [user] = fx.users,
+        key = randomUUID();
+      const reservation = await reserve(user, await admit(service, fx.eventId, user));
+      expect(reservation.status).toBe(201);
+      await redis.del(await redis.keys(`peakpass:admission:${fx.eventId}:*`));
+      // Fault injection: the limiter reports Redis unavailable once (fail-closed is the default).
+      jest
+        .spyOn(commands, 'checkRateLimit')
+        .mockResolvedValueOnce({ allowed: false, count: 0, resetAt: 0, redisAvailable: false });
+      const conversion = { reservationId: reservation.body.id };
+      const limited = await checkout(user, key, {}, conversion);
+      expect(limited.status).toBe(503);
+      expect(limited.body).toEqual({
+        error: { code: 'RATE_LIMIT_UNAVAILABLE', message: expect.any(String) },
+      });
+      expect(await fx.state()).toMatchObject({ held: 1, orders: 0 });
+      // Admission exemption is not limiter exemption; once the limiter answers, no queue is needed.
+      expect((await checkout(user, key, {}, conversion)).status).toBe(201);
+      expect(await fx.state()).toMatchObject({ available: 19, held: 0, ordered: 1, results: 1 });
+    });
+  });
+
   describe('Redis finalization and claim reclamation', () => {
     const fingerprintOf = (userId: string, admission: Admission) =>
       admissionFingerprint(
@@ -702,6 +895,22 @@ describe('admission purchase gate on owned PostgreSQL, Redis and loopback HTTP',
       expect(changed.status).toBe(409);
       expect(changed.body).toEqual(admissionError('ADMISSION_REQUEST_MISMATCH'));
       expect(await fx.state()).toMatchObject({ available: 20, reservations: 0, results: 1 });
+    });
+
+    it('leaves a claim of an epoch that PostgreSQL has already left to the reset instead of closing it', async () => {
+      fx = await fixture();
+      const [user] = fx.users,
+        admission = await admit(service, fx.eventId, user);
+      await service.claim(claimOf(user, admission));
+      await pastDeadline(admission);
+      // Synthetic barrier commit: the durable epoch moved on while Redis still holds the claim.
+      await pool.query(
+        'UPDATE admission_events SET generation=generation+1,epoch=$2 WHERE event_id=$1',
+        [fx.eventId, randomUUID()],
+      );
+      await reclaimOverdueClaims(fx.eventId, await overdue());
+      expect((await fx.state()).results).toBe(0);
+      expect(await slots(redis, fx.eventId, admission.admissionEpoch)).toBe(1);
     });
 
     it('keeps a consumer whose snapshot predates the closed commit from occupying', async () => {
