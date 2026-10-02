@@ -76,6 +76,35 @@ interface Call {
   at: number;
 }
 
+interface Purchase {
+  body: unknown;
+  signal: AbortSignal;
+  at: number;
+}
+
+interface PurchaseResult {
+  status: number;
+  data: unknown;
+  body: unknown;
+}
+
+interface Store {
+  get(key: string): string | null;
+  set(key: string, value: string): void;
+  remove(key: string): void;
+  size(): number;
+}
+
+function memoryStore(): Store {
+  const values = new Map<string, string>();
+  return {
+    get: (key) => values.get(key) ?? null,
+    set: (key, value) => void values.set(key, value),
+    remove: (key) => void values.delete(key),
+    size: () => values.size,
+  };
+}
+
 function load(): Api {
   const context = vm.createContext({});
   vm.runInContext(readFileSync('frontend/admission-polling.js', 'utf8'), context, {
@@ -126,6 +155,15 @@ const failure = (status: number, code: string, nextPollAfterMs: number | null = 
   data: { error: { code, message: code }, nextPollAfterMs },
 });
 
+const PURCHASE = Object.freeze({
+  eventId: EVENT,
+  userId: USER_A,
+  quantity: 2,
+  tierId: 'general',
+  admissionId: ADMISSION_A,
+  admissionEpoch: EPOCH_1,
+});
+
 /** A fake clock, fake timers, a fake transport and a fake visibility source for one tab. */
 function tab(api: Api, overrides: Record<string, unknown> = {}) {
   let now = 0;
@@ -135,11 +173,27 @@ function tab(api: Api, overrides: Record<string, unknown> = {}) {
   let maxActive = 0;
   let hidden = false;
   let respond: (call: Call) => Reply | Promise<Reply> = () => ({ status: 0 });
+  let respondPurchase: (purchase: Purchase) => Reply | Promise<Reply> = () => ({ status: 0 });
   const timers = new Map<number, { at: number; run: () => void }>();
   const listeners = new Set<() => void>();
   const calls: Call[] = [];
+  const purchases: Purchase[] = [];
+  const results: PurchaseResult[] = [];
   const views: View[] = [];
+  const pending = (overrides.pending as Store | undefined) ?? memoryStore();
   const flush = () => new Promise<void>((resolve) => setImmediate(resolve));
+  // Counts what the tab has in flight: a request leaves when it settles or is aborted.
+  const track = (signal: AbortSignal, reply: Reply | Promise<Reply>) => {
+    active += 1;
+    maxActive = Math.max(maxActive, active);
+    let open = true;
+    const leave = () => {
+      if (open) active -= 1;
+      open = false;
+    };
+    signal.addEventListener('abort', leave);
+    return Promise.resolve(reply).finally(leave);
+  };
 
   const controller = api.createController({
     userId: USER_A,
@@ -148,16 +202,15 @@ function tab(api: Api, overrides: Record<string, unknown> = {}) {
     transport(request: Omit<Call, 'at'>) {
       const call: Call = { ...request, at: now };
       calls.push(call);
-      active += 1;
-      maxActive = Math.max(maxActive, active);
-      let open = true;
-      const leave = () => {
-        if (open) active -= 1;
-        open = false;
-      };
-      request.signal.addEventListener('abort', leave);
-      return Promise.resolve(respond(call)).finally(leave);
+      return track(request.signal, respond(call));
     },
+    sendPurchase(body: unknown, signal: AbortSignal) {
+      const purchase: Purchase = { body, signal, at: now };
+      purchases.push(purchase);
+      return track(signal, respondPurchase(purchase));
+    },
+    onPurchaseResult: (result: PurchaseResult) => results.push(result),
+    pending,
     onChange: (view: View) => views.push(view),
     now: () => now,
     setTimer(run: () => void, ms: number) {
@@ -182,13 +235,20 @@ function tab(api: Api, overrides: Record<string, unknown> = {}) {
   return {
     controller,
     calls,
+    purchases,
+    results,
+    pending,
     views,
     flush,
     now: () => now,
     times: () => calls.map((call) => call.at),
+    methods: () => calls.map((call) => call.method),
     maxActive: () => maxActive,
     onRequest(handler: (call: Call) => Reply | Promise<Reply>) {
       respond = handler;
+    },
+    onPurchase(handler: (purchase: Purchase) => Reply | Promise<Reply>) {
+      respondPurchase = handler;
     },
     /** The answer of the status API at the current fake time. */
     ok(admission: Snapshot | null, nextPollAfterMs: number | null, epoch = EPOCH_1): Reply {
@@ -620,5 +680,431 @@ describe('polling controller', () => {
     none.setHidden(false);
     await none.advance(30000);
     expect(none.calls).toHaveLength(1);
+  });
+});
+
+describe('join, cancel and purchase', () => {
+  let api: Api;
+  beforeAll(() => {
+    api = load();
+  });
+
+  const admittedEntry = (t: { now(): number }) =>
+    entry('admitted', {
+      position: null,
+      admittedAt: iso(SERVER_T0 + t.now()),
+      expiresAt: iso(SERVER_T0 + t.now() + 30000),
+    });
+  const cancelled = () => entry('cancelled', { reason: 'ADMISSION_CANCELLED' });
+
+  it('repeats a join whose answer was lost with the same key and the epoch read by GET', async () => {
+    const t = tab(api);
+    let posts = 0;
+    t.onRequest((call) => {
+      if (call.method === 'GET') return t.ok(null, null);
+      posts += 1;
+      return posts === 1 ? { status: 0 } : t.ok(entry('waiting'), 5000);
+    });
+    t.controller.start();
+    await t.flush();
+    expect(t.controller.join()).toBe(true);
+    await t.flush();
+    // The answer is unknown. Nothing more is sent inside the backoff, not even on a second click.
+    expect(t.controller.join()).toBe(false);
+    expect(t.controller.view()).toMatchObject({ phase: 'not-joined', notice: 'JOIN_UNCONFIRMED' });
+    await t.advance(1000);
+    expect(t.methods()).toEqual(['GET', 'POST', 'GET']);
+    expect(t.controller.view()).toMatchObject({ phase: 'not-joined', notice: 'JOIN_UNCONFIRMED' });
+    expect(t.controller.join()).toBe(true);
+    await t.flush();
+    expect(t.calls[1].path).toBe(`/events/${EVENT}/admissions`);
+    expect(t.calls[1].body).toEqual({ epoch: EPOCH_1, joinRequestId: 'join-key-1' });
+    expect(t.calls[3].body).toEqual(t.calls[1].body);
+    expect(t.controller.view()).toMatchObject({ phase: 'waiting', notice: null });
+  });
+
+  it('uses a new join key for a new attempt after a finished entry', async () => {
+    const t = tab(api);
+    let current: Snapshot | null = null;
+    t.onRequest((call) => {
+      if (call.method === 'POST') current = entry('waiting');
+      if (call.method === 'DELETE') current = cancelled();
+      return t.ok(current, current?.state === 'waiting' ? 5000 : null);
+    });
+    t.controller.start();
+    await t.flush();
+    expect(t.controller.join()).toBe(true);
+    await t.flush();
+    expect(t.controller.cancel()).toBe(true);
+    await t.flush();
+    expect(t.controller.view().phase).toBe('cancelled');
+    expect(t.controller.join()).toBe(true);
+    await t.flush();
+    const keys = t.calls
+      .filter((call) => call.method === 'POST')
+      .map((call) => (call.body as { joinRequestId: string }).joinRequestId);
+    expect(keys).toEqual(['join-key-1', 'join-key-2']);
+  });
+
+  it('adopts the existing entry when another join key is still active and sends no second POST', async () => {
+    const t = tab(api);
+    const existing = entry('waiting', { admissionId: ADMISSION_B });
+    let refused = false;
+    t.onRequest((call) => {
+      if (call.method === 'GET') return refused ? t.ok(existing, 5000) : t.ok(null, null);
+      refused = true;
+      return {
+        status: 409,
+        data: {
+          error: { code: 'ACTIVE_ADMISSION_EXISTS', message: 'ACTIVE_ADMISSION_EXISTS' },
+          nextPollAfterMs: null,
+          admission: existing,
+        },
+      };
+    });
+    t.controller.start();
+    await t.flush();
+    t.controller.join();
+    await t.flush();
+    expect(t.methods()).toEqual(['GET', 'POST', 'GET']);
+    expect(t.controller.view().phase).toBe('waiting');
+    expect(t.controller.view().admission?.admissionId).toBe(ADMISSION_B);
+    await t.advance(3000);
+    expect(t.methods().filter((method) => method === 'POST')).toHaveLength(1);
+  });
+
+  it('does not join again by itself when the epoch was replaced before the join arrived', async () => {
+    const t = tab(api);
+    let epoch = EPOCH_1;
+    t.onRequest((call) => {
+      if (call.method === 'GET') return t.ok(null, null, epoch);
+      if ((call.body as { epoch: string }).epoch !== epoch) return failure(410, 'ADMISSION_RESET');
+      return { ...t.ok(entry('waiting', { epoch }), 5000, epoch), status: 201 };
+    });
+    t.controller.start();
+    await t.flush();
+    epoch = EPOCH_2;
+    t.controller.join();
+    await t.flush();
+    expect(t.methods()).toEqual(['GET', 'POST', 'GET']);
+    expect(t.controller.view()).toMatchObject({
+      phase: 'not-joined',
+      epoch: EPOCH_2,
+      notice: 'ADMISSION_RESET',
+    });
+    await t.advance(60000);
+    expect(t.methods()).toEqual(['GET', 'POST', 'GET']);
+    t.controller.join();
+    await t.flush();
+    expect(t.calls[3].body).toEqual({ epoch: EPOCH_2, joinRequestId: 'join-key-2' });
+    expect(t.controller.view().phase).toBe('waiting');
+  });
+
+  it('refuses a join while loading, while an entry is active and for an event without a queue', async () => {
+    const loading = tab(api);
+    loading.onRequest(() => new Promise<Reply>(() => undefined));
+    loading.controller.start();
+    await loading.flush();
+    expect(loading.controller.join()).toBe(false);
+
+    const active = tab(api);
+    active.onRequest(() => active.ok(entry('waiting'), 5000));
+    active.controller.start();
+    await active.flush();
+    expect(active.controller.join()).toBe(false);
+
+    const none = tab(api);
+    none.onRequest(() => failure(404, 'ADMISSION_NOT_ENABLED'));
+    none.controller.start();
+    await none.flush();
+    expect(none.controller.join()).toBe(false);
+    expect([...loading.methods(), ...active.methods(), ...none.methods()]).toEqual([
+      'GET',
+      'GET',
+      'GET',
+    ]);
+  });
+
+  it('lets a cancel pre-empt the request in flight and ignores that request when it answers late', async () => {
+    const t = tab(api);
+    const open = deferred<Reply>();
+    t.onRequest((call) => {
+      if (call.method === 'DELETE') return t.ok(cancelled(), null);
+      return t.calls.length === 2 ? open.promise : t.ok(entry('waiting'), 5000);
+    });
+    t.controller.start();
+    await t.advance(1200);
+    expect(t.controller.cancel()).toBe(true);
+    await t.flush();
+    expect(t.calls[1].signal.aborted).toBe(true);
+    expect(t.calls[2]).toMatchObject({
+      method: 'DELETE',
+      path: `/events/${EVENT}/admissions/${ADMISSION_A}`,
+      body: { epoch: EPOCH_1 },
+    });
+    expect(t.controller.view().phase).toBe('cancelled');
+    open.resolve(t.ok(entry('waiting'), 5000));
+    await t.advance(60000);
+    expect(t.controller.view().phase).toBe('cancelled');
+    expect(t.calls).toHaveLength(3);
+    expect(t.maxActive()).toBe(1);
+  });
+
+  it('keeps the newly joined entry when a cancel that timed out answers late (A14)', async () => {
+    const t = tab(api);
+    const lost = deferred<Reply>();
+    let current = entry('waiting');
+    t.onRequest((call) => {
+      if (call.method === 'DELETE') {
+        current = cancelled();
+        return lost.promise;
+      }
+      if (call.method === 'POST')
+        current = entry('waiting', { admissionId: ADMISSION_B, sequence: '40', position: 40 });
+      return t.ok(current, current.state === 'waiting' ? 5000 : null);
+    });
+    t.controller.start();
+    await t.flush();
+    t.controller.cancel();
+    await t.advance(5000);
+    expect(t.controller.view()).toMatchObject({ phase: 'waiting', notice: 'CANCEL_UNCONFIRMED' });
+    await t.advance(1000);
+    expect(t.controller.view()).toMatchObject({ phase: 'cancelled', notice: null });
+    expect(t.controller.join()).toBe(true);
+    await t.flush();
+    expect(t.controller.view().admission?.admissionId).toBe(ADMISSION_B);
+    lost.resolve(t.ok(cancelled(), null));
+    await t.advance(3000);
+    expect(t.controller.view().phase).toBe('waiting');
+    expect(t.controller.view().admission?.admissionId).toBe(ADMISSION_B);
+    expect(t.maxActive()).toBe(1);
+  });
+
+  it('reads the state again when a cancel is refused, without repeating the cancel', async () => {
+    const t = tab(api);
+    let refused = false;
+    t.onRequest((call) => {
+      if (call.method === 'DELETE') {
+        refused = true;
+        return failure(409, 'ADMISSION_IN_PROGRESS');
+      }
+      const admitted = admittedEntry(t);
+      return t.ok(refused ? { ...admitted, phase: 'processing' } : admitted, 1000);
+    });
+    t.controller.start();
+    await t.flush();
+    expect(t.controller.cancel()).toBe(true);
+    await t.flush();
+    expect(t.methods()).toEqual(['GET', 'DELETE', 'GET']);
+    expect(t.controller.view().phase).toBe('processing');
+    expect(t.controller.cancel()).toBe(false);
+  });
+
+  it('sends the purchase once with the body it was given while polling is paused', async () => {
+    const t = tab(api);
+    const answer = deferred<Reply>();
+    let consumed = false;
+    t.onRequest(() =>
+      consumed
+        ? t.ok(
+            entry('consumed', { outcome: { kind: 'reservation', resourceId: 'r-1', code: null } }),
+            null,
+          )
+        : t.ok(admittedEntry(t), 1000),
+    );
+    t.onPurchase(() => answer.promise);
+    t.controller.start();
+    await t.flush();
+    expect(t.controller.purchase({ ...PURCHASE })).toBe(true);
+    await t.advance(3000);
+    expect(t.methods()).toEqual(['GET']);
+    expect(t.purchases).toHaveLength(1);
+    expect(t.purchases[0].body).toEqual(PURCHASE);
+    expect(t.controller.view().purchase).toMatchObject({ status: 'sending', attempts: 1 });
+    expect(t.pending.size()).toBe(1);
+    consumed = true;
+    answer.resolve({ status: 201, data: { id: 'r-1' } });
+    await t.flush();
+    expect(t.results).toEqual([{ status: 201, data: { id: 'r-1' }, body: PURCHASE }]);
+    expect(t.methods()).toEqual(['GET', 'GET']);
+    expect(t.controller.view()).toMatchObject({ phase: 'consumed', purchase: null });
+    expect(t.pending.size()).toBe(0);
+    expect(t.maxActive()).toBe(1);
+  });
+
+  it('repeats an unknown purchase with the identical body, never joins, and stops after four automatic retries', async () => {
+    const t = tab(api);
+    t.onRequest(() => t.ok(admittedEntry(t), 1000));
+    t.onPurchase(() => ({ status: 0 }));
+    t.controller.start();
+    await t.flush();
+    t.controller.purchase({ ...PURCHASE });
+    await t.advance(14999);
+    expect(t.purchases.map((purchase) => purchase.at)).toEqual([0, 1000, 3000, 7000]);
+    expect(t.controller.view().purchase).toMatchObject({ status: 'retrying', attempts: 4 });
+    expect(t.methods()).toEqual(['GET']);
+    await t.advance(1);
+    expect(t.purchases.map((purchase) => purchase.at)).toEqual([0, 1000, 3000, 7000, 15000]);
+    expect(t.purchases.every((purchase) => purchase.body === t.purchases[0].body)).toBe(true);
+    expect(t.purchases[0].body).toEqual(PURCHASE);
+    expect(t.controller.view().purchase).toMatchObject({ status: 'unconfirmed', attempts: 5 });
+    // Polling is back, but nothing joins, cancels or buys again by itself.
+    expect(t.methods()).toEqual(['GET', 'GET']);
+    expect(t.controller.join()).toBe(false);
+    expect(t.controller.cancel()).toBe(false);
+    expect(t.controller.purchase({ ...PURCHASE, quantity: 1 })).toBe(false);
+    await t.advance(5000);
+    expect(t.purchases).toHaveLength(5);
+    expect(t.methods().every((method) => method === 'GET')).toBe(true);
+
+    t.onPurchase(() => ({ status: 201, data: { id: 'r-1' } }));
+    expect(t.controller.retryPurchase()).toBe(true);
+    await t.flush();
+    expect(t.purchases).toHaveLength(6);
+    expect(t.purchases[5].body).toBe(t.purchases[0].body);
+    expect(t.results.map((result) => result.status)).toEqual([201]);
+    expect(t.controller.view().purchase).toBeNull();
+    expect(t.pending.size()).toBe(0);
+    expect(t.maxActive()).toBe(1);
+  });
+
+  it('retries only what a later attempt can outlive and reports every other answer at once', async () => {
+    const transient = tab(api);
+    const replies: Reply[] = [
+      failure(503, 'ADMISSION_UNAVAILABLE', 1000),
+      failure(409, 'ADMISSION_IN_PROGRESS'),
+      { status: 429, data: { error: { code: 'RATE_LIMIT_EXCEEDED' } } },
+      { status: 201, data: { id: 'r-1' } },
+    ];
+    transient.onRequest(() => transient.ok(admittedEntry(transient), 1000));
+    transient.onPurchase(() => replies[transient.purchases.length - 1]);
+    transient.controller.start();
+    await transient.flush();
+    transient.controller.purchase({ ...PURCHASE });
+    await transient.advance(7000);
+    expect(transient.purchases.map((purchase) => purchase.at)).toEqual([0, 1000, 3000, 7000]);
+    expect(transient.results.map((result) => result.status)).toEqual([201]);
+
+    for (const reply of [
+      failure(410, 'ADMISSION_EXPIRED'),
+      failure(409, 'ADMISSION_REQUEST_MISMATCH'),
+      failure(404, 'ADMISSION_NOT_FOUND'),
+      failure(400, 'ADMISSION_INVALID_INPUT'),
+      failure(401, 'UNAUTHENTICATED'),
+      { status: 409, data: { error: { code: 'INSUFFICIENT_INVENTORY' } } },
+    ]) {
+      const t = tab(api);
+      t.onRequest(() => t.ok(admittedEntry(t), 1000));
+      t.onPurchase(() => reply);
+      t.controller.start();
+      await t.flush();
+      t.controller.purchase({ ...PURCHASE });
+      await t.advance(20000);
+      expect(t.purchases).toHaveLength(1);
+      expect(t.results.map((result) => result.status)).toEqual([reply.status]);
+      expect(t.controller.view().purchase).toBeNull();
+      expect(t.methods().every((method) => method === 'GET')).toBe(true);
+    }
+  });
+
+  it('does not hold a purchase back because a status poll failed', async () => {
+    const t = tab(api);
+    t.onRequest(() => (t.calls.length === 1 ? t.ok(admittedEntry(t), 1000) : { status: 0 }));
+    t.onPurchase(() => ({ status: 201, data: { id: 'r-1' } }));
+    t.controller.start();
+    await t.advance(1000);
+    expect(t.controller.view().problem?.kind).toBe('network');
+    // The admission lives 30 s; the backoff of the status API must not cost the user that time.
+    expect(t.controller.cancel()).toBe(false);
+    expect(t.controller.purchase({ ...PURCHASE })).toBe(true);
+    await t.flush();
+    expect(t.results.map((result) => result.status)).toEqual([201]);
+  });
+
+  it('keeps a wait of the status API when it reads the state again after a purchase', async () => {
+    const t = tab(api);
+    t.onRequest(() =>
+      t.calls.length === 2
+        ? failure(503, 'ADMISSION_RECOVERING', 15000)
+        : t.ok(admittedEntry(t), 1000),
+    );
+    t.onPurchase(() => ({ status: 201, data: { id: 'r-1' } }));
+    t.controller.start();
+    await t.advance(1000);
+    expect(t.controller.purchase({ ...PURCHASE })).toBe(true);
+    await t.advance(14999);
+    expect(t.results).toHaveLength(1);
+    expect(t.times()).toEqual([0, 1000]);
+    await t.advance(1);
+    expect(t.times()).toEqual([0, 1000, 16000]);
+  });
+
+  it('gives a purchase 10 s before it counts as unanswered', async () => {
+    const t = tab(api);
+    t.onRequest(() => t.ok(admittedEntry(t), 1000));
+    t.onPurchase(() => new Promise<Reply>(() => undefined));
+    t.controller.start();
+    await t.flush();
+    t.controller.purchase({ ...PURCHASE });
+    await t.advance(10999);
+    expect(t.purchases.map((purchase) => purchase.at)).toEqual([0]);
+    expect(t.purchases[0].signal.aborted).toBe(true);
+    await t.advance(1);
+    expect(t.purchases.map((purchase) => purchase.at)).toEqual([0, 11000]);
+    expect(t.maxActive()).toBe(1);
+  });
+
+  it('refuses a purchase unless the entry is admitted and idle', async () => {
+    for (const admission of [
+      entry('waiting'),
+      entry('admitted', { phase: 'processing', admittedAt: iso(SERVER_T0) }),
+      entry('expired', { reason: 'ADMISSION_EXPIRED' }),
+      null,
+    ]) {
+      const t = tab(api);
+      t.onRequest(() => t.ok(admission, admission?.state === 'expired' ? null : 1000));
+      t.controller.start();
+      await t.flush();
+      expect(t.controller.purchase({ ...PURCHASE })).toBe(false);
+      expect(t.purchases).toHaveLength(0);
+    }
+  });
+
+  it('restores an unresolved purchase after a reload for the same user and event only', async () => {
+    const before = tab(api);
+    before.onRequest(() => before.ok(admittedEntry(before), 1000));
+    before.onPurchase(() => new Promise<Reply>(() => undefined));
+    before.controller.start();
+    await before.flush();
+    before.controller.purchase({ ...PURCHASE });
+    await before.flush();
+    before.controller.dispose();
+    expect(before.pending.size()).toBe(1);
+
+    const stranger = tab(api, { userId: USER_B, pending: before.pending });
+    stranger.onRequest(() => stranger.ok(null, null));
+    stranger.controller.start();
+    await stranger.flush();
+    expect(stranger.controller.view().purchase).toBeNull();
+
+    const after = tab(api, { pending: before.pending });
+    after.onRequest(() =>
+      after.ok(entry('admitted', { phase: 'processing', admittedAt: iso(SERVER_T0) }), 1000),
+    );
+    after.onPurchase(() => ({ status: 201, data: { id: 'r-1' } }));
+    after.controller.start();
+    await after.flush();
+    expect(after.controller.view().purchase).toMatchObject({
+      status: 'unconfirmed',
+      restored: true,
+    });
+    // Nothing is bought again by itself, and nothing joins while the outcome is open.
+    expect(after.purchases).toHaveLength(0);
+    expect(after.controller.join()).toBe(false);
+    expect(after.controller.retryPurchase()).toBe(true);
+    await after.flush();
+    expect(after.purchases[0].body).toEqual(PURCHASE);
+    expect(after.results.map((result) => result.status)).toEqual([201]);
+    expect(after.pending.size()).toBe(0);
   });
 });

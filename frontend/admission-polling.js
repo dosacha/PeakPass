@@ -50,10 +50,14 @@
 
   const noop = () => {};
   const NO_RESPONSE = Object.freeze({ status: 0, data: null, retryAfterMs: null });
+  // A join is an explicit new attempt, so it is possible only when no entry is active.
+  const JOINABLE = Object.freeze(["not-joined", "reset", "consumed", "cancelled", "expired"]);
   const codeOf = (response) =>
     (response.data && response.data.error && response.data.error.code) || null;
   const phaseOf = (admission) =>
     admission.state === "admitted" && admission.phase !== "idle" ? "processing" : admission.state;
+  // Not decided, or not decided yet: the same request may be sent again.
+  const undecided = (status) => status === 0 || status === 429 || status >= 500;
 
   // A status body is usable when it is about this event and its admission is of the queue epoch.
   function usable(data, eventId) {
@@ -66,16 +70,23 @@
 
   // One controller serves one context: one user on one event against one API base. The caller
   // disposes it and creates another when any of those changes, so a response of an earlier
-  // context has nowhere to land. Within a context at most one request is in flight.
+  // context has nowhere to land. Within a context at most one request is in flight, whether it
+  // is a status poll, a join, a cancel or a purchase.
+  //
+  // The server is the only authority. Nothing here joins, or buys with another identity, as a
+  // reaction to a response: join() and purchase() run only when the caller calls them.
   function createController(options) {
-    const { eventId, transport, visibility } = options;
+    const { userId, eventId, transport, sendPurchase, visibility, uuid } = options;
     const onChange = options.onChange || noop;
+    const onPurchaseResult = options.onPurchaseResult || noop;
+    const pending = options.pending || null;
     const now = options.now || (() => root.performance.now());
     const setTimer = options.setTimer || ((run, ms) => root.setTimeout(run, ms));
     const clearTimer = options.clearTimer || ((id) => root.clearTimeout(id));
     const random = options.random || Math.random;
     const Abort = options.AbortController || root.AbortController;
     const path = "/events/" + eventId + "/admissions";
+    const pendingKey = userId + ":" + eventId;
 
     let mode = options.mode === "fixed" ? "fixed" : "adaptive";
     let started = false;
@@ -93,6 +104,9 @@
     let phase = "loading";
     let problem = null;
     let notice = null;
+    let busy = null; // "join" | "cancel" while that request is in flight
+    let intent = null; // the join key of one explicit attempt, bound to its epoch
+    let purchase = null; // the frozen purchase request while its outcome is open
     let resetPending = false;
     let deadlineAt = null;
     let unsubscribe = noop;
@@ -104,8 +118,12 @@
       admission,
       epoch,
       mode,
-      busy: null,
-      purchase: null,
+      busy,
+      purchase: purchase && {
+        status: purchase.status,
+        attempts: purchase.attempts,
+        restored: purchase.restored,
+      },
       deadlineAt,
       polls,
     });
@@ -113,6 +131,10 @@
       if (!disposed) onChange(view());
     };
     const draw = () => 2 * random() - 1;
+    const purchasing = () => purchase !== null && purchase.status !== "unconfirmed";
+    const idle = () => started && !disposed && !busy && !purchase;
+    // A join or cancel is a request to the queue API and respects its error wait.
+    const ready = () => idle() && notBefore <= now();
 
     // `done` runs only for the request that is still the current one. A request that timed
     // out, was pre-empted or belongs to a disposed controller never reaches it.
@@ -161,15 +183,30 @@
       }, delayMs);
     }
 
+    // An explicit action takes the place of a status poll, in flight or scheduled.
+    function preempt() {
+      drop();
+      unschedule();
+    }
+
     function poll() {
-      if (disposed || flight) return;
+      if (disposed || flight || purchasing()) return;
       unschedule();
       polls += 1;
       send(
         POLICY.timeoutMs,
         (signal) => transport({ method: "GET", path: path + "/me", signal }),
-        onStatus,
+        (response, timing) => {
+          onStatus(response, timing);
+          emit();
+        },
       );
+    }
+
+    // Reads the state again as soon as the queue API may be asked.
+    function refresh() {
+      if (notBefore > now()) schedule(notBefore - now(), "retry");
+      else poll();
     }
 
     function recovered() {
@@ -180,6 +217,7 @@
 
     function apply(data, timing) {
       const next = data.admission;
+      const before = phase;
       // The previous epoch is gone for good and its order is not restored.
       if (epoch !== null && data.queue.epoch !== epoch) {
         if (admission && (admission.state === "waiting" || admission.state === "admitted"))
@@ -189,12 +227,31 @@
       admission = next;
       if (next) resetPending = false;
       phase = next ? phaseOf(next) : resetPending ? "reset" : "not-joined";
+      if (phase !== before) notice = null;
       // The admission TTL on the local clock, without trusting the local wall time.
       const left =
         phase === "admitted" ? Date.parse(next.expiresAt) - Date.parse(data.serverTime) : NaN;
       deadlineAt = Number.isFinite(left) ? timing.tRecv + left : null;
     }
 
+    // A normal answer of the status, join or cancel API.
+    function accept(data, timing) {
+      recovered();
+      apply(data, timing);
+      if (data.nextPollAfterMs === null) return;
+      const hidden = visibility.hidden();
+      const u = mode === "adaptive" && !hidden ? draw() : 0;
+      schedule(successDelay({ mode, hidden, baseMs: data.nextPollAfterMs, u }), "timer");
+    }
+
+    function unqueued() {
+      recovered();
+      admission = null;
+      deadlineAt = null;
+      phase = "not-enabled";
+    }
+
+    // Keeps every identity and reads the state again after the wait.
     function fail(response) {
       failures += 1;
       const delay = failureDelay({
@@ -215,27 +272,179 @@
 
     function onStatus(response, timing) {
       const { status, data } = response;
-      if (status === 200 && usable(data, eventId)) {
-        recovered();
-        apply(data, timing);
-        if (data.nextPollAfterMs !== null) {
-          const hidden = visibility.hidden();
-          const u = mode === "adaptive" && !hidden ? draw() : 0;
-          schedule(successDelay({ mode, hidden, baseMs: data.nextPollAfterMs, u }), "timer");
-        }
-      } else if (status === 404) {
-        recovered();
-        admission = null;
-        deadlineAt = null;
-        phase = "not-enabled";
-      } else if (status === 401) {
+      if (status === 200 && usable(data, eventId)) accept(data, timing);
+      else if (status === 404) unqueued();
+      else if (status === 401)
         problem = { kind: "unauthenticated", code: codeOf(response), retryAt: null };
-      } else if (status === 0 || status === 200 || status === 429 || status >= 500) {
-        fail(response);
-      } else {
-        problem = { kind: "invalid", code: codeOf(response), retryAt: null };
+      else if (status === 200 || undecided(status)) fail(response);
+      else problem = { kind: "invalid", code: codeOf(response), retryAt: null };
+    }
+
+    // A join or cancel that did not succeed. Returns whether the answer is final: an answer
+    // that never came, 429 and 5xx keep the identity and wait, anything else is decided and
+    // the state is read again at once.
+    function refused(response, unconfirmed) {
+      const { status } = response;
+      if (status === 401) {
+        problem = { kind: "unauthenticated", code: codeOf(response), retryAt: null };
+        return true;
       }
+      if (undecided(status) || status === 200 || status === 201) {
+        notice = status === 429 ? codeOf(response) : unconfirmed;
+        fail(response);
+        return false;
+      }
+      notice = codeOf(response);
+      refresh();
+      return true;
+    }
+
+    function mutate(kind, request, done) {
+      preempt();
+      busy = kind;
+      notice = null;
       emit();
+      send(
+        POLICY.timeoutMs,
+        (signal) => transport(Object.assign({ signal }, request)),
+        (response, timing) => {
+          busy = null;
+          done(response, timing);
+          emit();
+        },
+      );
+    }
+
+    function join() {
+      if (!ready() || epoch === null || !JOINABLE.includes(phase)) return false;
+      // The key belongs to one attempt in one epoch: a retry of that attempt repeats it, a new
+      // attempt after a finished entry or in another epoch gets a new one.
+      if (!intent || intent.epoch !== epoch) intent = { epoch, joinRequestId: uuid() };
+      const body = { epoch: intent.epoch, joinRequestId: intent.joinRequestId };
+      mutate("join", { method: "POST", path, body }, (response, timing) => {
+        const { status, data } = response;
+        if ((status === 200 || status === 201) && usable(data, eventId)) {
+          intent = null;
+          accept(data, timing);
+        } else if (status === 404) {
+          intent = null;
+          unqueued();
+        } else if (refused(response, "JOIN_UNCONFIRMED")) {
+          intent = null;
+        }
+      });
+      return true;
+    }
+
+    function cancel() {
+      if (!ready() || !admission || (phase !== "waiting" && phase !== "admitted")) return false;
+      // The entry is named by the id it has now; an answer for it is never applied to another.
+      const target = admission.admissionId;
+      const request = {
+        method: "DELETE",
+        path: path + "/" + target,
+        body: { epoch: admission.epoch },
+      };
+      mutate("cancel", request, (response, timing) => {
+        const { status, data } = response;
+        const same = status === 200 && usable(data, eventId) && data.admission !== null;
+        if (same && data.admission.admissionId === target) accept(data, timing);
+        else refused(response, "CANCEL_UNCONFIRMED");
+      });
+      return true;
+    }
+
+    // One attempt of the frozen purchase. Polling stays paused until the outcome is known or
+    // the automatic retries are used up.
+    function attempt() {
+      purchase.status = "sending";
+      purchase.attempts += 1;
+      emit();
+      send(
+        POLICY.purchaseTimeoutMs,
+        (signal) => sendPurchase(purchase.body, signal),
+        (response) => {
+          const { status, data } = response;
+          if (undecided(status) || codeOf(response) === "ADMISSION_IN_PROGRESS") {
+            if (purchase.auto >= POLICY.purchaseAutoRetries) {
+              purchase.status = "unconfirmed";
+              emit();
+              refresh();
+              return;
+            }
+            purchase.auto += 1;
+            purchase.status = "retrying";
+            const delay = failureDelay({
+              failures: purchase.auto,
+              hidden: false,
+              serverMinMs: data && data.nextPollAfterMs,
+              retryAfterMs: response.retryAfterMs,
+              u: draw(),
+            });
+            purchase.timer = setTimer(() => {
+              purchase.timer = null;
+              attempt();
+            }, delay);
+            emit();
+            return;
+          }
+          const body = purchase.body;
+          purchase = null;
+          if (pending) pending.remove(pendingKey);
+          onPurchaseResult({ status, data, body });
+          emit();
+          refresh();
+        },
+      );
+    }
+
+    // The purchase goes to another API and the admission lives only 30 s, so a backoff of the
+    // status poll does not hold it back.
+    function startPurchase(body) {
+      if (!idle() || phase !== "admitted") return false;
+      purchase = {
+        body: Object.freeze(Object.assign({}, body)),
+        status: "sending",
+        attempts: 0,
+        auto: 0,
+        restored: false,
+        timer: null,
+      };
+      // The template of the request, without a token, so that the same request can be
+      // repeated after a reload.
+      if (pending) pending.set(pendingKey, JSON.stringify({ body: purchase.body }));
+      preempt();
+      notice = null;
+      attempt();
+      return true;
+    }
+
+    function retryPurchase() {
+      if (!started || disposed || busy || !purchase || purchase.status !== "unconfirmed")
+        return false;
+      preempt();
+      purchase.auto = 0;
+      attempt();
+      return true;
+    }
+
+    function restorePurchase() {
+      if (!pending) return;
+      try {
+        const saved = JSON.parse(pending.get(pendingKey));
+        const body = saved && saved.body;
+        if (!body || body.userId !== userId || body.eventId !== eventId) return;
+        purchase = {
+          body: Object.freeze(body),
+          status: "unconfirmed",
+          attempts: 0,
+          auto: POLICY.purchaseAutoRetries,
+          restored: true,
+          timer: null,
+        };
+      } catch (error) {
+        // An unreadable record is not a purchase.
+      }
     }
 
     function onVisibility() {
@@ -248,7 +457,7 @@
       }
       // One request on return. An error wait keeps its time, and an event without a queue is
       // not probed again.
-      if (flight || phase === "not-enabled" || notBefore > now()) return;
+      if (flight || purchasing() || phase === "not-enabled" || notBefore > now()) return;
       schedule(0, "return");
     }
 
@@ -256,6 +465,7 @@
       if (started || disposed) return;
       started = true;
       unsubscribe = visibility.subscribe(onVisibility);
+      restorePurchase();
       emit();
       poll();
     }
@@ -271,10 +481,11 @@
       disposed = true;
       drop();
       unschedule();
+      if (purchase && purchase.timer !== null) clearTimer(purchase.timer);
       unsubscribe();
     }
 
-    return { start, setMode, view, dispose };
+    return { start, join, cancel, purchase: startPurchase, retryPurchase, setMode, view, dispose };
   }
 
   const api = { POLICY, successDelay, failureDelay, parseRetryAfter, createController };
