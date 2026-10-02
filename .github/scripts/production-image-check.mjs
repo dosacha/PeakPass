@@ -53,8 +53,8 @@ try {
   }
   console.log(docker(['run', '--rm', ...network, ...containerEnv, image, 'node', 'dist/infra/migrations/runner.js', 'up']));
   const applied = await history();
-  assert.deepEqual(applied.map((row) => row.version), [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12], 'Production image must apply migrations 001–012');
-  for (const name of ['users', 'events', 'reservations', 'orders', 'tickets', 'payment_records', 'admission_events']) {
+  assert.deepEqual(applied.map((row) => row.version), [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13], 'Production image must apply migrations 001–013');
+  for (const name of ['users', 'events', 'reservations', 'orders', 'tickets', 'payment_records', 'admission_events', 'admission_results']) {
     assert.equal((await pool.query('SELECT to_regclass($1) AS name', [`public.${name}`])).rows[0].name, name);
   }
   const rerun = docker(['run', '--rm', ...network, ...containerEnv, image, 'node', 'dist/infra/migrations/runner.js', 'up']);
@@ -88,7 +88,7 @@ try {
   });
   assert.equal(response.status, 200);
   assert.deepEqual(await response.json(), { data: { myOrders: [] } });
-  console.log('PASS: migrations 001–012, unchanged rerun, ready, signed GraphQL auth smoke');
+  console.log('PASS: migrations 001–013, unchanged rerun, ready, signed GraphQL auth smoke');
 } finally {
   if (container) docker(['stop', container]);
   await pool.end();

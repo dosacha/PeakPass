@@ -2,7 +2,7 @@ import 'dotenv/config';
 import { randomUUID } from 'crypto';
 import type { Pool } from 'pg';
 import type { FastifyInstance } from 'fastify';
-import type { PurchaseFixture } from './admission-purchase-fixture';
+import type { PurchaseFixture, Json } from './admission-purchase-fixture';
 
 // ENABLE_ADMISSION keeps its default (false): this instance has the feature off.
 process.env.RATE_LIMIT_MAX_REQUESTS = '100000';
@@ -58,7 +58,7 @@ describe('protected event on an instance with admission off (actual PG/Redis/HTT
         ...fields,
       }),
     });
-    return { status: response.status, body: (await response.json()) as Record<string, any> };
+    return { status: response.status, body: (await response.json()) as Json };
   }
   const reserve = (userId: string, fields: object = {}) => post('/reservations', userId, fields);
   const checkout = (userId: string, key: string, fields: object = {}) =>

@@ -30,6 +30,7 @@ import {
   age,
   slots,
   TIER,
+  Json,
 } from './admission-purchase-fixture';
 
 jest.mock('@/infra/config', () => {
@@ -101,7 +102,7 @@ describe('admission purchase gate on owned PostgreSQL, Redis and loopback HTTP',
       headers: { 'content-type': 'application/json', ...headers },
       body: JSON.stringify(body),
     });
-    return { status: response.status, body: (await response.json()) as any };
+    return { status: response.status, body: (await response.json()) as Json };
   }
   const reserve = (userId: string, admission: Partial<Admission> = {}, changes: object = {}) =>
     request(

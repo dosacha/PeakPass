@@ -9,6 +9,8 @@ import type { initRedis } from '@/infra/redis/client';
 
 type Redis = Awaited<ReturnType<typeof initRedis>>;
 export const TIER = 'general';
+// HTTP bodies in these tests are read loosely and asserted field by field.
+export type Json = Record<string, any>;
 export const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
 // The contract's explicit transition (exclusive gate, real UPDATE). P5 adds no activation route.

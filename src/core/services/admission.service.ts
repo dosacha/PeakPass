@@ -412,10 +412,15 @@ export class AdmissionService {
 }
 export const admissionService = new AdmissionService();
 
-export async function assertP4AdmissionStartup(): Promise<void> {
+/**
+ * P5 gates both new seat-acquisition paths, so a protected policy no longer blocks startup. What
+ * this version needs instead is the durable result ledger: without migration 013 a protected
+ * purchase could not commit its result, so the product refuses to start.
+ */
+export async function assertAdmissionLedger(): Promise<void> {
   const result = await getPostgresPool().query(
-    'SELECT event_id FROM admission_events WHERE protected LIMIT 1',
+    "SELECT to_regclass('public.admission_results') AS ledger",
   );
-  if (result.rowCount)
-    throw new Error('P4 cannot serve a protected event before the P5 purchase gate is installed');
+  if (!result.rows[0].ledger)
+    throw new Error('admission_results is missing: apply migration 013 before serving purchases');
 }
