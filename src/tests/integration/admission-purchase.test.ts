@@ -439,11 +439,18 @@ describe('admission purchase gate on owned PostgreSQL, Redis and loopback HTTP',
         admission = await admit(service, fx.eventId, user);
       // Synthetic loss of the control key only; the purchase must not re-read policy elsewhere.
       await redis.del(admissionKeys(fx.eventId, admission.admissionEpoch)[0]);
-      const connect = jest.spyOn(pool, 'connect');
+      const acquire = pool.connect.bind(pool) as (...args: unknown[]) => unknown;
+      const busyAtConnect: number[] = [];
+      jest.spyOn(pool, 'connect').mockImplementation(((...args: unknown[]) => {
+        busyAtConnect.push(pool.totalCount - pool.idleCount);
+        return acquire(...args);
+      }) as never);
       const response = await reserve(user, admission);
       expect(response.status).toBe(503);
       expect(response.body).toEqual(admissionError('ADMISSION_RECOVERING', 1000));
-      expect(connect).toHaveBeenCalledTimes(1);
+      // The purchase transaction, then the ledger read that confirms the refusal after that
+      // transaction ended: no connection is taken while another is checked out.
+      expect(busyAtConnect).toEqual([0, 0]);
       expect(await fx.state()).toMatchObject({ available: 20, reservations: 0, results: 0 });
     });
 
@@ -859,6 +866,18 @@ describe('admission purchase gate on owned PostgreSQL, Redis and loopback HTTP',
         });
         expect(await fx.state()).toMatchObject({ available: 20, reservations: 0, results: 0 });
         await holder.query('ROLLBACK');
+        // An activation or reset holds the exclusive event gate: the very first wait of the
+        // purchase is bounded as well, instead of keeping its connection until the gate opens.
+        await holder.query('BEGIN');
+        await readAdmissionPolicy(holder, fx.eventId, 'exclusive');
+        const gated = reserve(user, admission);
+        const answer = await Promise.race([gated, sleep(3000).then(() => 'still waiting')]);
+        await holder.query('ROLLBACK');
+        await gated;
+        expect(answer).toMatchObject({
+          status: 503,
+          body: admissionError('ADMISSION_UNAVAILABLE', 1000),
+        });
       } finally {
         await holder.query('ROLLBACK').catch(() => undefined);
         holder.release();
@@ -960,6 +979,30 @@ describe('admission purchase gate on owned PostgreSQL, Redis and loopback HTTP',
       expect(stolen.status).toBe(404);
       expect(stolen.body).toEqual(admissionError('ADMISSION_NOT_FOUND'));
       expect(await fx.state()).toMatchObject({ available: 17, held: 2, ordered: 1, results: 2 });
+    });
+
+    it('replays an existing order while another request holds the lock of the submitted admission', async () => {
+      fx = await fixture(20, false);
+      const [user] = fx.users,
+        orderKey = randomUUID();
+      const legacy = await checkout(user, orderKey);
+      expect(legacy.status).toBe(201);
+      await setProtected(fx.eventId, true);
+      await service.recover(fx.eventId);
+      const admission = await admit(service, fx.eventId, user);
+      const holder = await pool.connect();
+      try {
+        // Another request for this admission is still inside its transaction (real lock).
+        await holder.query('BEGIN');
+        await lockAdmission(holder, admission.admissionId);
+        const replay = await checkout(user, orderKey, admission);
+        expect(replay.status).toBe(201);
+        expect(replay.body.order.id).toBe(legacy.body.order.id);
+      } finally {
+        await holder.query('ROLLBACK').catch(() => undefined);
+        holder.release();
+      }
+      expect(await fx.state()).toMatchObject({ available: 19, ordered: 1, results: 0 });
     });
 
     it('answers a stranger the existing reservation conflict whether or not that reservation has an admission link', async () => {
@@ -1096,7 +1139,11 @@ describe('admission purchase gate on owned PostgreSQL, Redis and loopback HTTP',
         expect(await slots(redis, fx.eventId, epoch)).toBe(1);
         const replay = await reserve(user, admission);
         expect(replay.status).toBe(response.status);
-        expect(replay.body.id).toBe(response.body.id);
+        if (kind === 'consumed') expect(replay.body.id).toBe(response.body.id);
+        else {
+          expect(response.body.error.code).toBe('INSUFFICIENT_INVENTORY');
+          expect(replay.body.error).toEqual(response.body.error);
+        }
         expect(await slots(redis, fx.eventId, epoch)).toBe(1);
         // Synthetic deadline passage, then the real maintenance tick with the reclaimer.
         await pastDeadline(admission);
@@ -1239,6 +1286,77 @@ describe('admission purchase gate on owned PostgreSQL, Redis and loopback HTTP',
         reservations: 1,
         results: 2,
       });
+    });
+
+    it('replays the committed result when Redis refuses the claim of a request whose snapshot predates it', async () => {
+      fx = await fixture();
+      const [user] = fx.users,
+        admission = await admit(service, fx.eventId, user);
+      // Injected: the first request is held at its claim, inside its transaction and holding the
+      // admission lock; its Redis finalization is lost, after which this instance refuses claims
+      // until it re-verifies Redis; the second request's claim is held until that loss.
+      // PostgreSQL locks, snapshots and commits are real.
+      let resume!: () => void;
+      const held = new Promise<void>((resolve) => (resume = resolve));
+      let reached!: () => void;
+      const claiming = new Promise<void>((resolve) => (reached = resolve));
+      let lose!: () => void;
+      const lost = new Promise<void>((resolve) => (lose = resolve));
+      const claim = service.claim.bind(service);
+      const claims = jest
+        .spyOn(service, 'claim')
+        .mockImplementationOnce(async (input) => {
+          reached();
+          await held;
+          return claim(input);
+        })
+        .mockImplementationOnce(async (input) => {
+          await lost;
+          return claim(input);
+        });
+      const complete = service.complete.bind(service);
+      jest.spyOn(service, 'complete').mockImplementationOnce(async (...args) => {
+        try {
+          return await complete(...args);
+        } finally {
+          lose();
+        }
+      });
+      const evaluate = redis.eval.bind(redis) as (...args: unknown[]) => Promise<unknown>;
+      jest
+        .spyOn(redis, 'eval')
+        .mockImplementation(((script: string, options: { arguments: string[] }) =>
+          options.arguments[0] === 'complete'
+            ? Promise.reject(new Error('Socket closed unexpectedly'))
+            : evaluate(script, options)) as never);
+      try {
+        const first = reserve(user, admission);
+        await claiming;
+        const holder = (
+          await pool.query(
+            `SELECT pid FROM pg_stat_activity WHERE datname=current_database()
+            AND state='idle in transaction' AND query LIKE 'SELECT 1 FROM users%'`,
+          )
+        ).rows[0].pid;
+        // The second request takes its SERIALIZABLE snapshot now and waits for the admission lock.
+        const second = reserve(user, admission);
+        await blocked(pool, holder);
+        resume();
+        const responses = [await first, await second.finally(lose)];
+        // The refusal was decided on a snapshot that could not see the committed reservation. It is
+        // not the answer: the result is read again in a fresh transaction and replayed.
+        expect(claims).toHaveBeenCalledTimes(2);
+        for (const response of responses) {
+          expect(response.status).toBe(201);
+          expect(response.body.id).toBe(responses[0].body.id);
+        }
+        expect(await slots(redis, fx.eventId, admission.admissionEpoch)).toBe(1);
+        expect(await fx.state()).toMatchObject({ available: 19, reservations: 1, results: 1 });
+      } finally {
+        resume();
+        lose();
+        await service.verifyEnvironment();
+      }
     });
 
     it('keeps a late request that waited behind the reclaimer from occupying after the closed commit', async () => {

@@ -11,6 +11,7 @@ import { getConfig } from '@/infra/config';
 import { getLogger } from '@/infra/logger';
 import {
   isRetriableTransactionError,
+  query,
   serializableTransactionWithRetry,
   transaction,
 } from '@/infra/postgres/client';
@@ -103,6 +104,8 @@ export const storedRejection = (result: AdmissionResult): AppError =>
 // Contract §5: bounds for a transaction that consumes or reclaims an admission.
 const TIMEOUTS = `SET LOCAL statement_timeout = '5s'; SET LOCAL lock_timeout = '1s';
   SET LOCAL idle_in_transaction_session_timeout = '10s'`;
+const NO_TIMEOUTS = `SET LOCAL statement_timeout = DEFAULT; SET LOCAL lock_timeout = DEFAULT;
+  SET LOCAL idle_in_transaction_session_timeout = DEFAULT`;
 
 export interface AdmissionGate {
   policy: AdmissionPolicy;
@@ -113,17 +116,20 @@ export interface AdmissionGate {
 /**
  * Step 2 and the read of step 3: shared event gate, policy locking read, admission lock, ledger
  * row. Nothing here looks at Redis, the epoch or the feature flag, so a committed result is
- * recovered whatever happened to the queue since. Nothing is rejected here either: the replay of
- * an existing order is exempt from admission and must not depend on the submitted admission.
+ * recovered whatever happened to the queue since. Only a new-occupation candidate comes here: a
+ * checkout whose key already has an order is a replay and never waits for these locks.
  */
 export async function openAdmissionGate(
   client: PoolClient,
   command: PurchaseCommand,
 ): Promise<AdmissionGate> {
-  const policy = await readAdmissionPolicy(client, command.eventId);
   const admission = command.admission;
+  // Before the first wait: the event gate, the policy ensure and its locking read are bounded
+  // too. An unprotected event keeps the existing flow, so the bounds are lifted again for it.
+  if (admission) await client.query(TIMEOUTS);
+  const policy = await readAdmissionPolicy(client, command.eventId);
   if (!admission) return { policy, prior: null };
-  if (policy.protected) await client.query(TIMEOUTS);
+  if (!policy.protected) await client.query(NO_TIMEOUTS);
   try {
     await lockAdmission(client, admission.admissionId);
   } catch (error) {
@@ -201,22 +207,28 @@ export async function occupyThroughAdmission<T>(
   // in Redis, and a NUL would make the rejection text of the unknown tier impossible to store.
   if (!admission || command.tierId.length > 50 || command.tierId.includes('\u0000'))
     throw new AdmissionError('ADMISSION_INVALID_INPUT', 400);
-  // An instance with the feature off never opens a protected event; ENV is not a release.
-  if (!getConfig().ENABLE_ADMISSION) throw new AdmissionError('ADMISSION_UNAVAILABLE', 503, 1000);
-  if (policy.phase !== 'open') throw new AdmissionError('ADMISSION_RECOVERING', 503, 1000);
-  if (policy.epoch !== admission.epoch) throw new AdmissionError('ADMISSION_RESET', 410);
-  // The ledger references the user: a subject without a row could claim but never be closed.
-  if (!(await client.query('SELECT 1 FROM users WHERE id = $1', [command.userId])).rowCount)
-    throw new AdmissionError('UNAUTHENTICATED', 401);
-
   const fingerprint = admissionFingerprint(command);
-  const claim = await admissionService.claim({
-    eventId: command.eventId,
-    userId: command.userId,
-    admissionId: admission.admissionId,
-    epoch: admission.epoch,
-    fingerprint,
-  });
+  let claim: AdmissionClaim;
+  try {
+    // An instance with the feature off never opens a protected event; ENV is not a release.
+    if (!getConfig().ENABLE_ADMISSION) throw new AdmissionError('ADMISSION_UNAVAILABLE', 503, 1000);
+    if (policy.phase !== 'open') throw new AdmissionError('ADMISSION_RECOVERING', 503, 1000);
+    if (policy.epoch !== admission.epoch) throw new AdmissionError('ADMISSION_RESET', 410);
+    // The ledger references the user: a subject without a row could claim but never be closed.
+    if (!(await client.query('SELECT 1 FROM users WHERE id = $1', [command.userId])).rowCount)
+      throw new AdmissionError('UNAUTHENTICATED', 401);
+    claim = await admissionService.claim({
+      eventId: command.eventId,
+      userId: command.userId,
+      admissionId: admission.admissionId,
+      epoch: admission.epoch,
+      fingerprint,
+    });
+  } catch (error) {
+    // Decided without a ledger row, on a snapshot that may predate the admission lock.
+    if (error instanceof AdmissionError) unconfirmed.add(error);
+    throw error;
+  }
   await client.query('SAVEPOINT admission_occupation');
   let occupied: { value: T; targetId: string };
   try {
@@ -284,6 +296,13 @@ export async function occupyThroughAdmission<T>(
   };
 }
 
+/**
+ * Refusals of a new occupation. A SERIALIZABLE snapshot is not renewed by the wait for the
+ * admission lock, so the result of the same request may be committed and still invisible to the
+ * transaction that refused. `purchaseTransaction` looks again before such a refusal is the answer.
+ */
+const unconfirmed = new WeakSet<AdmissionError>();
+
 /** A concurrent transaction committed this admission's result after our snapshot was taken. */
 export function isAdmissionResultRace(error: unknown): boolean {
   const e = error as { code?: string; constraint?: string };
@@ -332,8 +351,25 @@ export async function purchaseTransaction<T>(
     }
   };
   try {
-    if (!options.readCommitted)
-      return await serializableTransactionWithRetry(tracked, { retryIf: isPurchaseRace });
+    if (!options.readCommitted) {
+      const run = () => serializableTransactionWithRetry(tracked, { retryIf: isPurchaseRace });
+      try {
+        return await run();
+      } catch (error) {
+        // The refusing transaction is over, so this read is no second connection inside it. With
+        // no committed row the refusal stands; otherwise a fresh transaction judges and replays it.
+        if (
+          !unconfirmed.has(error as AdmissionError) ||
+          !(
+            await query('SELECT 1 FROM admission_results WHERE admission_id = $1', [
+              options.admission!.admissionId,
+            ])
+          ).rowCount
+        )
+          throw error;
+        return await run();
+      }
+    }
     try {
       return await transaction(tracked);
     } catch (error) {

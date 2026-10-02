@@ -80,16 +80,23 @@ export class CheckoutService {
   ): Promise<CheckoutOutcome> {
     // reservation 없는 checkout은 신규 좌석 점유 후보다 (admission-v1 §5).
     //
-    // 잠금 순서: event gate → policy → admission → checkout-key → 기존 row. 그래서 gate와
-    // 제출된 admission의 영속 결과 조회가 아래 checkout-key 잠금보다 먼저 온다. 이 단계는
-    // 읽기만 하고 아무것도 거절하지 않는다. 기존 주문 replay는 admission 면제 경로라서
-    // 제출된 admission이 어떤 상태든 영향을 받지 않아야 하기 때문이다.
+    // 이 key의 주문이 이미 있으면 기존 주문 replay다. replay는 admission 면제 경로라서 제출된
+    // admission의 상태뿐 아니라 그 잠금에도 의존하면 안 된다. 그래서 gate보다 먼저 잠금 없이
+    // 조회하고, 주문이 있으면 gate와 admission 잠금을 얻지 않는다.
+    //
+    // 주문이 없을 때만 신규 점유 후보다. 잠금 순서: event gate → policy → admission →
+    // checkout-key → 기존 row. gate와 제출된 admission의 영속 결과 조회가 아래 checkout-key
+    // 잠금보다 먼저 온다.
     //
     // reservationId가 있는 checkout은 새 좌석을 점유하지 않으므로 gate를 타지 않고 기존
     // 잠금 순서와 응답을 유지한다. 무효한 reservation은 아래에서 오류로 끝나며 직접 점유로
     // 넘어가지 않는다.
     const command = purchaseCommand('direct-checkout', input, input.idempotencyKey, admission);
-    const gate = input.reservationId ? null : await openAdmissionGate(client, command);
+    const keyedOrder = input.reservationId
+      ? null
+      : await this.orderService.getOrderByIdempotencyKey(input.idempotencyKey, client);
+    const gate =
+      input.reservationId || keyedOrder ? null : await openAdmissionGate(client, command);
 
     // 동일 idempotency_key 동시 진입 race를 차단한다.
     //
@@ -111,10 +118,9 @@ export class CheckoutService {
       [input.idempotencyKey],
     );
 
-    const existingOrder = await this.orderService.getOrderByIdempotencyKey(
-      input.idempotencyKey,
-      client,
-    );
+    const existingOrder =
+      keyedOrder ??
+      (await this.orderService.getOrderByIdempotencyKey(input.idempotencyKey, client));
     if (existingOrder) {
       // Idempotency-Key 재사용 시 payload fingerprint 검증.
       //
