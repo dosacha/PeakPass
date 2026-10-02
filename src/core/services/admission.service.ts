@@ -140,12 +140,18 @@ export class AdmissionService {
     operation: Parameters<typeof runAdmission>[2],
     input: Record<string, unknown>,
     epoch?: string,
+    // P5's claim runs inside the purchase transaction, whose client already holds the event gate
+    // and has read the policy. Internal operations must not classify on a second connection.
+    classify = true,
   ) {
     try {
       // A present control is authoritative here. The coordinator retires it once its policy is
       // released or its event is gone; this path never reads PG for a published namespace.
       const control = await this.control(eventId);
-      if (!control) return await this.unavailableEvent(eventId);
+      if (!control) {
+        if (!classify) throw new AdmissionError('ADMISSION_RECOVERING', 503, 1000);
+        return await this.unavailableEvent(eventId);
+      }
       if (!this.enabled || !this.isReady() || control.runId !== this.runId)
         throw new AdmissionError('ADMISSION_RECOVERING', 503, 1000);
       const result = await runAdmission(eventId, epoch ?? control.epoch, operation, input);
@@ -209,19 +215,20 @@ export class AdmissionService {
       'claim',
       { ...input, claimToken: randomUUID() },
       input.epoch,
+      false,
     );
     return { ...input, claimToken: result.entry!.claimToken!, deadline: result.entry!.deadline! };
   }
   /** Only after P5 has committed/verified a matching immutable durable result. */
   async complete(claim: AdmissionClaim, outcome: AdmissionOutcome) {
-    return this.execute(claim.eventId, 'complete', { ...claim, outcome }, claim.epoch);
+    return this.execute(claim.eventId, 'complete', { ...claim, outcome }, claim.epoch, false);
   }
   /** Only after P5's closed commit, never from a timeout/finally callback. */
   async close(claim: AdmissionClaim) {
-    return this.execute(claim.eventId, 'close', { ...claim }, claim.epoch);
+    return this.execute(claim.eventId, 'close', { ...claim }, claim.epoch, false);
   }
   async reconcile(eventId: string) {
-    return this.execute(eventId, 'reconcile', {});
+    return this.execute(eventId, 'reconcile', {}, undefined, false);
   }
 
   private probe(policy: AdmissionPolicy) {
@@ -294,7 +301,11 @@ export class AdmissionService {
     });
   }
 
-  async maintain(stopped = () => false): Promise<void> {
+  async maintain(
+    stopped = () => false,
+    // P5's reclaimer: decides overdue claims through the durable ledger. It must not throw.
+    reclaim?: (eventId: string, claims: RedisAdmissionEntry[]) => Promise<void>,
+  ): Promise<void> {
     if (!this.enabled || stopped()) return;
     if (!this.isReady()) await this.verifyEnvironment();
     const policies = (
@@ -335,7 +346,10 @@ export class AdmissionService {
         } else {
           await this.promote(policy.eventId);
           // P4 can mark overdue claims, but only P5 can decide and commit durable closure.
-          if (!stopped()) await this.reconcile(policy.eventId);
+          if (!stopped()) {
+            const overdue = (await this.reconcile(policy.eventId)).claims ?? [];
+            if (reclaim && overdue.length) await reclaim(policy.eventId, overdue);
+          }
         }
       } catch (error) {
         if (stopped()) return;
@@ -398,10 +412,15 @@ export class AdmissionService {
 }
 export const admissionService = new AdmissionService();
 
-export async function assertP4AdmissionStartup(): Promise<void> {
+/**
+ * P5 gates both new seat-acquisition paths, so a protected policy no longer blocks startup. What
+ * this version needs instead is the durable result ledger: without migration 013 a protected
+ * purchase could not commit its result, so the product refuses to start.
+ */
+export async function assertAdmissionLedger(): Promise<void> {
   const result = await getPostgresPool().query(
-    'SELECT event_id FROM admission_events WHERE protected LIMIT 1',
+    "SELECT to_regclass('public.admission_results') AS ledger",
   );
-  if (result.rowCount)
-    throw new Error('P4 cannot serve a protected event before the P5 purchase gate is installed');
+  if (!result.rows[0].ledger)
+    throw new Error('admission_results is missing: apply migration 013 before serving purchases');
 }

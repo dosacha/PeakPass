@@ -3,7 +3,7 @@ import { getLogger } from '@/infra/logger';
 import { getPostgresPool } from '@/infra/postgres/client';
 import { withRedis } from '@/infra/redis/client';
 import { getConfig } from '@/infra/config';
-import { admissionService, assertP4AdmissionStartup } from '@/core/services/admission.service';
+import { admissionService } from '@/core/services/admission.service';
 
 const logger = getLogger();
 
@@ -39,10 +39,9 @@ export async function readinessProbe(_request: FastifyRequest, reply: FastifyRep
     logger.warn({ err }, 'Redis not ready');
   }
 
-  try {
-    await assertP4AdmissionStartup();
-    checks.admission = !getConfig().ENABLE_ADMISSION || admissionService.isReady();
-  } catch (err) { logger.warn({err},'Admission not ready'); }
+  // An instance with the feature off is ready: it answers 503 for a protected new occupation and
+  // serves everything that needs no admission.
+  checks.admission = !getConfig().ENABLE_ADMISSION || admissionService.isReady();
 
   const isReady = Object.values(checks).every(Boolean);
   if (!isReady) {

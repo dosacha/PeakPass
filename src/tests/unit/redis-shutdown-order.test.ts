@@ -12,7 +12,7 @@ it.each(['SIGTERM', 'SIGINT'])('gates Redis before drain and handles repeated %s
   const admissionFinished=new Promise<void>(resolve=>{finishAdmission=resolve;});
   const signals = new EventEmitter();
   const logger = { info: jest.fn(), error: jest.fn() };
-  jest.doMock('@/core/services/admission.service', () => ({assertP4AdmissionStartup:jest.fn(),admissionService:{verifyEnvironment:jest.fn()}}));
+  jest.doMock('@/core/services/admission.service', () => ({assertAdmissionLedger:jest.fn(),admissionService:{verifyEnvironment:jest.fn()}}));
   jest.doMock('@/infra/config', () => ({ loadConfig: jest.fn(), getConfig: () => ({ PORT: 0, ENABLE_ADMISSION:true }) }));
   jest.doMock('@/infra/logger', () => ({ initLogger: jest.fn(), getLogger: () => logger }));
   jest.doMock('@/infra/postgres/client', () => ({ initPostgresPool: jest.fn(),
@@ -66,7 +66,7 @@ it.each(['SIGTERM', 'SIGINT'])('gates Redis before drain and handles repeated %s
 
 it('startup listen failure fences Redis and awaits the stopped worker before closing PostgreSQL', async () => {
   jest.resetModules();
-  jest.doMock('@/core/services/admission.service', () => ({assertP4AdmissionStartup:jest.fn(),admissionService:{verifyEnvironment:jest.fn()}}));
+  jest.doMock('@/core/services/admission.service', () => ({assertAdmissionLedger:jest.fn(),admissionService:{verifyEnvironment:jest.fn()}}));
   const events: string[] = [];
   let finish!: () => void;
   const inflight = new Promise<void>(resolve => { finish = resolve; });

@@ -40,6 +40,11 @@ describe('event sale eligibility (real PG/Redis/HTTP)', () => {
     await pool.query(`INSERT INTO events (id, name, starts_at, ends_at, total_seats, available_seats, pricing, status)
       VALUES ($1, 'Sale eligibility', NOW() + INTERVAL '1 hour', NOW() + INTERVAL '2 hours', 5, 5, $2, 'published')`,
     [input.eventId, JSON.stringify([{ id: input.tierId, name: 'General', price: 50, quantity: 5 }])]);
+    // A new purchase reads the event's admission policy first (admission-v1 §5). Ensure the lazily
+    // created policy row here: its first INSERT would otherwise wait on the event row through the
+    // foreign key, ahead of the eligibility lock that the lock-order test below observes.
+    const { readAdmissionPolicy } = await import('@/infra/postgres/admission-policy');
+    await postgres.serializableTransactionWithRetry((client) => readAdmissionPolicy(client, input.eventId));
   });
 
   afterEach(async () => {

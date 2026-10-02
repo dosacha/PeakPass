@@ -3,6 +3,7 @@ import { getLogger } from '@/infra/logger';
 import jwt from 'jsonwebtoken';
 import { getConfig } from '@/infra/config';
 import { ForbiddenError, UnauthorizedError } from '@/core/errors';
+import { AdmissionError, AdmissionRef, parsePurchaseAdmission } from '@/core/models/admission';
 
 export interface AuthUser {
   id: string;
@@ -104,6 +105,18 @@ export function assertBodyUserMatchesAuth(
     { bodyUserId, requestId: request.id },
     'Trusting body userId without JWT (ENFORCE_AUTH_USER_MATCH=false)',
   );
+}
+
+/**
+ * 구매 요청 본문의 admission 필드 (admission-v1 §3).
+ *
+ * admission 소비는 항상 JWT 주체로만 한다. ENFORCE_AUTH_USER_MATCH=false(demo override)로
+ * body.userId를 신뢰하는 환경에서도 JWT 없이 남의 자격을 소비할 수 없다.
+ */
+export function purchaseAdmission(request: FastifyRequest): AdmissionRef | undefined {
+  const admission = parsePurchaseAdmission(request.body);
+  if (admission && !request.user) throw new AdmissionError('UNAUTHENTICATED', 401);
+  return admission;
 }
 
 declare module 'fastify' {

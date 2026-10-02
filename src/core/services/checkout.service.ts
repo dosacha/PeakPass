@@ -5,14 +5,25 @@ import { Order, CreateOrderInput } from '../models/order';
 import { MAX_MONEY_AMOUNT, UnitPriceSchema } from '../models/money';
 import { Ticket } from '../models/ticket';
 import {
+  AppError,
   ValidationError,
   NotFoundError,
   ConflictError,
 } from '../errors';
+import { AdmissionRef } from '../models/admission';
 import { ReservationService } from './reservation.service';
 import { InventoryService } from './inventory.service';
 import { OrderService } from './order.service';
 import { TicketService } from './ticket.service';
+import {
+  AdmissionSettlement,
+  assertAdmissionLink,
+  occupyThroughAdmission,
+  openAdmissionGate,
+  ownResult,
+  purchaseCommand,
+  storedRejection,
+} from './admission-consumption';
 import { getLogger } from '@/infra/logger';
 import { getConfig } from '@/infra/config';
 
@@ -22,9 +33,20 @@ export interface CheckoutResult {
 }
 
 /**
+ * checkout()의 결과. `rejected`는 admission 원장에 저장된 업무 거절로, 호출자가 COMMIT 뒤에
+ * 그대로 던진다. `settlement`는 COMMIT 뒤 Redis에 반영할 admission 결과이며 응답 본문이 아니다.
+ */
+export type CheckoutOutcome = (
+  | CheckoutResult
+  | { reservationExpired: true }
+  | { rejected: AppError }
+) & { settlement?: AdmissionSettlement };
+
+/**
  * Checkout 명령 흐름 서비스.
  *
  * 이 서비스의 책임:
+ *   - reservation 없는 신규 점유 후보는 event admission gate와 보호 정책을 먼저 확인
  *   - 동일 idempotency_key 동시 진입을 advisory lock으로 직렬화
  *   - 동일 idempotency_key 재사용 시 payload fingerprint 일치 검증
  *   - reservation 경유 시 reservation 검증+converted 전환을 atomic UPDATE로 처리
@@ -41,10 +63,41 @@ export class CheckoutService {
   private orderService = new OrderService();
   private ticketService = new TicketService();
 
+  // admission 없이 호출하면 저장된 거절도 settlement도 생기지 않으므로 기존 반환 형태 그대로다.
+  checkout(
+    input: CreateOrderInput,
+    client: PoolClient,
+  ): Promise<CheckoutResult | { reservationExpired: true }>;
+  checkout(
+    input: CreateOrderInput,
+    client: PoolClient,
+    admission: AdmissionRef | undefined,
+  ): Promise<CheckoutOutcome>;
   async checkout(
     input: CreateOrderInput,
     client: PoolClient,
-  ): Promise<CheckoutResult | { reservationExpired: true }> {
+    admission?: AdmissionRef,
+  ): Promise<CheckoutOutcome> {
+    // reservation 없는 checkout은 신규 좌석 점유 후보다 (admission-v1 §5).
+    //
+    // 이 key의 주문이 이미 있으면 기존 주문 replay다. replay는 admission 면제 경로라서 제출된
+    // admission의 상태뿐 아니라 그 잠금에도 의존하면 안 된다. 그래서 gate보다 먼저 잠금 없이
+    // 조회하고, 주문이 있으면 gate와 admission 잠금을 얻지 않는다.
+    //
+    // 주문이 없을 때만 신규 점유 후보다. 잠금 순서: event gate → policy → admission →
+    // checkout-key → 기존 row. gate와 제출된 admission의 영속 결과 조회가 아래 checkout-key
+    // 잠금보다 먼저 온다.
+    //
+    // reservationId가 있는 checkout은 새 좌석을 점유하지 않으므로 gate를 타지 않고 기존
+    // 잠금 순서와 응답을 유지한다. 무효한 reservation은 아래에서 오류로 끝나며 직접 점유로
+    // 넘어가지 않는다.
+    const command = purchaseCommand('direct-checkout', input, input.idempotencyKey, admission);
+    const keyedOrder = input.reservationId
+      ? null
+      : await this.orderService.getOrderByIdempotencyKey(input.idempotencyKey, client);
+    const gate =
+      input.reservationId || keyedOrder ? null : await openAdmissionGate(client, command);
+
     // 동일 idempotency_key 동시 진입 race를 차단한다.
     //
     // 문제 시나리오: Redis idempotency lock이 1차 layer지만 Redis 장애 시
@@ -65,10 +118,9 @@ export class CheckoutService {
       [input.idempotencyKey],
     );
 
-    const existingOrder = await this.orderService.getOrderByIdempotencyKey(
-      input.idempotencyKey,
-      client,
-    );
+    const existingOrder =
+      keyedOrder ??
+      (await this.orderService.getOrderByIdempotencyKey(input.idempotencyKey, client));
     if (existingOrder) {
       // Idempotency-Key 재사용 시 payload fingerprint 검증.
       //
@@ -103,12 +155,32 @@ export class CheckoutService {
         );
       }
 
+      // 기존 주문은 admission TTL/reset과 무관하게 replay된다. admission 필드를 제출했다면
+      // 그 주문의 영속 연결과만 비교한다. 연결이 없는 주문이면 제출된 admission이 다른 요청에
+      // 이미 쓰였더라도 무시한다.
+      await assertAdmissionLink(
+        client,
+        admission,
+        existingOrder.id,
+        existingOrder.reservationId ?? null,
+      );
+
       this.logger.warn(
         { idempotencyKey: input.idempotencyKey },
         'Duplicate checkout request detected',
       );
       const tickets = await this.ticketService.getTicketsByOrderId(existingOrder.id, client);
       return { order: existingOrder, tickets };
+    }
+    // 여기부터는 기존 주문 replay가 아니다. 제출된 admission의 영속 결과를 이 요청과 대조한다:
+    // 타인·다른 event는 404, 다른 요청은 409, closed는 410, 같은 요청의 거절은 그대로 재생한다.
+    const prior = gate && ownResult(gate, command);
+    if (prior?.outcome === 'rejected') {
+      return { rejected: storedRejection(prior) };
+    }
+    if (prior) {
+      // consumed 결과의 fingerprint는 이 checkout key를 포함하므로 주문이 반드시 있어야 한다.
+      throw new Error('Admission result exists without its order');
     }
 
     // reservation을 사용한다면 검증+convert를 atomic UPDATE로 처리한다.
@@ -119,7 +191,6 @@ export class CheckoutService {
     //   - UPDATE ... WHERE status='active' AND expires_at > NOW() RETURNING은
     //     row lock + 조건 검증 + 상태 전환을 한 쿼리로 묶는다.
     //   - affected = 0이면 invalid (released/expired/만료시간 초과/payload mismatch).
-    let seatsAlreadyHeld = false;
     if (input.reservationId) {
       const convertResult = await client.query(
         `UPDATE reservations
@@ -169,9 +240,34 @@ export class CheckoutService {
         throw new ConflictError('Checkout payload does not match reservation');
       }
 
-      seatsAlreadyHeld = true;
+      // 유효한 기존 reservation은 admission이 면제된다. 제출된 admission 필드는 그 reservation의
+      // 영속 연결과 비교만 한다. 소유·payload 검증이 끝난 뒤에 비교하므로 타인의 reservation에
+      // 연결이 있는지는 드러나지 않고, 다르면 409로 끝나며 위 전환은 함께 rollback된다.
+      await assertAdmissionLink(client, admission, null, input.reservationId);
+
+      return this.createOrder(input, client, true);
     }
 
+    // 신규 점유: 보호 이벤트면 admission 소비와 주문 생성이 같은 트랜잭션에서 commit된다.
+    const occupation = await occupyThroughAdmission(client, gate!, command, async () => {
+      const created = await this.createOrder(input, client, false);
+      return { value: created, targetId: created.order.id };
+    });
+    if ('rejected' in occupation) return occupation;
+    return occupation.settlement
+      ? { ...occupation.value, settlement: occupation.settlement }
+      : occupation.value;
+  }
+
+  /**
+   * 주문 생성 본체: event 잠금과 tier/가격 검증, order INSERT, 좌석 차감(직접 점유일 때만),
+   * pending payment_record INSERT. 호출자의 트랜잭션(보호 이벤트면 savepoint) 안에서 실행된다.
+   */
+  private async createOrder(
+    input: CreateOrderInput,
+    client: PoolClient,
+    seatsAlreadyHeld: boolean,
+  ): Promise<CheckoutResult> {
     // events row를 INSERT 이전에 FOR UPDATE로 일찍 잠근다.
     //
     // 이유: orders가 events를 FK로 참조하므로 INSERT INTO orders는

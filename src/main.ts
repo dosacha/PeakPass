@@ -7,7 +7,7 @@ import { startReservationSweeper, stopReservationSweeper } from '@/infra/cron/re
 
 import { startOrderSweeper } from '@/infra/cron/order-sweeper';
 import { startAdmissionScheduler } from '@/infra/cron/admission-scheduler';
-import { admissionService, assertP4AdmissionStartup } from '@/core/services/admission.service';
+import { admissionService, assertAdmissionLedger } from '@/core/services/admission.service';
 
 let app: Awaited<ReturnType<typeof createApp>> | null = null;
 let sweeperHandle: NodeJS.Timeout | null = null;
@@ -72,7 +72,7 @@ async function main() {
 
     await initRedis();
     logger.info('Redis 연결 완료');
-    await assertP4AdmissionStartup();
+    await assertAdmissionLedger();
     if(config.ENABLE_ADMISSION) await admissionService.verifyEnvironment();
 
     app = await createApp();

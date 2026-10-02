@@ -2,6 +2,7 @@ import { FastifyReply } from 'fastify';
 import { ZodError } from 'zod';
 import { getLogger } from '@/infra/logger';
 import { AppError } from '@/core/errors';
+import { AdmissionError } from '@/core/models/admission';
 
 const logger = getLogger();
 
@@ -37,6 +38,17 @@ export function sendErrorResponse(
   };
 
   return reply.status(statusCode).send(response);
+}
+
+/** The exact admission-v1 error envelope, shared by the admission routes and purchase routes. */
+export function sendAdmissionError(reply: FastifyReply, error: AdmissionError): FastifyReply {
+  if (error.statusCode === 429)
+    reply.header('Retry-After', Math.ceil((error.nextPollAfterMs ?? 1000) / 1000));
+  return reply.code(error.statusCode).send({
+    error: { code: error.code, message: error.message },
+    nextPollAfterMs: error.nextPollAfterMs,
+    ...(error.admission ? { admission: error.admission } : {}),
+  });
 }
 
 export function handleAppError(err: AppError, reply: FastifyReply, requestId: string): void {

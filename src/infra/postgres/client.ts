@@ -28,6 +28,15 @@ export async function initPostgresPool(): Promise<Pool> {
   pool.on('error', (err) => {
     logger.error({ err }, 'Unexpected PostgreSQL pool error');
   });
+  // pg-pool listens for errors of idle clients only. When PostgreSQL ends the session of a
+  // checked-out client between two queries (restart, idle-in-transaction timeout), node-postgres
+  // emits 'error' on that client, and an unheard 'error' ends the process. Hear it here: the
+  // client's next query fails, so its transaction still ends with an error for its caller.
+  pool.on('connect', (client) => {
+    client.on('error', (err) => {
+      logger.error({ err }, 'PostgreSQL client connection lost');
+    });
+  });
 
   const client = await pool.connect();
   await client.query('SELECT NOW()');
@@ -133,7 +142,8 @@ export function isRetriableTransactionError(err: unknown): boolean {
 
 export async function serializableTransactionWithRetry<T>(
   callback: (client: PoolClient) => Promise<T>,
-  options: { maxAttempts?: number; baseDelayMs?: number } = {},
+  // retryIf names further errors that a fresh transaction (new snapshot) resolves.
+  options: { maxAttempts?: number; baseDelayMs?: number; retryIf?: (err: unknown) => boolean } = {},
 ): Promise<T> {
   const maxAttempts = options.maxAttempts ?? 3;
   const baseDelayMs = options.baseDelayMs ?? 20;
@@ -146,7 +156,10 @@ export async function serializableTransactionWithRetry<T>(
     } catch (err) {
       lastError = err;
 
-      if (!isRetriableTransactionError(err) || attempt === maxAttempts) {
+      if (
+        !(isRetriableTransactionError(err) || options.retryIf?.(err)) ||
+        attempt === maxAttempts
+      ) {
         throw err;
       }
 
