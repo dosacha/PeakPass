@@ -112,6 +112,13 @@ describe('admission purchase gate on owned PostgreSQL, Redis and loopback HTTP',
       { eventId: fx.eventId, userId, tierId: TIER, quantity: 1, ...admission, ...changes },
       { authorization: fx.token(userId) },
     );
+  const cancel = (userId: string, admission: Admission) =>
+    request(
+      'DELETE',
+      `/events/${fx.eventId}/admissions/${admission.admissionId}`,
+      { epoch: admission.admissionEpoch },
+      { authorization: fx.token(userId) },
+    );
   const checkout = (
     userId: string,
     key: string,
@@ -291,22 +298,17 @@ describe('admission purchase gate on owned PostgreSQL, Redis and loopback HTTP',
       let purchased = 0;
       for (const user of fx.users) {
         const admission = await admit(service, fx.eventId, user);
-        const [cancel, purchase] = await Promise.all([
-          request(
-            'DELETE',
-            `/events/${fx.eventId}/admissions/${admission.admissionId}`,
-            { epoch: admission.admissionEpoch },
-            { authorization: fx.token(user) },
-          ),
+        const [cancelled, purchase] = await Promise.all([
+          cancel(user, admission),
           reserve(user, admission),
         ]);
         if (purchase.status === 201) {
           purchased++;
           // The claim or its result was first: the cancel is refused and nothing is undone.
-          expect(cancel.status).toBe(409);
-          expect(cancel.body.error.code).toMatch(/^ADMISSION_(IN_PROGRESS|ALREADY_CONSUMED)$/);
+          expect(cancelled.status).toBe(409);
+          expect(cancelled.body.error.code).toMatch(/^ADMISSION_(IN_PROGRESS|ALREADY_CONSUMED)$/);
         } else {
-          expect(cancel.status).toBe(200);
+          expect(cancelled.status).toBe(200);
           expect(purchase.status).toBe(410);
           expect(purchase.body).toEqual(admissionError('ADMISSION_CANCELLED'));
         }
@@ -316,6 +318,35 @@ describe('admission purchase gate on owned PostgreSQL, Redis and loopback HTTP',
         reservations: purchased,
         results: purchased,
       });
+    });
+
+    it('refuses a cancel once the purchase holds the claim, and the purchase still commits', async () => {
+      fx = await fixture();
+      const [user] = fx.users,
+        admission = await admit(service, fx.eventId, user);
+      // Injected pause only: the purchase is held right after Redis approved its claim, inside its
+      // transaction. Unforced, the race above goes to the cancel, which never waits on PostgreSQL.
+      let resume!: () => void;
+      const held = new Promise<void>((resolve) => (resume = resolve));
+      let reached!: () => void;
+      const claimed = new Promise<void>((resolve) => (reached = resolve));
+      const claim = service.claim.bind(service);
+      jest.spyOn(service, 'claim').mockImplementationOnce(async (input) => {
+        const approved = await claim(input);
+        reached();
+        await held;
+        return approved;
+      });
+      const purchase = reserve(user, admission);
+      await claimed;
+      const during = await cancel(user, admission).finally(resume);
+      expect(during.status).toBe(409);
+      expect(during.body.error.code).toBe('ADMISSION_IN_PROGRESS');
+      expect((await purchase).status).toBe(201);
+      const after = await cancel(user, admission);
+      expect(after.status).toBe(409);
+      expect(after.body.error.code).toBe('ADMISSION_ALREADY_CONSUMED');
+      expect(await fx.state()).toMatchObject({ available: 19, reservations: 1, results: 1 });
     });
 
     it('stores a sold-out rejection once and replays it after stock returns', async () => {
@@ -504,6 +535,13 @@ describe('admission purchase gate on owned PostgreSQL, Redis and loopback HTTP',
       const otherKey = await checkout(user, randomUUID(), admission);
       expect(otherKey.status).toBe(409);
       expect(otherKey.body).toEqual(admissionError('ADMISSION_REQUEST_MISMATCH'));
+      // The same key with a changed payload keeps the existing idempotency answer and envelope.
+      const changed = await checkout(user, key, admission, { quantity: 2 });
+      expect(changed.status).toBe(409);
+      expect(changed.body).toMatchObject({
+        error: { code: 'CONFLICT' },
+        requestId: expect.any(String),
+      });
       expect(await fx.state()).toMatchObject({ available: 19, ordered: 1, orders: 1, results: 1 });
     });
 
@@ -1141,7 +1179,7 @@ describe('admission purchase gate on owned PostgreSQL, Redis and loopback HTTP',
       expect(await slots(redis, fx.eventId, admission.admissionEpoch)).toBe(1);
     });
 
-    it('lets a stale snapshot occupy again only up to the ledger key, then replays the committed rejection', async () => {
+    it('lets a stale snapshot occupy again only up to the ledger insert, then replays the committed rejection', async () => {
       fx = await fixture(1);
       const [buyer, user] = fx.users;
       expect((await reserve(buyer, await admit(service, fx.eventId, buyer))).status).toBe(201);
@@ -1179,11 +1217,12 @@ describe('admission purchase gate on owned PostgreSQL, Redis and loopback HTTP',
       await blocked(pool, holder);
       resume();
       // Its snapshot could not see the committed rejection, Redis approved the same claim again,
-      // and it ran the occupation a second time. The ledger key stopped it; a fresh transaction
-      // then replayed the stored result.
-      const late = await second;
+      // and it ran the occupation a second time. The ledger insert stopped it: this transaction
+      // had read the key, so PostgreSQL reports the committed row as a serialization failure
+      // (40001) rather than a duplicate key. A fresh transaction then replayed the stored result.
+      // The first request is released in every case, so a failure here cannot leave it parked.
+      const late = await second.finally(finalize);
       expect(claims).toHaveBeenCalledTimes(2);
-      finalize();
       const responses = [await first, late];
       expect(await slots(redis, fx.eventId, admission.admissionEpoch)).toBe(0);
       for (const response of responses) {
