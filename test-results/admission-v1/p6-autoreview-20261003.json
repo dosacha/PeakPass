@@ -1,0 +1,354 @@
+{
+  "runId": "peakpass-p6-20261003",
+  "part": "GitHub Codex auto-review of PR #28, first round",
+  "codeSha": "a9954d86c3705d45a763f6bfe1a1fde164231442",
+  "previous": [
+    {
+      "archive": "p6-final-20261003.zip",
+      "codeSha": "02ee7e025b31b5de39f942d4cfec1fc3e9432e74"
+    },
+    {
+      "archive": "p6-review-20261003.zip",
+      "codeSha": "b9656ab317d344f2bedff3b49ecfb9638c77f7bb"
+    },
+    {
+      "archive": "p6-review2-20261003.zip",
+      "codeSha": "fc0f4a8a665d385e52a3300882bd376eee4f24f8",
+      "head": "6645a2903fd2ab74071cd1f8f0121a2edcd67ca5"
+    }
+  ],
+  "baseSha": "2d67cc3c10a1d04bebe0a7a81f9575ea39e63363",
+  "contract": {
+    "revision": "admission-v1",
+    "sha256": "e22be4df9910811eba552f630b43170ba0cf0c8d953a54dc5a3cea34c0dcf3d1"
+  },
+  "archive": "p6-autoreview-20261003.zip",
+  "archiveSha256": "98dd881dee1137f3f2e6b39facff41823eeae4cb8b859c9e7dae7d01fcb81f07",
+  "pullRequest": {
+    "number": 28,
+    "head": "6645a2903fd2ab74071cd1f8f0121a2edcd67ca5",
+    "ci": "install-lint-test passed on 6645a29"
+  },
+  "autoReview": {
+    "reviewer": "chatgpt-codex-connector[bot] on PR #28",
+    "target": "6645a2903fd2ab74071cd1f8f0121a2edcd67ca5",
+    "findings": "three P2: cross-tab race of the recognition marker (answered by an analysis rule, no code change); a reservation read answered after Reset (fixed); a 401 attempt missing from the trace and the request log (fixed)",
+    "fixedIn": "a9954d86c3705d45a763f6bfe1a1fde164231442",
+    "nextReview": "starts with the next push"
+  },
+  "results": {
+    "build": "pass",
+    "typecheck": "pass",
+    "lintErrors": 0,
+    "lintWarnings": 11,
+    "unitPassed": 223,
+    "unitSuites": 23,
+    "integrationPassed": 346,
+    "integrationSkipped": 15,
+    "integrationSuitesPassed": 30,
+    "integrationSuitesSkipped": 2,
+    "harnessPassed": 29,
+    "callbackHarness": "pass",
+    "mutations": "49/49 at b9656ab; the polling script did not change afterwards",
+    "checkPageTask21": "10/10",
+    "checkPageTask22CasesPassed": 4,
+    "servedFilesEqualCommittedBlobs": 10,
+    "pageTraces": 8,
+    "overlappingRequestsInPageTraces": 0,
+    "serverLogExtractsOfTheBrowser": 6,
+    "overlappingRequestsInServerLogExtracts": 0,
+    "finalSql": "available + active reservation quantity + pending/paid/delivered order quantity = total (82 + 4 + 14 = 100); consumed results that do not match their target: 0"
+  },
+  "scenarios": {
+    "s23": "reservation read held back 8 s, Reset clicked meanwhile: before the change the late answer put the reservation back and marked step 3 done; after it nothing changed",
+    "s24": "one status request answered 401 (invalid token injected) and repeated with a new session: before the change neither the trace nor the request log had the rejected attempt; after it the trace has an auth-retry record and the request log a 401 line"
+  },
+  "note": "No credentials, env file, token or raw HAR are archived; the raw application logs are not archived.",
+  "files": [
+    {
+      "name": "README.txt",
+      "bytes": 934,
+      "sha256": "ae60a8981a9f88f86b5557ffb113cef5de9774e7f8d3ec2c3c75ab9a7a449cc2"
+    },
+    {
+      "name": "evidence/a11y-admitted.json",
+      "bytes": 1665,
+      "sha256": "2cdd5f28ba8e2f4d37c77de47c03368f5325f01f372f7578d10c141ab3ce7d34"
+    },
+    {
+      "name": "evidence/a11y-finished.json",
+      "bytes": 2066,
+      "sha256": "02b3fb5755cbc206eba26532c252539c2ec7e768a53c2591c0692334fc82acb5"
+    },
+    {
+      "name": "evidence/a11y-page.json",
+      "bytes": 7712,
+      "sha256": "e91f321def143b72692075fd971d16e519388229dec8bf298f656262bfe1a40c"
+    },
+    {
+      "name": "evidence/a11y-waiting-confirm.json",
+      "bytes": 2098,
+      "sha256": "f5ab92c60b73e6d09a4c19fd9006d8f0744c26c0d7fda8adafa8d76cceabdc46"
+    },
+    {
+      "name": "evidence/a11y-waiting.json",
+      "bytes": 1717,
+      "sha256": "d3bf1318621e36f7acb0556be40ba681a6110dde923a90e23c43534c82841c78"
+    },
+    {
+      "name": "evidence/final-f1.applog.json",
+      "bytes": 266,
+      "sha256": "2dbf8d05e0aaaf1fc4b77cff268fbb9744cc20bab44d16a0ff9c3a98ee809351"
+    },
+    {
+      "name": "evidence/final-f1.fillers.log",
+      "bytes": 507,
+      "sha256": "07a521aa17c02cca7b1de62024b0ce54ff6c525f07c99e31f9a19e0d7472a8bc"
+    },
+    {
+      "name": "evidence/final-f1.requests.txt",
+      "bytes": 5595,
+      "sha256": "912f21caff9152f180aa2e757be050e8f5af84c08afd9f88149967e91426a059"
+    },
+    {
+      "name": "evidence/final-f1a.trace.json",
+      "bytes": 3288,
+      "sha256": "61bf21643a0572770259d311e2f74db1e444770a172cca2c60c87f587a415281"
+    },
+    {
+      "name": "evidence/final-f1b.trace.json",
+      "bytes": 12677,
+      "sha256": "bcaa6d5dd16cafd156581444f1b464e74ecff6261731998efc717bd943c7a12d"
+    },
+    {
+      "name": "evidence/final-f1c.trace.json",
+      "bytes": 732,
+      "sha256": "86fc7ee7b13235c325abb6160ae6f77eb59d2cd030312c784f1866e47d0f29b3"
+    },
+    {
+      "name": "evidence/final-f2.applog.json",
+      "bytes": 269,
+      "sha256": "de6cd140b08a23eabf66cb93d43b3958bda142b6f6aeb8eb227ffd14049a075a"
+    },
+    {
+      "name": "evidence/final-f2.fillers.log",
+      "bytes": 423,
+      "sha256": "3e91b600f41774ecc974816b2a6f53acf8ca026c60dd4af8a5cb42b1f411e951"
+    },
+    {
+      "name": "evidence/final-f2.requests.txt",
+      "bytes": 7452,
+      "sha256": "2d040dfa76623a41c2e7305b36467a27ada76ea834f7b61d7b4a1c4a51cd84ee"
+    },
+    {
+      "name": "evidence/final-f2.trace.json",
+      "bytes": 28722,
+      "sha256": "b05b14f4ca61df767fb357ea1885c184aaf7225c8460d367af55b285b672c3bc"
+    },
+    {
+      "name": "evidence/final.console.log",
+      "bytes": 9434,
+      "sha256": "721e54c61a9e024b8f63fa1e2f1c06f8bcd66750218324c088fe00f93a8ba3c1"
+    },
+    {
+      "name": "evidence/review4.proxy.log",
+      "bytes": 26058,
+      "sha256": "b5c542bfe80fc3ed328f624d8a3e05dc857a8582120305145809f7352020da1d"
+    },
+    {
+      "name": "evidence/s23-reset-before.applog.json",
+      "bytes": 264,
+      "sha256": "e4b808dfb581727c2a644fa1036cd32694f112754af4bdf44e090b349947c5d4"
+    },
+    {
+      "name": "evidence/s23-reset-before.console.log",
+      "bytes": 1586,
+      "sha256": "59fdec158b3c85d3f5a6438ba5a506b6f5a935b6a2e736141979e84c29ec2f4b"
+    },
+    {
+      "name": "evidence/s23-reset-before.requests.txt",
+      "bytes": 2071,
+      "sha256": "511b306f0d3346148e2e2549c4d5786bb93ed4a110009065e43c60ced78f0304"
+    },
+    {
+      "name": "evidence/s23-reset-before.trace.json",
+      "bytes": 733,
+      "sha256": "1ea36313c2637804b6c567b17e729860520bc66a188d5fac45692868d99eee14"
+    },
+    {
+      "name": "evidence/s23-reset.applog.json",
+      "bytes": 264,
+      "sha256": "55f7a258f67bd23817f8ca04caa9cf798c928fcc94a969bb4be37337af1deedf"
+    },
+    {
+      "name": "evidence/s23-reset.console.log",
+      "bytes": 1587,
+      "sha256": "d147ea55f0f32f8aae2c7bf52cbf5274c201685e0228db6275718c0be33ceffb"
+    },
+    {
+      "name": "evidence/s23-reset.requests.txt",
+      "bytes": 1896,
+      "sha256": "d9b2528ce3bba2a932714bccc55004308c076f788670cdb90bf3dc8f72a59ab5"
+    },
+    {
+      "name": "evidence/s23-reset.trace.json",
+      "bytes": 726,
+      "sha256": "d5466b678dc216e838b4b56540990404798dff23c3644effa765ae966e6ef85e"
+    },
+    {
+      "name": "evidence/s24-auth-retry-before.applog.json",
+      "bytes": 263,
+      "sha256": "c40c3109c6b5f660d8d2c989cbec2db79c5fbea66cd04652a8a63c7a5d24bd91"
+    },
+    {
+      "name": "evidence/s24-auth-retry-before.console.log",
+      "bytes": 1514,
+      "sha256": "716eaf3a278b4d2aa1b6b4b653acbbe18a0a0b7afcdffdf496cce628973891e1"
+    },
+    {
+      "name": "evidence/s24-auth-retry-before.requests.txt",
+      "bytes": 1802,
+      "sha256": "285e7d81b5d57a64d4abd0ccf29105124aefa9a285c5b14084ef6cfa0c3d7227"
+    },
+    {
+      "name": "evidence/s24-auth-retry-before.trace.json",
+      "bytes": 4922,
+      "sha256": "f47cde8ae489c5ed7dd3d9e44ffbdb1dc9d3c30766fe4ebb136a5fca8312dc98"
+    },
+    {
+      "name": "evidence/s24-auth-retry.applog.json",
+      "bytes": 263,
+      "sha256": "9f64be039186f8f01a0669b000a2d6b3cbd08b14a6b839ada0616dc531abd854"
+    },
+    {
+      "name": "evidence/s24-auth-retry.console.log",
+      "bytes": 1804,
+      "sha256": "2fcdac570a592775a68cb8547d64413d1ffedc510697dfcdd92e88211882d110"
+    },
+    {
+      "name": "evidence/s24-auth-retry.requests.txt",
+      "bytes": 1802,
+      "sha256": "360f9df1b965531667678e555026946e47588e6f810088db368c02c3514641f3"
+    },
+    {
+      "name": "evidence/s24-auth-retry.trace.json",
+      "bytes": 5188,
+      "sha256": "c33095ce92faea7c24b537690c93c27c48295998773777335657c0c1333ca27f"
+    },
+    {
+      "name": "logs/ar1-build.log",
+      "bytes": 94,
+      "sha256": "b1549c2c034dd03e6b5ea3ea465f2ea87716fe6eaf9d08c5c2e361930a7701a0"
+    },
+    {
+      "name": "logs/ar1-callback.log",
+      "bytes": 264,
+      "sha256": "15cfbd97e201b80219f5be8b42244f28d3f3fe64e3dd09e2558ea2856a8ddeff"
+    },
+    {
+      "name": "logs/ar1-flash-sale.log",
+      "bytes": 3069,
+      "sha256": "8b9ee669aa9925904f87453237413d5a9835c01243a18f27300988e9ecffd706"
+    },
+    {
+      "name": "logs/ar1-integration.log",
+      "bytes": 726998,
+      "sha256": "59865c71fdafabea8b3f16e9eee6c115a143669d6c428487461c0fb0d24c8fc4"
+    },
+    {
+      "name": "logs/ar1-lint.log",
+      "bytes": 1602,
+      "sha256": "006d1002e521bbc0b4e5935a8390dbb72f4ef468d9856b747dbf12cbcf146f98"
+    },
+    {
+      "name": "logs/ar1-typecheck.log",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "name": "logs/ar1-unit.log",
+      "bytes": 16787,
+      "sha256": "d3d7af33ad0a39f16c43ccc356f4904397c5b8f8efb549f02ab8f912c3729639"
+    },
+    {
+      "name": "logs/pr28-checks.log",
+      "bytes": 1960,
+      "sha256": "540df877016ab57ce117ef1b4062aabec933c07b61fec2d0bb8076456c8e66a2"
+    },
+    {
+      "name": "logs/pr28-issue-comments.json",
+      "bytes": 4480,
+      "sha256": "3166e1941f8db47de4145cb0cec49a9652e4be36f9935b32e2d5e0e0260c92d7"
+    },
+    {
+      "name": "logs/pr28-reactions.json",
+      "bytes": 1336,
+      "sha256": "9db7992de86ce016a60609f4514b9fa29e5c58c58943ec166a969d62a8167a5b"
+    },
+    {
+      "name": "logs/pr28-review-comments.json",
+      "bytes": 15657,
+      "sha256": "175b271ab089909947f60e7728bb3189e58eb58fb5a5778ebedbdfcc9fc43726"
+    },
+    {
+      "name": "logs/pr28-reviews.json",
+      "bytes": 2427,
+      "sha256": "c2a2f662da71dbc284712de0ac151ea083c1aa4fb9cfb9a222b23d5f4fa48c4c"
+    },
+    {
+      "name": "logs/pr28-summary.md",
+      "bytes": 871,
+      "sha256": "bdf28b8681cf6a43e698c90c219caf3dc782140f9ffaa659ad87ff94d3fa6a6e"
+    },
+    {
+      "name": "logs/summaries.txt",
+      "bytes": 14076,
+      "sha256": "aedc0f060a6a81b52ccba05615ce1145bd4d2e1cccc24a5a26f20aa69affe859"
+    },
+    {
+      "name": "scripts/app.sh",
+      "bytes": 1274,
+      "sha256": "1db2a4f5d06903f1e30a64216a36051f9774c85d8efc1ad22b0b4aec5b2d3d76"
+    },
+    {
+      "name": "scripts/applog.mjs",
+      "bytes": 3307,
+      "sha256": "a152bb060ebef812e1b3971a5661bdf73dee646f87c9b7ad9a05b71c9ccc9ca8"
+    },
+    {
+      "name": "scripts/archive-autoreview.mjs",
+      "bytes": 8313,
+      "sha256": "a8cccaa126bfb664c7700861cc1e49ebb82a3125851d22b5b80efe490d4babd7"
+    },
+    {
+      "name": "scripts/final.sh",
+      "bytes": 8500,
+      "sha256": "e0b9db29c81a84c67720371df15949d51c1499f9ae3b12bc9e9a9eea6d5f09b8"
+    },
+    {
+      "name": "scripts/helpers.sh",
+      "bytes": 4022,
+      "sha256": "7aa568c7f9bfe5cb4c571e75237404e2e4f4194c3de025368e0aadafeebbe74e"
+    },
+    {
+      "name": "scripts/lib.sh",
+      "bytes": 4903,
+      "sha256": "d82d38d458815d14150d20c64a27b5c4280866659006367a6fa853aff2b1fd17"
+    },
+    {
+      "name": "scripts/proxy.mjs",
+      "bytes": 5532,
+      "sha256": "9d879faca4cb5c44d618fc330752b4547ad8c0fa23f40a03e00eb13ae8054616"
+    },
+    {
+      "name": "scripts/review4.sh",
+      "bytes": 3629,
+      "sha256": "338629665a9d69df2b1c50e3433109cbebbdcb9b3be6431ac45dccbac397a434"
+    },
+    {
+      "name": "scripts/summary.mjs",
+      "bytes": 3038,
+      "sha256": "e486726c3f81c0c491e7074c6d20c69f6b7636b14ecc0eda77e19ad2928704f3"
+    }
+  ]
+}
