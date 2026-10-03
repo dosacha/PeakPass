@@ -593,6 +593,20 @@
       return true;
     }
 
+    // The page the purchase belongs to was cleared. An attempt still out is dropped and no
+    // repeat follows; the request waits as unconfirmed for its button. The status polling
+    // resumes as after the last automatic repeat, so a wait the server asked for still holds.
+    function stopPurchase() {
+      if (disposed || !purchasing()) return false;
+      drop();
+      if (purchase.timer !== null) clearTimer(purchase.timer);
+      purchase.timer = null;
+      purchase.status = "unconfirmed";
+      emit();
+      refresh();
+      return true;
+    }
+
     function restorePurchase() {
       if (!pending) return;
       try {
@@ -667,7 +681,7 @@
       unsubscribe();
     }
 
-    return { start, join, cancel, purchase: startPurchase, retryPurchase, setMode, view, dispose };
+    return { start, join, cancel, purchase: startPurchase, retryPurchase, stopPurchase, setMode, view, dispose };
   }
 
   const api = {

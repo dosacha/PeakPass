@@ -610,11 +610,11 @@ const App = () => {
       setExpandedSteps({ s1:true,s2:false,sq:true,s3:false,s4:false,s5:false,s6:false,s7:false });
       setDupBusy({ A: false, B: false }); // [FIX] reset per-button busy flags
       setPurchaseError(null);
-      // Reset is local: an entry in the queue stays on the server and is read again, by a new
-      // controller. The old one ends with its timers and requests, so nothing it still had open
-      // lands on the cleared page; a purchase without an outcome stays restorable.
+      // Reset is local: an entry in the queue stays on the server and is read again, on the
+      // queue's own schedule. A purchase still being sent stops, so its answer cannot land on
+      // the cleared page; the request waits as unconfirmed for its button.
       clearLiveDemoSession();
-      if (queueUserId) setQueueNonce(n => n + 1);
+      admissionRef.current?.stopPurchase();
     },
 
     step1: async () => {

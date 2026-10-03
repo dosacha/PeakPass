@@ -63,6 +63,7 @@ interface Controller {
   cancel(): boolean;
   purchase(body: Record<string, unknown>): boolean;
   retryPurchase(): boolean;
+  stopPurchase(): boolean;
   setMode(mode: Mode): void;
   view(): View;
   dispose(): void;
@@ -1200,6 +1201,69 @@ describe('join, cancel and purchase', () => {
     expect(t.methods()).toEqual(['GET']);
     // The request stays open for this user and event: the next page restores it.
     expect(t.pending.size()).toBe(1);
+  });
+
+  it('stops sending a purchase on request and leaves the request to its button', async () => {
+    const t = tab(api);
+    t.onRequest(() => t.ok(admittedEntry(t), 1000));
+    t.onPurchase(() => ({ status: 0 }));
+    t.controller.start();
+    await t.flush();
+    // Reset calls it whatever the state: without an open purchase it does nothing.
+    expect(t.controller.stopPurchase()).toBe(false);
+    t.controller.purchase({ ...PURCHASE });
+    await t.advance(500);
+    expect(t.controller.view().purchase).toMatchObject({ status: 'retrying', attempts: 1 });
+    expect(t.controller.stopPurchase()).toBe(true);
+    expect(t.controller.stopPurchase()).toBe(false);
+    await t.advance(60000);
+    // No repeat by itself and no result; status polling resumes at once.
+    expect(t.purchases).toHaveLength(1);
+    expect(t.results).toEqual([]);
+    expect(t.times().slice(0, 3)).toEqual([0, 500, 1500]);
+    expect(t.controller.view().purchase).toMatchObject({ status: 'unconfirmed', attempts: 1 });
+    expect(t.pending.size()).toBe(1);
+    t.onPurchase(() => ({ status: 201, data: { id: 'r-1' } }));
+    expect(t.controller.retryPurchase()).toBe(true);
+    await t.flush();
+    expect(t.purchases[1].body).toEqual(PURCHASE);
+    expect(t.results.map((result) => result.status)).toEqual([201]);
+  });
+
+  it('drops the answer of an attempt that is out when the purchase is stopped', async () => {
+    const t = tab(api);
+    t.onRequest(() => t.ok(admittedEntry(t), 1000));
+    const answer = deferred<Reply>();
+    t.onPurchase(() => answer.promise);
+    t.controller.start();
+    await t.flush();
+    t.controller.purchase({ ...PURCHASE });
+    await t.flush();
+    expect(t.controller.stopPurchase()).toBe(true);
+    expect(t.purchases[0].signal.aborted).toBe(true);
+    answer.resolve({ status: 201, data: { id: 'r-1' } });
+    await t.flush();
+    expect(t.results).toEqual([]);
+    expect(t.controller.view().purchase).toMatchObject({ status: 'unconfirmed' });
+  });
+
+  it('keeps a wait of the status API when a purchase is stopped', async () => {
+    const t = tab(api);
+    t.onRequest(() =>
+      t.calls.length === 2
+        ? failure(503, 'ADMISSION_RECOVERING', 15000)
+        : t.ok(admittedEntry(t), 1000),
+    );
+    t.onPurchase(() => ({ status: 0 }));
+    t.controller.start();
+    await t.advance(1000);
+    expect(t.controller.purchase({ ...PURCHASE })).toBe(true);
+    await t.advance(500);
+    expect(t.controller.stopPurchase()).toBe(true);
+    await t.advance(14499);
+    expect(t.times()).toEqual([0, 1000]);
+    await t.advance(1);
+    expect(t.times()).toEqual([0, 1000, 16000]);
   });
 
   it('retries only what a later attempt can outlive and reports every other answer at once', async () => {
