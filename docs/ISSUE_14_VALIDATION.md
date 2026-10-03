@@ -1,8 +1,8 @@
 # Issue #14 / P5 implementation and P6/P7/P8 handoff
 
-Run: `peakpass-p5-20261002`. This is the implementation candidate on branch `claude/issue-14-p5-admission`, open as [PR #26](https://github.com/dosacha/PeakPass/pull/26). It is **not merged and not an accepted P5 tuple**. Acceptance remains in [#9](https://github.com/dosacha/PeakPass/issues/9). The contract `admission-v1` is unchanged.
+Run: `peakpass-p5-20261002`. This is the P5 implementation of branch `claude/issue-14-p5-admission`, merged as [PR #26](https://github.com/dosacha/PeakPass/pull/26) on 2026-10-02 (merge commit `2d67cc3c10a1d04bebe0a7a81f9575ea39e63363`, whose tree equals the PR head `e3fb7e2`). The acceptance record is in [#9](https://github.com/dosacha/PeakPass/issues/9) and [#14](https://github.com/dosacha/PeakPass/issues/14), and what was left open is in [#27](https://github.com/dosacha/PeakPass/issues/27). The contract `admission-v1` is unchanged.
 
-Final code: `9eca3247429905bc5ae9ed4bc01e8b1483183baa`. It follows the automated Codex review of PR #26 at `a4e0b9b`, which made two comments. One (P2) was reproduced and fixed in `9eca324`: admission fields without a JWT got the legacy 401 envelope because the body-user guard ran first. The other (P1) claimed that same-key checkouts with a stale snapshot fail with a duplicate key and answer 500; it was not reproduced, and `9eca324` adds the test that forces that order (see A06). `9eca324` has not been reviewed.
+Final code: `9eca3247429905bc5ae9ed4bc01e8b1483183baa`. It follows the automated Codex review of PR #26 at `a4e0b9b`, which made two comments. One (P2) was reproduced and fixed in `9eca324`: admission fields without a JWT got the legacy 401 envelope because the body-user guard ran first. The other (P1) claimed that same-key checkouts with a stale snapshot fail with a duplicate key and answer 500; it was not reproduced, and `9eca324` adds the test that forces that order (see A06). `9eca324` was read by the automated review only: its round on the PR head `e3fb7e2` ended without a finding. No external reviewer or person has read it.
 
 Before the PR, the code `ba12450` followed an external static review of `39dced43bdb6917f5feb60ca29803155d9a9c95b` (code `5000cc2`) against merge-base `678ac7c`, done by a Codex session with three parallel helpers; that session did not expose its model name, version or effort. It ran no test and changed nothing. It reported no P1, four P2 (stale-snapshot refusal, order replay behind the admission lock, unbounded first wait, an unconditional time bound in this document) and one P3 (a replay assertion that compared two undefined values). The three product findings were reproduced by failing tests and all five are addressed in `91f8ec5`. The rerun mutation check then showed that the older rerun on Redis' `ADMISSION_ALREADY_CONSUMED` no longer changed any answer, and `ba12450` removed it. The same reviewer then read `a4e0b9b` again and reported no findings, as relayed by the maintainer.
 
@@ -103,6 +103,7 @@ Evidence kinds: **real** is owned PostgreSQL/Redis and an HTTP exchange with a l
 | Docker lifecycle | The five opt-in order-worker cases passed with `WAVE4_TEST_IMAGE=peakpass:p5-issue14-review`. They are among the 15 skips of the default run. |
 | Harness regression | `npm run test:flash-sale`: 29/29; callback run-isolation check passed. Harness checks, not load runs. |
 | Skips | Seven redis-recovery, two order-sweeper Redis-outage and one order-expiration-http Redis-stop cases still need their original fixed-port container and stay skipped. All 15 names are in the archive. |
+| GitHub Actions | `install-lint-test` passed on `a4e0b9b`, on the PR head `e3fb7e2`, which carries the final code, and on the merge commit `2d67cc3`. |
 
 Raw outputs: [manifest](../test-results/admission-v1/p5-final-20261002.json) / [ZIP](../test-results/admission-v1/p5-final-20261002.zip). The manifest records the ZIP and file SHA256 values, the image id, the results and the skipped tests. The archive holds the final outputs, the baseline, the RED output of each task and of the review findings, and the upgrade and mutation scripts, which are not part of the source tree. No credentials or `.env` are archived.
 
@@ -128,11 +129,11 @@ The final SQL of contract §8 runs after every purchase test: `available + activ
 - `statement_timeout` and `idle_in_transaction_session_timeout` firing by their own timers. `lock_timeout` fired for real, and a session ended by the server while idle in a transaction was produced with `pg_terminate_backend`; a statement timeout was an injected error code.
 - A duplicate-key (23505) race on the ledger between two purchases. Where two SERIALIZABLE purchases met at the ledger insert, PostgreSQL reported 40001 because both had read the key. The 23505 classification is exercised only by a constructed duplicate insert in the ledger test.
 - A late duplicate of a rejected direct checkout after its key produced an order through another admission. The answer given in the purchase interface is read from the code; no test builds that sequence.
-- The other refusals behind a stale snapshot. The test produces the refusal of an instance that lost a finalization. A claim past its deadline (409 `ADMISSION_IN_PROGRESS`), a feature-off instance and a frozen namespace take the same confirmation path in the code; no test builds them with a stale snapshot.- Elapsed 30 s TTL and 15 s claim deadline in real time. They were synthetic fields.
+- The other refusals behind a stale snapshot. The test produces the refusal of an instance that lost a finalization. A claim past its deadline (409 `ADMISSION_IN_PROGRESS`), a feature-off instance and a frozen namespace take the same confirmation path in the code; no test builds them with a stale snapshot.
+- Elapsed 30 s TTL and 15 s claim deadline in real time. They were synthetic fields.
 - Throughput, latency and the cost of the added statements: not measured. P8 remeasures A/B/C at the integrated SHA.
 - Browser behaviour: P6.
-- GitHub Actions and the automated review of the final code. `install-lint-test` passed on the PR head `a4e0b9b`; the push that carries `9eca324` starts both again.
-- A review of `9eca324`. The external static review covered the code up to `ba12450`; see the first paragraphs.
+- A review of `9eca324` by the external reviewer or by a person. The external static review covered the code up to `ba12450`; see the first paragraphs.
 
 ### Limits kept or introduced
 
