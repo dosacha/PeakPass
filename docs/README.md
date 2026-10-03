@@ -5,7 +5,8 @@
 
 ## 진행 중인 Issue 인수인계
 
-- [P5 / Issue #14 구현 검증과 P6·P7·P8 인계](ISSUE_14_VALIDATION.md) — 예약·직접 checkout의 admission 소비 원장, 재시도·회수, 구매 요청 인터페이스, 검증 범위와 미검증 항목. 로컬 후보이며 수용 상태는 총괄 #9를 따른다.
+- [P6 / Issue #15 구현 검증과 P7·P8 인계](ISSUE_15_VALIDATION.md) — 대기 카드, 고정·적응형 폴링과 jitter, 요청 직렬화와 늦은 응답 폐기, 구매 연결과 결과 미확인 구매의 복구, 입장 인지 계측, 실제 브라우저 검증 범위와 미검증 항목. 로컬 후보이며 수용 상태는 총괄 #9를 따른다.
+- [P5 / Issue #14 구현 검증과 P6·P7·P8 인계](ISSUE_14_VALIDATION.md) — 예약·직접 checkout의 admission 소비 원장, 재시도·회수, 구매 요청 인터페이스, 검증 범위와 미검증 항목. PR #26으로 병합됨(main `2d67cc3`). 수용 상태는 총괄 #9를 따른다.
 - [P4 / Issue #13 새 세션 인수인계](ISSUE_13_HANDOFF.md) — 병합된 admission-v1, 첫 설계 설명, Redis·PG policy 경계와 P4/P5/P6 검증·인계 기준.
 - [입장 제어 계약 admission-v1](ADMISSION_CONTRACT.md) — P4~P8의 상태/API·단일 소비·실패 복구·실험 profile과 검증 경계. 제품 구현·실측 결과와 구분한다.
 - [P3 / Issue #12 이전 인수인계](ISSUE_12_HANDOFF.md) — P3 착수 당시의 수용 P2 증거와 설계 과제. 현재 계약·P4 착수는 위 문서를 따른다.

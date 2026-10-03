@@ -1,0 +1,761 @@
+{
+  "runId": "peakpass-p6-20261003",
+  "part": "GitHub Codex auto-review of PR #28, second round",
+  "codeSha": "cfe72a53c9621694df32a486f86d29db3a769bf2",
+  "codeCommitsOfThisRound": [
+    "0b1c3b5e22bf5fd53c429b331c2350f9880f2051",
+    "cfe72a53c9621694df32a486f86d29db3a769bf2"
+  ],
+  "previous": [
+    {
+      "archive": "p6-final-20261003.zip",
+      "codeSha": "02ee7e025b31b5de39f942d4cfec1fc3e9432e74"
+    },
+    {
+      "archive": "p6-review-20261003.zip",
+      "codeSha": "b9656ab317d344f2bedff3b49ecfb9638c77f7bb"
+    },
+    {
+      "archive": "p6-review2-20261003.zip",
+      "codeSha": "fc0f4a8a665d385e52a3300882bd376eee4f24f8",
+      "head": "6645a2903fd2ab74071cd1f8f0121a2edcd67ca5"
+    },
+    {
+      "archive": "p6-autoreview-20261003.zip",
+      "codeSha": "a9954d86c3705d45a763f6bfe1a1fde164231442",
+      "head": "d022ec773c4c08ce2c1e884f99c31da4fbf2ce63"
+    }
+  ],
+  "baseSha": "2d67cc3c10a1d04bebe0a7a81f9575ea39e63363",
+  "contract": {
+    "revision": "admission-v1",
+    "sha256": "e22be4df9910811eba552f630b43170ba0cf0c8d953a54dc5a3cea34c0dcf3d1"
+  },
+  "archive": "p6-autoreview2-20261003.zip",
+  "archiveSha256": "c2e8ac416d7f56468ae69a1eceda21ba522459b081f2b80092522522203c4545",
+  "pullRequest": {
+    "number": 28,
+    "head": "d022ec773c4c08ce2c1e884f99c31da4fbf2ce63",
+    "ci": "install-lint-test passed on 6645a29 and d022ec7"
+  },
+  "autoReview": {
+    "reviewer": "chatgpt-codex-connector[bot] on PR #28",
+    "target": "d022ec773c4c08ce2c1e884f99c31da4fbf2ce63",
+    "findings": "three P2: a stored purchase not namespaced by API base (fixed in 0b1c3b5); purchase callbacks of a retry landing after Reset (fixed in 0b1c3b5 by replacing the controller, then in cfe72a5 by stopping only the purchase); a newer consumed reservation of another tab not loadable (fixed in 0b1c3b5)",
+    "fixedIn": "cfe72a53c9621694df32a486f86d29db3a769bf2",
+    "nextReview": "starts with the next push"
+  },
+  "results": {
+    "build": "pass",
+    "typecheck": "pass",
+    "lintErrors": 0,
+    "lintWarnings": 11,
+    "unitPassed": 227,
+    "unitSuites": 23,
+    "integrationPassed": 346,
+    "integrationSkipped": 15,
+    "integrationSuitesPassed": 30,
+    "integrationSuitesSkipped": 2,
+    "harnessPassed": 29,
+    "callbackHarness": "pass",
+    "mutations": "56/56 at cfe72a5 (49 of them also at b9656ab)",
+    "checkPageTask21": "10/10",
+    "checkPageTask22CasesPassed": 4,
+    "servedFilesEqualCommittedBlobs": 10,
+    "pageTraces": 25,
+    "overlappingRequestsInPageTraces": 0,
+    "serverLogExtractsOfTheBrowser": 19,
+    "overlappingRequestsInServerLogExtracts": 0,
+    "finalSql": "available + active reservation quantity + pending/paid/delivered order quantity = total (76 + 6 + 18 = 100); consumed results 50, of which do not match their target: 0",
+    "finalSqlAfterS25b": "(78 + 4 + 18 = 100); consumed results 52, of which do not match their target: 0"
+  },
+  "scenarios": {
+    "s25": "purchase answer and the browser repeat lost, Reset clicked: before the change the page retry was answered after Reset and the reservation and step 3 done came back; on the working tree of 0b1c3b5 no request followed Reset and the request was restored as unconfirmed; on cfe72a5 the retry happened to be answered before the click",
+    "s25b": "every purchase answer lost until Reset, then answers pass: with the frontend of d022ec7 a purchase attempt sent after Reset was answered and adopted; on cfe72a5 no attempt followed Reset, the request waited as unconfirmed and its button returned the one reservation",
+    "s26": "a second tab of the same profile joined again and bought: before the change the first tab could not load the newer reservation; after it the button loaded it with its quantity (three runs on 0b1c3b5, see README, and one on cfe72a5)",
+    "regression": "s16, s17 and s23 on 0b1c3b5 and on cfe72a5"
+  },
+  "note": "No credentials, env file, token or raw HAR are archived; the raw application logs are not archived.",
+  "files": [
+    {
+      "name": "README.txt",
+      "bytes": 2109,
+      "sha256": "111519e018088126e32bca6bd15ec6f93642a1a0ad2aa2bb2623ebe5b231c3eb"
+    },
+    {
+      "name": "evidence/a11y-admitted.json",
+      "bytes": 1665,
+      "sha256": "2cdd5f28ba8e2f4d37c77de47c03368f5325f01f372f7578d10c141ab3ce7d34"
+    },
+    {
+      "name": "evidence/a11y-finished.json",
+      "bytes": 2066,
+      "sha256": "02b3fb5755cbc206eba26532c252539c2ec7e768a53c2591c0692334fc82acb5"
+    },
+    {
+      "name": "evidence/a11y-page.json",
+      "bytes": 7712,
+      "sha256": "e91f321def143b72692075fd971d16e519388229dec8bf298f656262bfe1a40c"
+    },
+    {
+      "name": "evidence/a11y-step3-unconfirmed-ar2.json",
+      "bytes": 1079,
+      "sha256": "69d726a26e726217ba2b6f149e3b22c105e02c994dca60ba02aa14f84a7b4cb0"
+    },
+    {
+      "name": "evidence/a11y-step3-unconfirmed-cfe72a5.json",
+      "bytes": 1083,
+      "sha256": "d3731a1783d30b284952c076cd93f9e4408d69982516eeb91b7d1fab8949475e"
+    },
+    {
+      "name": "evidence/a11y-waiting-confirm.json",
+      "bytes": 2098,
+      "sha256": "f5ab92c60b73e6d09a4c19fd9006d8f0744c26c0d7fda8adafa8d76cceabdc46"
+    },
+    {
+      "name": "evidence/a11y-waiting.json",
+      "bytes": 1717,
+      "sha256": "d3bf1318621e36f7acb0556be40ba681a6110dde923a90e23c43534c82841c78"
+    },
+    {
+      "name": "evidence/final-0b1c3b5-stopped/final-f1.applog.json",
+      "bytes": 266,
+      "sha256": "80563615d561c6a3fc8ed37566ce3780fc4f87ace03e78c59937c3cc89105f97"
+    },
+    {
+      "name": "evidence/final-0b1c3b5-stopped/final-f1.fillers.log",
+      "bytes": 507,
+      "sha256": "514d54baa3d69660de1f41b6c751e897a0ba577e530d15a5012ef31709e7fa3c"
+    },
+    {
+      "name": "evidence/final-0b1c3b5-stopped/final-f1.requests.txt",
+      "bytes": 5671,
+      "sha256": "2232d3fab51d8a04b5571616596bafa7e2992fb9dd5ed53d6a699d6d4f8fd229"
+    },
+    {
+      "name": "evidence/final-0b1c3b5-stopped/final-f1a.trace.json",
+      "bytes": 2712,
+      "sha256": "ea8d08303f16c8510468807ab50d3d365f72dec743775dbb1fdec0cdac431193"
+    },
+    {
+      "name": "evidence/final-0b1c3b5-stopped/final-f1b.trace.json",
+      "bytes": 12584,
+      "sha256": "589d355955a72e0d008f57b25efc2c80deb8d9d55acc6dfce328cc4b1eccaed2"
+    },
+    {
+      "name": "evidence/final-0b1c3b5-stopped/final-f1c.trace.json",
+      "bytes": 746,
+      "sha256": "1cb93c6b9c7070773a7aeca56c5c1209b6adc36da6890237e63d614b8ba43160"
+    },
+    {
+      "name": "evidence/final-0b1c3b5-stopped/final-f2.fillers.log",
+      "bytes": 259,
+      "sha256": "3162350dd735ed55e6368dde2d2e8069d33eacefe3039cb5ca9c1342d0c016b0"
+    },
+    {
+      "name": "evidence/final-0b1c3b5-stopped/final.console.log",
+      "bytes": 4402,
+      "sha256": "fb38c04ec33a6fb69087cf89ca406dca919e9b0751298aafcf6d6ab253e5f58e"
+    },
+    {
+      "name": "evidence/final-f1.applog.json",
+      "bytes": 266,
+      "sha256": "f5347bdb08388af3c2b16dedf2421437434c5d060c8b5f751b37f3e600185090"
+    },
+    {
+      "name": "evidence/final-f1.fillers.log",
+      "bytes": 494,
+      "sha256": "672fab2b29eb84ac6597a0c25fda2de1fb5673a4025eb4063e3d6729004d584a"
+    },
+    {
+      "name": "evidence/final-f1.requests.txt",
+      "bytes": 5780,
+      "sha256": "f79092b2683929b10922e8180cced0356e2901e10eceb6ca5bbd87ca2df5dce6"
+    },
+    {
+      "name": "evidence/final-f1a.trace.json",
+      "bytes": 3323,
+      "sha256": "51ba76f96973c40ac3b55c5b5e3812cb4b87d1496a87a4f8909a2a4f07c3e27a"
+    },
+    {
+      "name": "evidence/final-f1b.trace.json",
+      "bytes": 13214,
+      "sha256": "6e8cfdac136e677a56d807683edb26d239b7bd569886184206cc4ff662137844"
+    },
+    {
+      "name": "evidence/final-f1c.trace.json",
+      "bytes": 746,
+      "sha256": "d115533b1eded46f7ab0336d5ff62992e295fca7cda790f1951ca8831130013f"
+    },
+    {
+      "name": "evidence/final-f2.applog.json",
+      "bytes": 269,
+      "sha256": "ef554e51d0f5c716ee45033094432bc81b658ae01c22e7faa66d35bcbb8574d9"
+    },
+    {
+      "name": "evidence/final-f2.fillers.log",
+      "bytes": 448,
+      "sha256": "196537a660aa888cc00518f5e43001799e72ae6948f1de18caeab4604d1b6ffd"
+    },
+    {
+      "name": "evidence/final-f2.requests.txt",
+      "bytes": 7560,
+      "sha256": "447156854d6cfe41d2d06113b35358426fb34572c4980ce079d0dee93cc31ff4"
+    },
+    {
+      "name": "evidence/final-f2.trace.json",
+      "bytes": 28551,
+      "sha256": "6560ac58c3f46aecc520e7e7bf9912e137c951cc66020481d07a7739c5457dc2"
+    },
+    {
+      "name": "evidence/final-sql-after-s25b.txt",
+      "bytes": 433,
+      "sha256": "99bee60b8ce2656d1a75e29ee9a5f5f80cbc82e0fab89b99cdae53b33fe68be5"
+    },
+    {
+      "name": "evidence/final.console.log",
+      "bytes": 9437,
+      "sha256": "ce6b1e6d527774afa2a058dcf349ac3cd0305ce67ec8489f4d22169f1f91ccdd"
+    },
+    {
+      "name": "evidence/mutation-autoreview2.txt",
+      "bytes": 4679,
+      "sha256": "d254c3dfc5f440505fcc07518ba243ddf896a2ef44617dc69623535d158709e8"
+    },
+    {
+      "name": "evidence/red-autoreview2-apibase.txt",
+      "bytes": 7623,
+      "sha256": "a3cdb9af90f8dc0c6fb5508ffb46d12802d02dd20b59e06cd10f727fba9ee967"
+    },
+    {
+      "name": "evidence/red-autoreview2-stop.txt",
+      "bytes": 9591,
+      "sha256": "9baea1d39fd1cafe3abc30abf6c306e167733e72b6db0ddac36f727539e1e308"
+    },
+    {
+      "name": "evidence/review5.proxy.log",
+      "bytes": 75497,
+      "sha256": "0c0ab7d01536d667e2950ebfd19a446ce6cda2f71b48cd8524a0acee498cb9a0"
+    },
+    {
+      "name": "evidence/s16-event-switch-ar2.applog.json",
+      "bytes": 277,
+      "sha256": "68cafd1aa14ed4d1484165a28af23c1b2d13ec0043b465575311fad453eb49b4"
+    },
+    {
+      "name": "evidence/s16-event-switch-ar2.console.log",
+      "bytes": 3634,
+      "sha256": "e8bf2758965caa0c3f1e98ee71700352041790e62f953ad6dfb614e43f9c3b5d"
+    },
+    {
+      "name": "evidence/s16-event-switch-ar2.requests.txt",
+      "bytes": 1945,
+      "sha256": "bf609b63c974c46e07dc1830fecc83c92ca844478a73b9fb0151a9103772c7e0"
+    },
+    {
+      "name": "evidence/s16-event-switch-ar2.trace.json",
+      "bytes": 5492,
+      "sha256": "292844abecd6a7d2e590fea336b63b4f9cbbf55b6f97c1f880231f2327b5d5db"
+    },
+    {
+      "name": "evidence/s16-event-switch-cfe72a5.applog.json",
+      "bytes": 277,
+      "sha256": "9186364fb87f8a49b10977db077b25d4e874202432b875313a10d4e140b51e1a"
+    },
+    {
+      "name": "evidence/s16-event-switch-cfe72a5.console.log",
+      "bytes": 3635,
+      "sha256": "fc26110f7e6986264fd97b727df2c9c53c99d2fabdc07cd684c090ff482b95c8"
+    },
+    {
+      "name": "evidence/s16-event-switch-cfe72a5.requests.txt",
+      "bytes": 1959,
+      "sha256": "29f6d65313fb6d454b60ee32e1c8448855500cff81dc356de0fd90bc82fb458a"
+    },
+    {
+      "name": "evidence/s16-event-switch-cfe72a5.trace.json",
+      "bytes": 5487,
+      "sha256": "7b462cdff54ec3bcbe9eb489ccfb5af1b4c3d1f099e725a7cbd475dfe1253979"
+    },
+    {
+      "name": "evidence/s17-reload-unconfirmed-a-ar2.trace.json",
+      "bytes": 3595,
+      "sha256": "55bed08003887b451281d1cec837dee282a9b8df28fdd18b8ab891e905fb60aa"
+    },
+    {
+      "name": "evidence/s17-reload-unconfirmed-a-cfe72a5.trace.json",
+      "bytes": 3633,
+      "sha256": "079fffef3d367bdafed213cf80542f41f35f27acfe79839d42c078bfac408812"
+    },
+    {
+      "name": "evidence/s17-reload-unconfirmed-ar2.applog.json",
+      "bytes": 265,
+      "sha256": "3f21de583eb965266bc80a6b7abb7b02cb5459b1ff2248ddf3b3e7357cc77ff9"
+    },
+    {
+      "name": "evidence/s17-reload-unconfirmed-ar2.console.log",
+      "bytes": 3343,
+      "sha256": "abf8b2e4203740f1ed0938a913b832107fb964a5c4dccde9c3d47ce298c6ff3f"
+    },
+    {
+      "name": "evidence/s17-reload-unconfirmed-ar2.requests.txt",
+      "bytes": 2135,
+      "sha256": "d381c47fce4fe1a51d2afdbd61cf8efa348df925e91ba45a93b00d7c1b42dc08"
+    },
+    {
+      "name": "evidence/s17-reload-unconfirmed-b-ar2.trace.json",
+      "bytes": 1507,
+      "sha256": "58ab523432dca7ba1a710494ed7166d8bbede98db8b9e96ba752d590f2aa595e"
+    },
+    {
+      "name": "evidence/s17-reload-unconfirmed-b-cfe72a5.trace.json",
+      "bytes": 1484,
+      "sha256": "ddd809c2269f8af2156f98118142a72f71f61c77f58d4d182d1701c64d1a8ffa"
+    },
+    {
+      "name": "evidence/s17-reload-unconfirmed-cfe72a5.applog.json",
+      "bytes": 265,
+      "sha256": "1a5992bb2882a7234f5d9fb9fbc1cb4d6ebdedaf8793682e3799cc728a61187d"
+    },
+    {
+      "name": "evidence/s17-reload-unconfirmed-cfe72a5.console.log",
+      "bytes": 3358,
+      "sha256": "2d34cd5e4082e93e1219aad5c0df1cc5550c20705b9ca7ee0e8523d9340f88e8"
+    },
+    {
+      "name": "evidence/s17-reload-unconfirmed-cfe72a5.requests.txt",
+      "bytes": 2150,
+      "sha256": "ecbfd64ed0aae19317cfecaad19e76c910ecedd473f3bc293443f6d40fddc8d3"
+    },
+    {
+      "name": "evidence/s23-reset-ar2.applog.json",
+      "bytes": 264,
+      "sha256": "294ee49b014eea1ea4ce8cc1c89844885ac45c1e4609e4597d279374888f2170"
+    },
+    {
+      "name": "evidence/s23-reset-ar2.console.log",
+      "bytes": 1587,
+      "sha256": "f6ae03e363cceb0c359be82131dd88c41391324a36c37f1af88ca4053baf97a6"
+    },
+    {
+      "name": "evidence/s23-reset-ar2.requests.txt",
+      "bytes": 2081,
+      "sha256": "13a0523cc80bf7de8692beffec34564dd29746ba8b8e6a4d92cb640003645d3e"
+    },
+    {
+      "name": "evidence/s23-reset-ar2.trace.json",
+      "bytes": 1256,
+      "sha256": "5ac000fb99c1658926a84201a0f7523e4bbe1dad52c2f62fef43464bb44d35ba"
+    },
+    {
+      "name": "evidence/s23-reset-cfe72a5.applog.json",
+      "bytes": 264,
+      "sha256": "ac2e7a3d7c89352fa43330ef09569c0b038244437edaa069c675ccb25badbc3c"
+    },
+    {
+      "name": "evidence/s23-reset-cfe72a5.console.log",
+      "bytes": 1587,
+      "sha256": "eb60578598f7ec6c0f51e7f5469e64d82194cd506b11eec56d7602e08da6e1fb"
+    },
+    {
+      "name": "evidence/s23-reset-cfe72a5.requests.txt",
+      "bytes": 1922,
+      "sha256": "7d283265c1141ecee2008cc012d48c0a6a5974ccfe99d01894c0a50feb237814"
+    },
+    {
+      "name": "evidence/s23-reset-cfe72a5.trace.json",
+      "bytes": 734,
+      "sha256": "ab2e65e131d9e9329382d346a4da2f3779eeb0ac99ea05e8a66c2f0e8f1fbc57"
+    },
+    {
+      "name": "evidence/s25-reset-purchase-after.applog.json",
+      "bytes": 265,
+      "sha256": "9fc5d50e90fde49f439f80ec39d9f079e5c7a71f1bfe635c04bf1385f6451c7a"
+    },
+    {
+      "name": "evidence/s25-reset-purchase-after.console.log",
+      "bytes": 2323,
+      "sha256": "1d982d7f11df651cd1717275ce59bd6e62a3940d076c94ea0ec800df2c27e480"
+    },
+    {
+      "name": "evidence/s25-reset-purchase-after.requests.txt",
+      "bytes": 1796,
+      "sha256": "20e88ea298f80083cee35134c9506c0cc5e6212989a1473c410b3ebf5b16f329"
+    },
+    {
+      "name": "evidence/s25-reset-purchase-after.trace.json",
+      "bytes": 4758,
+      "sha256": "17993edcd722e1b5c56ad3daa9cc4c360c441808732ff88f8b6d30d46abc5681"
+    },
+    {
+      "name": "evidence/s25-reset-purchase-before.applog.json",
+      "bytes": 265,
+      "sha256": "ed2a9b9ac9a740a44c7269984291206ae6012d552eca7cbea4a4c7cfad831982"
+    },
+    {
+      "name": "evidence/s25-reset-purchase-before.console.log",
+      "bytes": 2283,
+      "sha256": "f3fc0e47fb9182c1a77ab8d31cc873b1022e53608f01cc2230c9cb0d83a43402"
+    },
+    {
+      "name": "evidence/s25-reset-purchase-before.requests.txt",
+      "bytes": 1773,
+      "sha256": "527472ed836b4aab57c4f3a80bdc6cbe9fce1ea142c31d78d46671ef44a6ac9f"
+    },
+    {
+      "name": "evidence/s25-reset-purchase-before.trace.json",
+      "bytes": 4405,
+      "sha256": "bedbfc23906ab6dd999399d618eda02bf604c2faa0bcf3efbd8e97e05375c57d"
+    },
+    {
+      "name": "evidence/s25-reset-purchase-cfe72a5.applog.json",
+      "bytes": 265,
+      "sha256": "4fd25687e0de6cd53b0b729a9dd9af374e9b082eaec09683e35ed76ae878718d"
+    },
+    {
+      "name": "evidence/s25-reset-purchase-cfe72a5.console.log",
+      "bytes": 2291,
+      "sha256": "536b475d186962a8320c4ebc2a5332c165b02831dda84e417de18655771531ef"
+    },
+    {
+      "name": "evidence/s25-reset-purchase-cfe72a5.requests.txt",
+      "bytes": 1630,
+      "sha256": "e731d76db2dff07a057f754fda315a47be95716c008b1a956b6d341c32d3dc83"
+    },
+    {
+      "name": "evidence/s25-reset-purchase-cfe72a5.trace.json",
+      "bytes": 4173,
+      "sha256": "0550b51ed62f160cb33d07a05dd9bbb5ed488b021d40fd378b8030c88f3be61e"
+    },
+    {
+      "name": "evidence/s25b-reset-purchase-cfe72a5.applog.json",
+      "bytes": 266,
+      "sha256": "571a5f15558ba1779352299d8573fc5e9a904be571f5daf23a03006edccf5bf8"
+    },
+    {
+      "name": "evidence/s25b-reset-purchase-cfe72a5.console.log",
+      "bytes": 2365,
+      "sha256": "1660dc00c27537ff0d00dd3928a472c62caa9cb0759a1137da539e75ae8b5487"
+    },
+    {
+      "name": "evidence/s25b-reset-purchase-cfe72a5.requests.txt",
+      "bytes": 1870,
+      "sha256": "76630c33453ac0ae963982206d8680ce42045694951ca109e78d42e4d5a6d645"
+    },
+    {
+      "name": "evidence/s25b-reset-purchase-cfe72a5.trace.json",
+      "bytes": 4992,
+      "sha256": "254299163b20fc0c8622cc60510f415091f6918ad75d8b44ecb314bcbc457e1a"
+    },
+    {
+      "name": "evidence/s25b-reset-purchase-red-d022ec7.applog.json",
+      "bytes": 265,
+      "sha256": "3ebc1160300f7ea4c0692eef6806e969f145b2b1afb75278580e0c8236e5338f"
+    },
+    {
+      "name": "evidence/s25b-reset-purchase-red-d022ec7.console.log",
+      "bytes": 2437,
+      "sha256": "a3970a7ee8c86c8a6c916b479fa74331aac89780666fcd3ffa8bdda9604abc34"
+    },
+    {
+      "name": "evidence/s25b-reset-purchase-red-d022ec7.requests.txt",
+      "bytes": 1981,
+      "sha256": "3482796c5b5d5103669341feabd658ed5b766f1b202fcf69fdb717b2f8878e59"
+    },
+    {
+      "name": "evidence/s25b-reset-purchase-red-d022ec7.trace.json",
+      "bytes": 4419,
+      "sha256": "775e9be9ba6bf593d0fb9bc23ce63f32ef71543c2b1285051b862c28bdf1d84d"
+    },
+    {
+      "name": "evidence/s26-newer-after.applog.json",
+      "bytes": 265,
+      "sha256": "a2027e5349f2dff6a075b0284a1da8d0dc9e3b9be36dacc625c7601d8d1814bd"
+    },
+    {
+      "name": "evidence/s26-newer-after.console.log",
+      "bytes": 2041,
+      "sha256": "66730fc741cadad1cd81bec409cdb7ae1c210f985ebcf4cd630f39670f5bc391"
+    },
+    {
+      "name": "evidence/s26-newer-after.requests.txt",
+      "bytes": 3209,
+      "sha256": "260c2cc675fda61f170f6cc9271070980dd6a66e223b03698a0cbf0ad7d093f0"
+    },
+    {
+      "name": "evidence/s26-newer-after.trace.json",
+      "bytes": 4132,
+      "sha256": "ebd3bf2ebf842072ab3705c3ed179d78afc93589d5fce2adf52a04e39bf541d8"
+    },
+    {
+      "name": "evidence/s26-newer-after2.applog.json",
+      "bytes": 265,
+      "sha256": "3b94f0c2b3dc063fd8f34e51d2fdd8ace442c4770f936d720c8de36fe15de169"
+    },
+    {
+      "name": "evidence/s26-newer-after2.console.log",
+      "bytes": 2057,
+      "sha256": "9d3b88d73d246eae4f800242b0e67aa4789a4ad4f8ff3f2d7e20fcf052186a22"
+    },
+    {
+      "name": "evidence/s26-newer-after2.requests.txt",
+      "bytes": 3209,
+      "sha256": "0c6ee09ef9705f18e60cfca0e7e233e7b2416acd68363420a9c9406a78f961e8"
+    },
+    {
+      "name": "evidence/s26-newer-after2.trace.json",
+      "bytes": 4181,
+      "sha256": "40622056903c188b3cf734fc5fc923a9b9c97d86895dd6ab98ee754ffef120dc"
+    },
+    {
+      "name": "evidence/s26-newer-after3.applog.json",
+      "bytes": 265,
+      "sha256": "c7e1542c95b4698ac8b325f67e68d5ea942a94b2d13cd77cc3749876790c0978"
+    },
+    {
+      "name": "evidence/s26-newer-after3.console.log",
+      "bytes": 2081,
+      "sha256": "2742b6583a21700f67acce356a067fd7f68b022adf2a9fa13a3d36b8d756b7d7"
+    },
+    {
+      "name": "evidence/s26-newer-after3.requests.txt",
+      "bytes": 3209,
+      "sha256": "e9c4045cb202e8c7a2083598b408bbbc9d24a15d20adb7e1772f870c2a13896a"
+    },
+    {
+      "name": "evidence/s26-newer-after3.trace.json",
+      "bytes": 4203,
+      "sha256": "a79b37fa5baf85baa96356f8c0b725fbc6621e75fc710fccbe3cb29d085e3de1"
+    },
+    {
+      "name": "evidence/s26-newer-before.applog.json",
+      "bytes": 265,
+      "sha256": "e287b8e8f899701ffe16fa409e7bbc8f49b1a3e4db88cf7ce7560419ae4a9dee"
+    },
+    {
+      "name": "evidence/s26-newer-before.console.log",
+      "bytes": 2063,
+      "sha256": "c2e7c1814221fb185d93c3c28c37e87cdb40656871fee5a05857312a40e40663"
+    },
+    {
+      "name": "evidence/s26-newer-before.requests.txt",
+      "bytes": 2982,
+      "sha256": "5e9f7c7ce17a71d840a1faf99bbec6f3dbe2cfb6246a28e8b894edc326f28e59"
+    },
+    {
+      "name": "evidence/s26-newer-before.trace.json",
+      "bytes": 4216,
+      "sha256": "4c0e4bf84c88c9c2fcfe8c4853ff10c0a62750e87b4bf70c1174682911b8bf28"
+    },
+    {
+      "name": "evidence/s26-newer-cfe72a5.applog.json",
+      "bytes": 265,
+      "sha256": "572ab9b7bf40334f4f233452848d6057d5f6983cf0e745da02e9efe13c740e16"
+    },
+    {
+      "name": "evidence/s26-newer-cfe72a5.console.log",
+      "bytes": 2080,
+      "sha256": "d35d2b53d776fab0ddeadb1f35830e892c78c5053beb8ffd96637f4a91466ba0"
+    },
+    {
+      "name": "evidence/s26-newer-cfe72a5.requests.txt",
+      "bytes": 3220,
+      "sha256": "b8b8fe1091835e7933774a727d769ac334baa6c331fee129c92d3fb655ad2cf1"
+    },
+    {
+      "name": "evidence/s26-newer-cfe72a5.trace.json",
+      "bytes": 4179,
+      "sha256": "6ceb5cd7da2fb707128c83abe7ac9f5106525128037a0ed1c8ffce0eb1a16805"
+    },
+    {
+      "name": "logs/ar2-0b1c3b5-build.log",
+      "bytes": 94,
+      "sha256": "b1549c2c034dd03e6b5ea3ea465f2ea87716fe6eaf9d08c5c2e361930a7701a0"
+    },
+    {
+      "name": "logs/ar2-0b1c3b5-callback.log",
+      "bytes": 264,
+      "sha256": "841dbb922e9f7714fee8aa6d69009a6c9789497dd0338ba9d7c71999664ee21a"
+    },
+    {
+      "name": "logs/ar2-0b1c3b5-flash-sale.log",
+      "bytes": 3070,
+      "sha256": "d4b6f937835b7a45416917b9b21279861d8b3aa66d48cfada3e3ad0e0d4528d0"
+    },
+    {
+      "name": "logs/ar2-0b1c3b5-integration.log",
+      "bytes": 695163,
+      "sha256": "0bb215bd03b9aef534ac33928cfe37f25908ea4d61095aa9a20ca6c7915e9661"
+    },
+    {
+      "name": "logs/ar2-0b1c3b5-lint.log",
+      "bytes": 1602,
+      "sha256": "006d1002e521bbc0b4e5935a8390dbb72f4ef468d9856b747dbf12cbcf146f98"
+    },
+    {
+      "name": "logs/ar2-0b1c3b5-typecheck.log",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "name": "logs/ar2-0b1c3b5-unit.log",
+      "bytes": 16794,
+      "sha256": "cc89c550046ed1828cd11159489e1bedbdf2d044039ee993438c8bd44617f9ca"
+    },
+    {
+      "name": "logs/ar2-build.log",
+      "bytes": 94,
+      "sha256": "b1549c2c034dd03e6b5ea3ea465f2ea87716fe6eaf9d08c5c2e361930a7701a0"
+    },
+    {
+      "name": "logs/ar2-callback.log",
+      "bytes": 264,
+      "sha256": "a188c43834620834eb67c4e09235f735ef3f1ef0744a2cf2901219fc944ba762"
+    },
+    {
+      "name": "logs/ar2-flash-sale.log",
+      "bytes": 3066,
+      "sha256": "00b0d49f642f3220da33356aae4e4a91674443f50888f5124349aba53a30a332"
+    },
+    {
+      "name": "logs/ar2-integration.log",
+      "bytes": 694940,
+      "sha256": "8a5e675b38185abe2b71decd1573f1968ced57b1b9e3ebcd3a95f8622eb06a50"
+    },
+    {
+      "name": "logs/ar2-lint.log",
+      "bytes": 1602,
+      "sha256": "006d1002e521bbc0b4e5935a8390dbb72f4ef468d9856b747dbf12cbcf146f98"
+    },
+    {
+      "name": "logs/ar2-typecheck.log",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "name": "logs/ar2-unit.log",
+      "bytes": 16792,
+      "sha256": "702a28c05ceef896e9a47d0ec0ac8a3a7b3eb06c46961646d6a16f62e04ef692"
+    },
+    {
+      "name": "logs/pr28-checks-2.log",
+      "bytes": 1817,
+      "sha256": "fa8c8c93c44ce19f9afbebd648665a07e0b26867f053ab29f22e9e474fb38a0c"
+    },
+    {
+      "name": "logs/pr28-reactions-2.json",
+      "bytes": 2,
+      "sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+    },
+    {
+      "name": "logs/pr28-review-comments-2.json",
+      "bytes": 67361,
+      "sha256": "be5e6b9cf8666e429aacbb157a959a7f924107967fdcd59db1a13ee53f1b2844"
+    },
+    {
+      "name": "logs/pr28-reviews-2.json",
+      "bytes": 9278,
+      "sha256": "d672856934644559fc8ca48b1ff450eab2b3b34d4494abba1c157004fa16e9a6"
+    },
+    {
+      "name": "logs/pr28-summary-2.md",
+      "bytes": 873,
+      "sha256": "96857deb1b57377b2d0e8266bf568012c6815f2e6d1f41c3a9e0521de7ff89c2"
+    },
+    {
+      "name": "logs/pr28-threads.json",
+      "bytes": 776,
+      "sha256": "734277b66d4de3f3cc72ed92cefdb5b3445d3ff00980dc4de7a784727bf238e5"
+    },
+    {
+      "name": "logs/summaries.txt",
+      "bytes": 37206,
+      "sha256": "e5f0bf5651f0f4eac695a9ccd8950e4101f67d47e2057abfc4a56846b6349d43"
+    },
+    {
+      "name": "scripts/app.sh",
+      "bytes": 1274,
+      "sha256": "1db2a4f5d06903f1e30a64216a36051f9774c85d8efc1ad22b0b4aec5b2d3d76"
+    },
+    {
+      "name": "scripts/applog.mjs",
+      "bytes": 3307,
+      "sha256": "a152bb060ebef812e1b3971a5661bdf73dee646f87c9b7ad9a05b71c9ccc9ca8"
+    },
+    {
+      "name": "scripts/ar2-regress.sh",
+      "bytes": 1479,
+      "sha256": "f0075cdff28652ff52df10be4fb852f0dbb0067f70903b23f89d9f7ec97ce41c"
+    },
+    {
+      "name": "scripts/archive-autoreview2.mjs",
+      "bytes": 12697,
+      "sha256": "9ab1420af271a0af284d6021dcf75ba003bca4cf9acff354a2f991ff6498ec58"
+    },
+    {
+      "name": "scripts/f2-window.mjs",
+      "bytes": 1674,
+      "sha256": "4508143b090f463656b5983658a79140cc1b1087130799533679e91a1549fe81"
+    },
+    {
+      "name": "scripts/final-sql.sh",
+      "bytes": 555,
+      "sha256": "e6d97559254a45e16ab658cea1880ccc697ba7c93d4fd07729ddec5f5c52a5ba"
+    },
+    {
+      "name": "scripts/final.sh",
+      "bytes": 8500,
+      "sha256": "e0b9db29c81a84c67720371df15949d51c1499f9ae3b12bc9e9a9eea6d5f09b8"
+    },
+    {
+      "name": "scripts/helpers.sh",
+      "bytes": 4022,
+      "sha256": "10ead99e8021a02afcf726752c03914a3aef76ffe929d8daf3db7e8c92ee9813"
+    },
+    {
+      "name": "scripts/lib.sh",
+      "bytes": 4903,
+      "sha256": "d82d38d458815d14150d20c64a27b5c4280866659006367a6fa853aff2b1fd17"
+    },
+    {
+      "name": "scripts/mutate.mjs",
+      "bytes": 11595,
+      "sha256": "ba4a36db10956ebda55615e9c475621669ccd17738d55cb74a3b14fe8d1af6ca"
+    },
+    {
+      "name": "scripts/proxy.mjs",
+      "bytes": 5532,
+      "sha256": "9d879faca4cb5c44d618fc330752b4547ad8c0fa23f40a03e00eb13ae8054616"
+    },
+    {
+      "name": "scripts/red-at.mjs",
+      "bytes": 1037,
+      "sha256": "848c2550bb111f72f858fa15014e2e8fd307ffac1171ed341b5aa1a9940ae312"
+    },
+    {
+      "name": "scripts/review-fix.sh",
+      "bytes": 7968,
+      "sha256": "5159b9054cff26a11de2955627cdf98af0ca8a4b351b239fc933bc9c9ac4e160"
+    },
+    {
+      "name": "scripts/review4.sh",
+      "bytes": 3655,
+      "sha256": "efe95c00037c3f9f4c14ebfcec4e5ed2fcbf297bc29108b0f16bba7395998b5c"
+    },
+    {
+      "name": "scripts/review5.sh",
+      "bytes": 4995,
+      "sha256": "ba2273d875ebfa20de2c2c69075b791365c76ad2db4a32ad844c8f9adc1bb64b"
+    },
+    {
+      "name": "scripts/review6.sh",
+      "bytes": 3965,
+      "sha256": "094837cad066b89ed01d01759b66569d90b92005acb352ae93b39cb754fed5f4"
+    },
+    {
+      "name": "scripts/summary.mjs",
+      "bytes": 3038,
+      "sha256": "e486726c3f81c0c491e7074c6d20c69f6b7636b14ecc0eda77e19ad2928704f3"
+    }
+  ]
+}

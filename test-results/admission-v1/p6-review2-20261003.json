@@ -1,0 +1,327 @@
+{
+  "runId": "peakpass-p6-20261003",
+  "part": "external review, second round",
+  "codeSha": "fc0f4a8a665d385e52a3300882bd376eee4f24f8",
+  "previous": [
+    {
+      "archive": "p6-final-20261003.zip",
+      "codeSha": "02ee7e025b31b5de39f942d4cfec1fc3e9432e74"
+    },
+    {
+      "archive": "p6-review-20261003.zip",
+      "codeSha": "b9656ab317d344f2bedff3b49ecfb9638c77f7bb",
+      "head": "bb2fb1357bf4070c477e7397fa28a9afa9e65c5f"
+    }
+  ],
+  "baseSha": "2d67cc3c10a1d04bebe0a7a81f9575ea39e63363",
+  "contract": {
+    "revision": "admission-v1",
+    "sha256": "e22be4df9910811eba552f630b43170ba0cf0c8d953a54dc5a3cea34c0dcf3d1"
+  },
+  "archive": "p6-review2-20261003.zip",
+  "archiveSha256": "cf8cc5bc4be7ef0f907b9b4836fa8e12cb99936e1a759fdbc487459baed377a5",
+  "externalReview": {
+    "reviewer": "a Codex session with four independent subagents, relayed by the maintainer; the relayed result states no model, version or effort",
+    "target": "2d67cc3c10a1d04bebe0a7a81f9575ea39e63363..bb2fb1357bf4070c477e7397fa28a9afa9e65c5f",
+    "mode": "static, plus the 63 tests of the polling file in a memory runner and two in-memory reproductions; no browser, HTTP or database run",
+    "findings": "P0 0, P1 0, P2 2: an earlier reservation read applied after a new join and purchase on the same event; a demo session request without a time limit that every later request waited for",
+    "fixedIn": "fc0f4a8a665d385e52a3300882bd376eee4f24f8",
+    "reReview": "pending"
+  },
+  "results": {
+    "build": "pass",
+    "typecheck": "pass",
+    "lintErrors": 0,
+    "lintWarnings": 11,
+    "unitPassed": 223,
+    "unitSuites": 23,
+    "pollingTests": 63,
+    "integrationPassed": 346,
+    "integrationSkipped": 15,
+    "integrationSuitesPassed": 30,
+    "integrationSuitesSkipped": 2,
+    "harnessPassed": 29,
+    "callbackHarness": "pass",
+    "mutations": "49/49 at b9656ab; the polling script did not change afterwards",
+    "checkPageTask21": "10/10",
+    "checkPageTask22CasesPassed": 4,
+    "servedFilesEqualCommittedBlobs": 10,
+    "pageTraces": 8,
+    "overlappingRequestsInPageTraces": 0,
+    "serverLogExtractsOfTheBrowser": 6,
+    "overlappingRequestsInServerLogExtracts": 0,
+    "finalSql": "available + active reservation quantity + pending/paid/delivered order quantity = total (85 + 3 + 12 = 100); consumed results that do not match their target: 0"
+  },
+  "scenarios": {
+    "s21": "reservation read held back 15 s, meanwhile a new join and a second purchase of quantity 1 on the same event: before the change the late answer replaced the second reservation and quantity 1 with the first reservation and quantity 2; after it the second reservation stayed",
+    "s22": "while waiting, one status request answered 401 (invalid token injected) and the new demo session was held 20 s: before the change no status request was answered in the 150 s observed and the entry expired; after it each held session request was given up after about 5 s, a new session was issued once the server answered and polling resumed (143 answered status requests in 150 s)"
+  },
+  "note": "No credentials, env file, token or raw HAR are archived; the raw application logs are not archived.",
+  "files": [
+    {
+      "name": "README.txt",
+      "bytes": 938,
+      "sha256": "aa5407c509d410ce1402713b1ca190c88567e9b38d2822971e55deb72b3ae94b"
+    },
+    {
+      "name": "evidence/a11y-admitted.json",
+      "bytes": 1665,
+      "sha256": "2cdd5f28ba8e2f4d37c77de47c03368f5325f01f372f7578d10c141ab3ce7d34"
+    },
+    {
+      "name": "evidence/a11y-finished.json",
+      "bytes": 2066,
+      "sha256": "02b3fb5755cbc206eba26532c252539c2ec7e768a53c2591c0692334fc82acb5"
+    },
+    {
+      "name": "evidence/a11y-page.json",
+      "bytes": 7712,
+      "sha256": "e91f321def143b72692075fd971d16e519388229dec8bf298f656262bfe1a40c"
+    },
+    {
+      "name": "evidence/a11y-waiting-confirm.json",
+      "bytes": 2098,
+      "sha256": "f5ab92c60b73e6d09a4c19fd9006d8f0744c26c0d7fda8adafa8d76cceabdc46"
+    },
+    {
+      "name": "evidence/a11y-waiting.json",
+      "bytes": 1717,
+      "sha256": "d3bf1318621e36f7acb0556be40ba681a6110dde923a90e23c43534c82841c78"
+    },
+    {
+      "name": "evidence/final-f1.applog.json",
+      "bytes": 266,
+      "sha256": "804da8e79e0e7cc33db448288d3655e0e39ee85460c82bf898b3b904fea30355"
+    },
+    {
+      "name": "evidence/final-f1.fillers.log",
+      "bytes": 507,
+      "sha256": "0bf73b66e462d9a2a72798a81bbe054c8210cf201c367dbe31fc51c3e337e761"
+    },
+    {
+      "name": "evidence/final-f1.requests.txt",
+      "bytes": 5639,
+      "sha256": "f3ba0e9466e18f974f5ff10097842c78baae09a7f6dbe1cdfc76800a528595ac"
+    },
+    {
+      "name": "evidence/final-f1a.trace.json",
+      "bytes": 3299,
+      "sha256": "58fe08b9be515dc2125498f1a6fedb3d921373f29e68dd1a2842ec4976903539"
+    },
+    {
+      "name": "evidence/final-f1b.trace.json",
+      "bytes": 12606,
+      "sha256": "d3bfd1041613adae0e7570fbca212d5cc203c64f10a27d9dcba529e106412bbb"
+    },
+    {
+      "name": "evidence/final-f1c.trace.json",
+      "bytes": 718,
+      "sha256": "6a9c0a4433ff57f06ce6282c3509227fb50a241ba9e9c9778f182dce5a1365b7"
+    },
+    {
+      "name": "evidence/final-f2.applog.json",
+      "bytes": 269,
+      "sha256": "798c2ddae9636152ff458ba1336ed9fcaf67d8a9bedbd10f842c7dd4011c8ea4"
+    },
+    {
+      "name": "evidence/final-f2.fillers.log",
+      "bytes": 448,
+      "sha256": "05e8961bc82f5beb70d675a7f3c932f25c143d0422185791098c77cdae37531e"
+    },
+    {
+      "name": "evidence/final-f2.requests.txt",
+      "bytes": 7669,
+      "sha256": "460288e629c144e391a202741de5a8ff8a18ed7a9982093951e1e2a5270f9990"
+    },
+    {
+      "name": "evidence/final-f2.trace.json",
+      "bytes": 29203,
+      "sha256": "da6ae7f361de8030ae56229fe69b71067ac8b7c6ccd387916aa40f8ffa742660"
+    },
+    {
+      "name": "evidence/final.console.log",
+      "bytes": 9436,
+      "sha256": "70dda9a8104cd8d48f0865f2519c0454c794fb4191c58636c8f9635a036c76ac"
+    },
+    {
+      "name": "evidence/review3.proxy.log",
+      "bytes": 59061,
+      "sha256": "f154db9071a19c20c78eed584a5d1ca54f244880f8c21c7c0a76547a1af80ab5"
+    },
+    {
+      "name": "evidence/s21-earlier-read-before.applog.json",
+      "bytes": 265,
+      "sha256": "fc981a1a16b3ea0c05135481fe2f56d6ef5fb915057bf054e1e9fd42d2b64327"
+    },
+    {
+      "name": "evidence/s21-earlier-read-before.console.log",
+      "bytes": 2336,
+      "sha256": "d05b001b156ab1be02b49d75e2a592bc5f498d6f7a88d2f02381b29c63452238"
+    },
+    {
+      "name": "evidence/s21-earlier-read-before.requests.txt",
+      "bytes": 3236,
+      "sha256": "2adfbfb72cda5738f56459d53245a11c1c45c70fa38c826859767bfa222e94dd"
+    },
+    {
+      "name": "evidence/s21-earlier-read-before.trace.json",
+      "bytes": 4496,
+      "sha256": "95671612dafef06cfdd4c199fef6768d8ca1d1dd948e20ee623861c3bb7a02a1"
+    },
+    {
+      "name": "evidence/s21-earlier-read.applog.json",
+      "bytes": 265,
+      "sha256": "e1f9d869b35ed630389ffc982c6bc7e9a12e2a6b622055d93b2a59999cc4d726"
+    },
+    {
+      "name": "evidence/s21-earlier-read.console.log",
+      "bytes": 2350,
+      "sha256": "903d4723c994b2bdf9af2de5a7b00c5ab8624dfb0b6a6af412f3d8e0a19be14d"
+    },
+    {
+      "name": "evidence/s21-earlier-read.requests.txt",
+      "bytes": 2976,
+      "sha256": "8c0b02ea5f2bd23dd2ae7fefe1403120198b78c04178c0953a61f8e5428710b7"
+    },
+    {
+      "name": "evidence/s21-earlier-read.trace.json",
+      "bytes": 4542,
+      "sha256": "ddf9171912e5382d8a83f4e548deee644d3485636c66da8fbd057823eee301c4"
+    },
+    {
+      "name": "evidence/s22-session-before.applog.json",
+      "bytes": 265,
+      "sha256": "36d720aad79930f09b12aaa3eb92bd863d206e970b7198ed5a75025ac8711dd5"
+    },
+    {
+      "name": "evidence/s22-session-before.console.log",
+      "bytes": 3821,
+      "sha256": "45040267e8c97b005ec79cacff41e547a1561c1496bc51a8f194c570df4c9a52"
+    },
+    {
+      "name": "evidence/s22-session-before.fillers.log",
+      "bytes": 2141,
+      "sha256": "7bff7a3f2dded53c9f1d600ced8d84f6b51ce65df8ad16f99c037b29d3a6e4a3"
+    },
+    {
+      "name": "evidence/s22-session-before.requests.txt",
+      "bytes": 1353,
+      "sha256": "8575ed6eaff9e48b4ea863ed8b02ccb3a033b9ba9f78bee869342b78a5737d3f"
+    },
+    {
+      "name": "evidence/s22-session-before.trace.json",
+      "bytes": 9346,
+      "sha256": "f3c9e0112ee023084b1406dbd7952192210b845d645870f3362bb66dba758f8b"
+    },
+    {
+      "name": "evidence/s22-session.applog.json",
+      "bytes": 269,
+      "sha256": "8d1a7a39d61ecb20de79068cd9200faeac3838175a6b175d4614f668952b4bab"
+    },
+    {
+      "name": "evidence/s22-session.console.log",
+      "bytes": 4348,
+      "sha256": "b5cdf7bc14a453ac8457a925c4a109ecd70810976d43ee10917ba247d972cebc"
+    },
+    {
+      "name": "evidence/s22-session.fillers.log",
+      "bytes": 2128,
+      "sha256": "91935fdddde680f2fc61981fd0f46ccfec4b0ad5c041a9a69c8e222b5c69ffae"
+    },
+    {
+      "name": "evidence/s22-session.requests.txt",
+      "bytes": 21382,
+      "sha256": "af7cf0ae2c0d5da0984d8c7c70be2f090772aea03c8aaad4c2ec025423e93f8a"
+    },
+    {
+      "name": "evidence/s22-session.trace.json",
+      "bytes": 86952,
+      "sha256": "488dc678dffc525e128e967f6ed8d03ad0afa6c33ce30043a4999b68f816d007"
+    },
+    {
+      "name": "logs/ext2-build.log",
+      "bytes": 94,
+      "sha256": "b1549c2c034dd03e6b5ea3ea465f2ea87716fe6eaf9d08c5c2e361930a7701a0"
+    },
+    {
+      "name": "logs/ext2-callback.log",
+      "bytes": 264,
+      "sha256": "1a47c76239c552b667f5ee7e3babb28a308a65e8ab8e6a721bf1cdc581c15d8a"
+    },
+    {
+      "name": "logs/ext2-flash-sale.log",
+      "bytes": 3062,
+      "sha256": "4ed1c1ebc2c35d556b32821bfa3c3c53e66402d7427ae0d766e7afe451b6b4fc"
+    },
+    {
+      "name": "logs/ext2-integration.log",
+      "bytes": 728455,
+      "sha256": "bcf3068e6f10ff795154a1fb83fccc1d1f149003a3e4a803b773c4aeac411ca6"
+    },
+    {
+      "name": "logs/ext2-lint.log",
+      "bytes": 1602,
+      "sha256": "006d1002e521bbc0b4e5935a8390dbb72f4ef468d9856b747dbf12cbcf146f98"
+    },
+    {
+      "name": "logs/ext2-typecheck.log",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "name": "logs/ext2-unit.log",
+      "bytes": 16805,
+      "sha256": "07b32a16aaed11ead8c7a132fc789dff6b70fb462ad672977548a7743fe84750"
+    },
+    {
+      "name": "logs/summaries.txt",
+      "bytes": 32198,
+      "sha256": "6d72ef55e4967460054fc2f6134fcac3c021690884897542dd41fb286bafcf61"
+    },
+    {
+      "name": "scripts/app.sh",
+      "bytes": 1274,
+      "sha256": "1db2a4f5d06903f1e30a64216a36051f9774c85d8efc1ad22b0b4aec5b2d3d76"
+    },
+    {
+      "name": "scripts/applog.mjs",
+      "bytes": 3307,
+      "sha256": "a152bb060ebef812e1b3971a5661bdf73dee646f87c9b7ad9a05b71c9ccc9ca8"
+    },
+    {
+      "name": "scripts/archive-review2.mjs",
+      "bytes": 8504,
+      "sha256": "30e5f1c2274e87604ad96a2bbbd846cbfc66cee549b1c1da2bd88b118adc1440"
+    },
+    {
+      "name": "scripts/final.sh",
+      "bytes": 8500,
+      "sha256": "e0b9db29c81a84c67720371df15949d51c1499f9ae3b12bc9e9a9eea6d5f09b8"
+    },
+    {
+      "name": "scripts/helpers.sh",
+      "bytes": 4022,
+      "sha256": "88404b0fb8b1f127f6175672c9fbac588477275f78539e5ddb3947b9b5b251c6"
+    },
+    {
+      "name": "scripts/lib.sh",
+      "bytes": 4903,
+      "sha256": "d82d38d458815d14150d20c64a27b5c4280866659006367a6fa853aff2b1fd17"
+    },
+    {
+      "name": "scripts/proxy.mjs",
+      "bytes": 5532,
+      "sha256": "9d879faca4cb5c44d618fc330752b4547ad8c0fa23f40a03e00eb13ae8054616"
+    },
+    {
+      "name": "scripts/review3.sh",
+      "bytes": 4191,
+      "sha256": "88c311b66f666f95718bf1ef955d2f975ac564783baffb59048a36cca37106dd"
+    },
+    {
+      "name": "scripts/summary.mjs",
+      "bytes": 3038,
+      "sha256": "e486726c3f81c0c491e7074c6d20c69f6b7636b14ecc0eda77e19ad2928704f3"
+    }
+  ]
+}
