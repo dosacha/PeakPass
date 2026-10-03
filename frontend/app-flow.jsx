@@ -308,7 +308,7 @@ const QueueCard = ({ state, actions }) => {
                 </button>
               </>
             )}
-            {phase === "consumed" && outcome?.kind === "reservation" && !reservation && (
+            {phase === "consumed" && outcome?.kind === "reservation" && reservation?.id !== outcome.resourceId && (
               <button type="button" className="btn btn-secondary" onClick={actions.loadReservation}>예약 불러오기</button>
             )}
           </div>

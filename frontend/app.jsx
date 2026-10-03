@@ -432,6 +432,7 @@ const App = () => {
     };
 
     const controller = window.PeakPassAdmission.createController({
+      apiBase,
       userId: queueUserId,
       eventId: selectedEventId,
       mode: pollModeRef.current,
@@ -571,7 +572,8 @@ const App = () => {
       if (queueUserId) setQueueNonce(n => n + 1);
       else ensureLiveDemoSession().catch(() => {});
     },
-    // After a reload the page no longer holds the reservation an admission was used for.
+    // The page may not hold the reservation an admission was used for: after a reload, or when
+    // another tab of the same user used a newer admission.
     loadReservation: async () => {
       const asked = admission?.admission;
       const id = asked?.outcome?.resourceId;
@@ -608,8 +610,11 @@ const App = () => {
       setExpandedSteps({ s1:true,s2:false,sq:true,s3:false,s4:false,s5:false,s6:false,s7:false });
       setDupBusy({ A: false, B: false }); // [FIX] reset per-button busy flags
       setPurchaseError(null);
-      // Reset is local: an entry in the queue stays on the server and is read again.
+      // Reset is local: an entry in the queue stays on the server and is read again, by a new
+      // controller. The old one ends with its timers and requests, so nothing it still had open
+      // lands on the cleared page; a purchase without an outcome stays restorable.
       clearLiveDemoSession();
+      if (queueUserId) setQueueNonce(n => n + 1);
     },
 
     step1: async () => {

@@ -1341,6 +1341,31 @@ describe('join, cancel and purchase', () => {
     expect(after.results.map((result) => result.status)).toEqual([201]);
     expect(after.pending.size()).toBe(0);
   });
+
+  it('restores an unresolved purchase only against the API base it was sent to', async () => {
+    const before = tab(api, { apiBase: 'http://127.0.0.1:3101' });
+    before.onRequest(() => before.ok(admittedEntry(before), 1000));
+    before.onPurchase(() => new Promise<Reply>(() => undefined));
+    before.controller.start();
+    await before.flush();
+    before.controller.purchase({ ...PURCHASE });
+    await before.flush();
+    before.controller.dispose();
+
+    // Another server can hold the same user and event ids; the request was not sent there.
+    const processing = entry('admitted', { phase: 'processing', admittedAt: iso(SERVER_T0) });
+    const other = tab(api, { apiBase: 'http://127.0.0.1:3102', pending: before.pending });
+    other.onRequest(() => other.ok(processing, 1000));
+    other.controller.start();
+    await other.flush();
+    expect(other.controller.view().purchase).toBeNull();
+
+    const same = tab(api, { apiBase: 'http://127.0.0.1:3101', pending: before.pending });
+    same.onRequest(() => same.ok(processing, 1000));
+    same.controller.start();
+    await same.flush();
+    expect(same.controller.view().purchase).toMatchObject({ status: 'unconfirmed', restored: true });
+  });
 });
 
 describe('instrumentation', () => {

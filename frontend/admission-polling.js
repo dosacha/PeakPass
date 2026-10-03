@@ -100,7 +100,7 @@
   // The server is the only authority. Nothing here joins, or buys with another identity, as a
   // reaction to a response: join() and purchase() run only when the caller calls them.
   function createController(options) {
-    const { userId, eventId, transport, sendPurchase, visibility, uuid } = options;
+    const { apiBase, userId, eventId, transport, sendPurchase, visibility, uuid } = options;
     const onChange = options.onChange || noop;
     const onTrace = options.onTrace || noop;
     const onPurchaseResult = options.onPurchaseResult || noop;
@@ -113,7 +113,8 @@
     const random = options.random || Math.random;
     const Abort = options.AbortController || root.AbortController;
     const path = "/events/" + eventId + "/admissions";
-    const pendingKey = userId + ":" + eventId;
+    // Another server can hold the same user and event ids, so a stored purchase names all three.
+    const pendingKey = JSON.stringify([apiBase, userId, eventId]);
 
     let mode = options.mode === "fixed" ? "fixed" : "adaptive";
     let started = false;
