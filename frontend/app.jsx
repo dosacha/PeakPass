@@ -580,18 +580,32 @@ const App = () => {
       const context = admissionRef.current;
       const gen = sessionGenRef.current;
       if (!id || !context) return;
+      // The answer belongs to the admission it was asked for and to the page as it was. After
+      // a change of the event, user or API base, a new join on the same event, or Reset (which
+      // ends the session generation), it describes an earlier state and is dropped, as the
+      // controller drops its own late answers.
+      const stale = () => admissionRef.current !== context || sessionGenRef.current !== gen
+        || context.view().admission?.admissionId !== asked.admissionId;
+      const read = (session) => callLive(apiBase, "GET", `/reservations/${id}`, null,
+        { "Authorization": `Bearer ${session.token}` });
+      const log = (res) => logReq({ method: "GET", url: `/reservations/${id}`, status: res.status,
+                                    elapsed: res.elapsed || 0, request: null, response: res.data });
       try {
-        const session = await ensureLiveDemoSession();
-        const res = await callLive(apiBase, "GET", `/reservations/${id}`, null,
-          { "Authorization": `Bearer ${session.token}` });
-        // The answer belongs to the admission it was asked for and to the page as it was. After
-        // a change of the event, user or API base, a new join on the same event, or Reset (which
-        // ends the session generation), it describes an earlier state and is dropped, as the
-        // controller drops its own late answers.
-        if (admissionRef.current !== context || sessionGenRef.current !== gen
-            || context.view().admission?.admissionId !== asked.admissionId) return;
-        logReq({ method: "GET", url: `/reservations/${id}`, status: res.status, elapsed: res.elapsed || 0,
-                 request: null, response: res.data });
+        let session = await ensureLiveDemoSession();
+        let res = await read(session);
+        if (stale()) return;
+        // A consumed admission is not polled any more, so nothing else would replace a token the
+        // server rejects. As for the queue's requests, it is replaced once, and only by a
+        // session of the same user.
+        if (res.status === 401) {
+          log(res);
+          liveSessionRef.current = null;
+          session = await ensureLiveDemoSession();
+          if (session.userId !== queueUserId) return;
+          res = await read(session);
+          if (stale()) return;
+        }
+        log(res);
         if (!res.ok) return;
         adoptReservation(res.data);
         setPurchaseError(null);
