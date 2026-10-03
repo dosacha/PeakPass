@@ -313,7 +313,10 @@ const App = () => {
     const gen = sessionGenRef.current;
     const request = (async () => {
       try {
-        const response = await callLive(apiBase, "POST", "/demo/session");
+        // Every caller waits for this one request, so it must end: an answer that does not come
+        // within the request timeout of the queue gives up, and the next call starts a new one.
+        const response = await callLive(apiBase, "POST", "/demo/session", undefined, {}, false,
+          AbortSignal.timeout(window.PeakPassAdmission.POLICY.timeoutMs));
         if (sessionGenRef.current !== gen) throw new Error("Live demo session was reset while it was being issued");
         const session = response.data;
         const isValidSession = response.ok &&
@@ -561,16 +564,18 @@ const App = () => {
     },
     // After a reload the page no longer holds the reservation an admission was used for.
     loadReservation: async () => {
-      const id = admission?.admission?.outcome?.resourceId;
+      const asked = admission?.admission;
+      const id = asked?.outcome?.resourceId;
       const context = admissionRef.current;
       if (!id || !context) return;
       try {
         const session = await ensureLiveDemoSession();
         const res = await callLive(apiBase, "GET", `/reservations/${id}`, null,
           { "Authorization": `Bearer ${session.token}` });
-        // An answer that arrives after the event, user or API base changed belongs to the
-        // context that asked for it and is dropped, as the controller drops its own.
-        if (admissionRef.current !== context) return;
+        // The answer belongs to the admission it was asked for. After a change of the event,
+        // user or API base, or a new join on the same event, it describes an earlier state and
+        // is dropped, as the controller drops its own late answers.
+        if (admissionRef.current !== context || context.view().admission?.admissionId !== asked.admissionId) return;
         logReq({ method: "GET", url: `/reservations/${id}`, status: res.status, elapsed: res.elapsed || 0,
                  request: null, response: res.data });
         if (!res.ok) return;
