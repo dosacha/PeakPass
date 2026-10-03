@@ -114,7 +114,8 @@
     const Abort = options.AbortController || root.AbortController;
     const path = "/events/" + eventId + "/admissions";
     // Another server can hold the same user and event ids, so a stored purchase names all three.
-    const pendingKey = JSON.stringify([apiBase, userId, eventId]);
+    // The base is spelled as the transport sends it: trailing slashes do not make another server.
+    const pendingKey = JSON.stringify([String(apiBase).replace(/\/+$/, ""), userId, eventId]);
 
     let mode = options.mode === "fixed" ? "fixed" : "adaptive";
     let started = false;

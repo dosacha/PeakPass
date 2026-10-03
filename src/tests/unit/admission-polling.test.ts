@@ -1430,6 +1430,25 @@ describe('join, cancel and purchase', () => {
     await same.flush();
     expect(same.controller.view().purchase).toMatchObject({ status: 'unconfirmed', restored: true });
   });
+
+  it('restores an unresolved purchase when only the trailing slash of the API base differs', async () => {
+    const before = tab(api, { apiBase: 'http://127.0.0.1:3101/' });
+    before.onRequest(() => before.ok(admittedEntry(before), 1000));
+    before.onPurchase(() => new Promise<Reply>(() => undefined));
+    before.controller.start();
+    await before.flush();
+    before.controller.purchase({ ...PURCHASE });
+    await before.flush();
+    before.controller.dispose();
+
+    // The transport sends both spellings to the same server.
+    const processing = entry('admitted', { phase: 'processing', admittedAt: iso(SERVER_T0) });
+    const same = tab(api, { apiBase: 'http://127.0.0.1:3101', pending: before.pending });
+    same.onRequest(() => same.ok(processing, 1000));
+    same.controller.start();
+    await same.flush();
+    expect(same.controller.view().purchase).toMatchObject({ status: 'unconfirmed', restored: true });
+  });
 });
 
 describe('instrumentation', () => {
