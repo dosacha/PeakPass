@@ -409,12 +409,20 @@ const App = () => {
 
     const none = { status: 0, data: null, retryAfterMs: null };
     // Sends with the session of this context's user. A rejected token is replaced once, and
-    // only by a session of the same user.
-    const authorized = async (send) => {
+    // only by a session of the same user. The rejected attempt was a request of its own, so the
+    // trace and the request log keep it next to the repeat.
+    const authorized = async (send, request) => {
       let session = await ensureLiveDemoSession();
       if (session.userId !== queueUserId) return none;
+      const tSend = performance.now();
       let response = await send({ Authorization: `Bearer ${session.token}` });
       if (response.status === 401) {
+        const tRecv = performance.now();
+        admissionTrace.push({ type: "auth-retry", t: tRecv, wall: Date.now(), method: request.method,
+                              path: request.path, tSend, tRecv, status: 401,
+                              code: response.data?.error?.code || null });
+        logReq({ method: request.method, url: request.path, status: 401, elapsed: response.elapsed || 0,
+                 request: request.body || null, response: response.data });
         liveSessionRef.current = null;
         session = await ensureLiveDemoSession();
         if (session.userId !== queueUserId) return none;
@@ -434,7 +442,7 @@ const App = () => {
       async transport({ method, path, body, signal }) {
         try {
           const response = await authorized((headers) =>
-            callLive(apiBase, method, path, body, headers, false, signal));
+            callLive(apiBase, method, path, body, headers, false, signal), { method, path, body });
           const entry = { method, url: path, status: response.status, elapsed: response.elapsed || 0,
                           request: body || null, response: response.data };
           if (method === "GET") lastPollRef.current = entry;
@@ -447,7 +455,8 @@ const App = () => {
       async sendPurchase(body, signal) {
         try {
           const response = await authorized((headers) =>
-            callLive(apiBase, "POST", "/reservations", body, headers, false, signal));
+            callLive(apiBase, "POST", "/reservations", body, headers, false, signal),
+            { method: "POST", path: "/reservations", body });
           logReq({ method: "POST", url: "/reservations", status: response.status, elapsed: response.elapsed || 0,
                    request: body, response: response.data });
           if (response.elapsed) setStepTiming(prev => ({ ...prev, s3: response.elapsed }));
@@ -567,15 +576,18 @@ const App = () => {
       const asked = admission?.admission;
       const id = asked?.outcome?.resourceId;
       const context = admissionRef.current;
+      const gen = sessionGenRef.current;
       if (!id || !context) return;
       try {
         const session = await ensureLiveDemoSession();
         const res = await callLive(apiBase, "GET", `/reservations/${id}`, null,
           { "Authorization": `Bearer ${session.token}` });
-        // The answer belongs to the admission it was asked for. After a change of the event,
-        // user or API base, or a new join on the same event, it describes an earlier state and
-        // is dropped, as the controller drops its own late answers.
-        if (admissionRef.current !== context || context.view().admission?.admissionId !== asked.admissionId) return;
+        // The answer belongs to the admission it was asked for and to the page as it was. After
+        // a change of the event, user or API base, a new join on the same event, or Reset (which
+        // ends the session generation), it describes an earlier state and is dropped, as the
+        // controller drops its own late answers.
+        if (admissionRef.current !== context || sessionGenRef.current !== gen
+            || context.view().admission?.admissionId !== asked.admissionId) return;
         logReq({ method: "GET", url: `/reservations/${id}`, status: res.status, elapsed: res.elapsed || 0,
                  request: null, response: res.data });
         if (!res.ok) return;
