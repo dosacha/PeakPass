@@ -33,8 +33,8 @@ const claim = (id: string, now: number) => [
 ];
 const finish = (id: string, now: number) =>
   ['waiting', 'leases', 'active', 'claims'].map((name) => lua(now, 'ZREM', key(name), id));
-const publish = (generation: string, epoch: string, now: number) => [
-  lua(now, 'HSET', control, 'generation', generation, 'epoch', epoch, 'mode', 'initializing', 'runId', 'r1', 'dirty', '1'),
+const publish = (generation: string, epoch: string, now: number, runId = 'r1') => [
+  lua(now, 'HSET', control, 'generation', generation, 'epoch', epoch, 'mode', 'initializing', 'runId', runId, 'dirty', '1'),
   lua(now, 'ZADD', key('active', epoch), '+inf', '__'),
   lua(now, 'ZADD', key('waiting', epoch), '+inf', '__'),
   lua(now, 'HDEL', control, 'dirty'),
@@ -165,6 +165,24 @@ describe('replay of the admission transition log', () => {
         lua(T0 + 6, 'HSET', control, 'mode', 'ready'),
       ]),
     ).toEqual(['generation']);
+  });
+
+  it('reports a namespace initialized under the run id of a server process that is gone', () => {
+    const parse = (lines: string[]) => lines.map(parseMonitorLine).filter((e): e is MonitorEntry => e !== null);
+    // The fixture marks the moment it replaced the server process; nothing of the old one is left.
+    const restarted: MonitorEntry = { time: T0 + 10, source: 'fixture:restart', args: ['FLUSHALL'] };
+    const before = parse(publish('1', EPOCH, T0, 'old-process'));
+    expect(
+      replayAdmissionLog([...before, restarted, ...parse(publish('2', NEXT_EPOCH, T0 + 20, 'new-process'))]).violations,
+    ).toEqual([]);
+    expect(
+      replayAdmissionLog([...before, restarted, ...parse(publish('2', NEXT_EPOCH, T0 + 20, 'old-process'))])
+        .violations.map((v) => v.rule),
+    ).toEqual(['run-id']);
+    // An emptied server of the same process keeps its run id: that is no violation.
+    expect(
+      rules([...publish('1', EPOCH, T0, 'same'), line(T0 + 10, '172.18.0.9:40000', 'FLUSHALL'), ...publish('2', NEXT_EPOCH, T0 + 20, 'same')]),
+    ).toEqual([]);
   });
 
   it('lists every control change in order', () => {

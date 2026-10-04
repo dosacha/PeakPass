@@ -561,6 +561,28 @@ export async function startTopology(
       WHEN (NEW.user_id = '${userId}'::uuid) EXECUTE FUNCTION p7_sleep('${seconds}')`);
     return () => pool.query(`DROP TRIGGER IF EXISTS ${name} ON ${table}`);
   }
+  /** Waits until PostgreSQL shows a statement like `queryLike` sleeping in the trigger of `slow`. */
+  const sleeping = (queryLike: string) =>
+    until(
+      async () => (await backends(queryLike)).some((backend) => backend.wait_event === 'PgSleep'),
+      15000,
+      `a statement like ${queryLike} to be held`,
+      50,
+    );
+  /** The server log of PostgreSQL, where its own timers report what they ended. */
+  const pgLog = async () => {
+    const { stdout, stderr } = await run('docker', ['logs', pgId], {
+      encoding: 'utf8',
+      windowsHide: true,
+      maxBuffer: 256 * 1024 * 1024,
+    });
+    return stdout + stderr;
+  };
+  /** Redis server time in milliseconds: the clock of every admission deadline. */
+  const redisNow = async () => {
+    const [seconds, micros] = (await redis.sendCommand(['TIME'])) as [string, string];
+    return Number(seconds) * 1000 + Math.floor(Number(micros) / 1000);
+  };
   /** Backends whose current statement matches, as PostgreSQL reports them. */
   const backends = async (queryLike: string) =>
     (
@@ -570,6 +592,9 @@ export async function startTopology(
         [queryLike],
       )
     ).rows;
+  /** The state of one session, or null once PostgreSQL has ended it. */
+  const session = async (pid: number) =>
+    (await pool.query<{ state: string }>('SELECT state FROM pg_stat_activity WHERE pid = $1', [pid])).rows[0]?.state ?? null;
 
   /** The final SQL of contract §8: violating rows only. */
   async function violations(ignore: string[] = []) {
@@ -601,6 +626,23 @@ export async function startTopology(
     }
     return { ...replay, incomplete };
   }
+  /** Marks the start of a scenario: `verify` reports the log violations from here on. */
+  let since = 0;
+  async function begin(name: string) {
+    since = await redisNow();
+    note('scenario', { name });
+  }
+  /**
+   * The two checks every scenario ends with: the final SQL and the complete transition log. The
+   * log is replayed from its beginning, and the violations of earlier scenarios stay theirs.
+   */
+  async function verify(ignore: string[] = []) {
+    expect(await violations(ignore)).toEqual([]);
+    const log = await transitions();
+    expect(log.incomplete).toEqual([]);
+    expect(log.violations.filter((violation) => violation.time >= since)).toEqual([]);
+    return log;
+  }
   /** What a capture that begins now would report: the reason it cannot be trusted, if any. */
   async function lateCapture() {
     const late = new Monitor(redisPort);
@@ -612,6 +654,52 @@ export async function startTopology(
     const current = await control(eventId);
     return current ? (await redis.zCard(`peakpass:admission:${eventId}:${current.epoch}:active`)) - 1 : null;
   };
+  /** Waits until no admitted entry and no unresolved claim is left. */
+  const quiet = (eventId: string, timeoutMs = 90000) =>
+    until(async () => (await slots(eventId)) === 0, timeoutMs, 'every slot to be returned', 500);
+  /** Releases protection by the explicit transition and waits until a scheduler retired the namespace. */
+  async function release(eventId: string) {
+    const at = await protect(eventId, false);
+    await until(async () => (await control(eventId)) === null, 30000, 'the namespace to be retired');
+    return at;
+  }
+  /** The address PostgreSQL sees for each application container. */
+  const addresses = async () =>
+    new Map(
+      await Promise.all(
+        apps.map(async (app) => [
+          await docker('inspect', '--format', '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}', app.id),
+          app,
+        ] as const),
+      ),
+    );
+  /** The applications whose sessions wait for an advisory lock: a coordinator at the event gate. */
+  async function gateWaiters(): Promise<AppBox[]> {
+    const known = await addresses();
+    const waiting = await pool.query<{ addr: string }>(
+      `SELECT host(a.client_addr) AS addr FROM pg_locks l JOIN pg_stat_activity a ON a.pid = l.pid
+      WHERE l.locktype = 'advisory' AND NOT l.granted`,
+    );
+    return waiting.rows.map((row) => known.get(row.addr)).filter((app): app is AppBox => !!app);
+  }
+  const advisoryWaiters = async () =>
+    (await pool.query(`SELECT 1 FROM pg_locks WHERE locktype = 'advisory' AND NOT granted`)).rowCount ?? 0;
+  /**
+   * Hands the gate on: a second holder queues behind whoever waits for the exclusive gate, the
+   * current holder lets go, and this returns once the second holder has it. Everything that was
+   * waiting for the exclusive gate has run exactly one transaction in between.
+   */
+  async function passGate(eventId: string, current: ReturnType<typeof holdGate>) {
+    const waiting = await advisoryWaiters();
+    const queued = holdGate(eventId);
+    await Promise.race([
+      queued.granted,
+      until(async () => (await advisoryWaiters()) > waiting, 10000, 'the next gate holder to queue', 20),
+    ]);
+    await current.release();
+    await queued.granted;
+    return queued;
+  }
   const entry = async (eventId: string, admission: AdmissionRef): Promise<Json | null> => {
     const raw = await redis.hGet(
       `peakpass:admission:${eventId}:${admission.admissionEpoch}:entries`,
@@ -666,18 +754,28 @@ export async function startTopology(
       await redis.flushAll();
     },
   };
+  const pgBack = async () => {
+    await pool.end().catch(() => undefined);
+    pool = newPool();
+    await until(async () => {
+      try {
+        return (await pool.query('SELECT 1')).rowCount === 1;
+      } catch {
+        return false;
+      }
+    }, 60000, 'PostgreSQL to answer again', 200);
+  };
   const pgFaults = {
+    /** A fast shutdown and a start: every session is ended with an administrator-command error. */
     async restart() {
-      await fault('restart', pgId, '-t', '0');
-      await pool.end().catch(() => undefined);
-      pool = newPool();
-      await until(async () => {
-        try {
-          return (await pool.query('SELECT 1')).rowCount === 1;
-        } catch {
-          return false;
-        }
-      }, 60000, 'PostgreSQL after its restart', 200);
+      await fault('restart', pgId, '-t', '20');
+      await pgBack();
+    },
+    /** SIGKILL and a start: sessions end without a word and the server recovers from its log. */
+    async crash() {
+      await fault('kill', pgId, '--signal', 'KILL');
+      await fault('start', pgId);
+      await pgBack();
     },
   };
   const appFaults = {
@@ -699,6 +797,8 @@ export async function startTopology(
         }, timeoutMs, `${app.name} to exit`, 200)
       ).code,
     logs: (app: AppBox) => docker('logs', app.id),
+    /** When the container's process was started: unchanged as long as it has not restarted. */
+    startedAt: (app: AppBox) => docker('inspect', '--format', '{{.State.StartedAt}}', app.id),
   };
 
   async function destroy(suite: string) {
@@ -744,11 +844,21 @@ export async function startTopology(
     policy,
     holdGate,
     slow,
+    sleeping,
+    pgLog,
+    redisNow,
     backends,
+    session,
     violations,
     transitions,
+    begin,
+    verify,
     lateCapture,
     slots,
+    quiet,
+    release,
+    gateWaiters,
+    passGate,
     entry,
     results,
     seats,

@@ -19,7 +19,8 @@ export type ReplayRule =
   | 'repromotion'
   | 'fifo'
   | 'claim-without-slot'
-  | 'generation';
+  | 'generation'
+  | 'run-id';
 export interface ReplayViolation {
   rule: ReplayRule;
   detail: string;
@@ -104,6 +105,9 @@ export function replayAdmissionLog(
   const current = new Map<string, Control>();
   const published = new Map<string, Published>();
   const controls: ControlChange[] = [];
+  // Run ids seen in controls: of the server process that is running, and of those replaced.
+  const alive = new Set<string>();
+  const gone = new Set<string>();
   let promotions = 0;
 
   const namespace = (id: string) => {
@@ -128,6 +132,11 @@ export function replayAdmissionLog(
     for (let i = 0; i + 1 < fields.length; i += 2) {
       if (fields[i] === 'generation' || fields[i] === 'epoch' || fields[i] === 'mode')
         control[fields[i] as keyof Control] = fields[i + 1];
+      if (fields[i] !== 'runId') continue;
+      // The run id names the Redis process that holds the namespace.
+      if (gone.has(fields[i + 1]))
+        report('run-id', time, `event ${eventId} was initialized under the run id of a process that is gone`);
+      else alive.add(fields[i + 1]);
     }
     // The dirty bit and a repeated publication of an intact ready generation change nothing here.
     if (
@@ -160,8 +169,13 @@ export function replayAdmissionLog(
     published.set(eventId, { generation, epoch: control.epoch, closed: false });
   }
 
-  for (const { time, args } of entries) {
+  for (const { time, source, args } of entries) {
     const command = args[0]?.toUpperCase();
+    // The capture marks a replaced server process: it starts empty and under another run id.
+    if (source === 'fixture:restart') {
+      for (const runId of alive) gone.add(runId);
+      alive.clear();
+    }
     if (command === 'FLUSHALL' || command === 'FLUSHDB') {
       namespaces.clear();
       for (const eventId of [...current.keys()]) lose(eventId);
