@@ -7,6 +7,7 @@
  */
 export interface LedgerRow {
   admissionId: string;
+  operation: 'reservation' | 'direct-checkout';
   outcome: 'consumed' | 'rejected' | 'closed';
   /** The reservation or order of a consumed result. */
   targetId: string | null;
@@ -40,7 +41,7 @@ export function ledgerMismatches(rows: LedgerRow[], entries: RedisEntry[]): stri
         : entry.state === 'consumed' &&
           (row.outcome === 'rejected'
             ? entry.outcome?.kind === 'rejected' && entry.outcome.code === row.errorCode
-            : entry.outcome?.kind !== 'rejected' && entry.outcome?.resourceId === row.targetId);
+            : entry.outcome?.kind === row.operation && entry.outcome.resourceId === row.targetId);
     if (!fits)
       problems.push(`ledger row ${row.admissionId} (${row.outcome}) does not match its entry: ${entry.state}`);
   }

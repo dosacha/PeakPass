@@ -125,8 +125,8 @@ export class AdmissionService {
   }
   /**
    * Under the exclusive gate, which may have been waited for behind a writer: Redis may have been
-   * replaced meanwhile. The process is read again while the instance keeps serving every other
-   * event, and only a process other than the verified one changes what the instance holds.
+   * replaced meanwhile, or only the connection to it. The process is read again while the instance
+   * keeps serving every other event; what the instance holds changes once that read has succeeded.
    */
   private async currentProcess(): Promise<void> {
     if (this.stopping) throw new AdmissionError('ADMISSION_UNAVAILABLE', 503, 1000);
@@ -138,7 +138,6 @@ export class AdmissionService {
       throw error;
     }
     if (this.stopping) throw new AdmissionError('ADMISSION_UNAVAILABLE', 503, 1000);
-    if (runId === this.runId) return;
     this.runId = runId;
     this.version = getRedisConnectionVersion();
     this.healthy = true;
@@ -312,14 +311,16 @@ export class AdmissionService {
         return;
       // This gate was waited for as well. A generation that is still recovering was never
       // written and is created under the process that is there now. An open one was written
-      // before: if its namespace is no longer intact, it was lost after the decision above, and
-      // the same epoch is never written anew. The next attempt decides that loss from the start.
+      // before and nothing is written for it again: if its namespace is no longer intact, it was
+      // lost after the decision above, and the next attempt decides that loss from the start. A
+      // loss after this check is met by the publication, which checks and writes in one script.
       await this.currentProcess();
-      if (current.phase === 'open' && !(await this.probe(current)).ok)
-        throw new AdmissionError('ADMISSION_RECOVERING', 503, 1000);
+      if (current.phase === 'open') {
+        if (!(await this.probe(current)).ok) throw new AdmissionError('ADMISSION_RECOVERING', 503, 1000);
+        return;
+      }
       accepted(await initializeAdmission(current, this.runId));
-      if (current.phase === 'recovering')
-        await c.query("UPDATE admission_events SET phase='open' WHERE event_id=$1", [eventId]);
+      await c.query("UPDATE admission_events SET phase='open' WHERE event_id=$1", [eventId]);
     });
     // Deliberately a new transaction. Holding the exclusive gate through CAS fences late publishers.
     await serializableTransactionWithRetry(async (c) => {

@@ -15,7 +15,8 @@
 --   payment_settled          exactly a paid or delivered order has one settled payment that is no
 --                            reconciliation fact
 --   payment_callback_key     a provider payment record has its durable callback key
---   payment_checkout_record  an order has its one checkout payment record under its own key
+--   payment_checkout_record  an order has one checkout payment record and no other: under its own
+--                            key and pending, as the checkout wrote it
 WITH held AS (
   SELECT event_id, SUM(quantity) AS quantity FROM reservations WHERE status = 'active' GROUP BY event_id
 ), ordered AS (
@@ -106,11 +107,14 @@ WHERE p.provider_transaction_id IS NOT NULL AND NOT EXISTS (
     AND k.provider_transaction_id = p.provider_transaction_id)
 
 UNION ALL
-SELECT 'payment_checkout_record', o.event_id, format('order=%s records=%s', o.id, p.records)
+SELECT 'payment_checkout_record', o.event_id,
+  format('order=%s records=%s own=%s', o.id, p.records, p.own)
 FROM orders o
 CROSS JOIN LATERAL (
-  SELECT COUNT(*) AS records FROM payment_records p
+  SELECT COUNT(*) AS records,
+    COUNT(*) FILTER (
+      WHERE lower(p.idempotency_key) = o.idempotency_key::text AND p.status = 'pending') AS own
+  FROM payment_records p
   WHERE p.order_id = o.id AND p.provider_transaction_id IS NULL
-    AND lower(p.idempotency_key) = o.idempotency_key::text
 ) p
-WHERE p.records <> 1
+WHERE p.records <> 1 OR p.own <> 1

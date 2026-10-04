@@ -274,6 +274,26 @@ describe('final SQL of admission-v1 §8', () => {
         await seats(c, ids, 9);
       }),
     ).toEqual(['payment_checkout_record']);
+    // One checkout record per order: a second one under another key, or one that is no longer
+    // pending, is not the record the checkout wrote.
+    expect(
+      await checks(async (c, ids) => {
+        const created = await order(c, ids, 1);
+        await c.query(`INSERT INTO payment_records(id,order_id,status,idempotency_key) VALUES($1,$2,'pending',$3)`, [
+          randomUUID(),
+          created.id,
+          randomUUID(),
+        ]);
+        await seats(c, ids, 9);
+      }),
+    ).toEqual(['payment_checkout_record']);
+    expect(
+      await checks(async (c, ids) => {
+        const created = await order(c, ids, 1);
+        await c.query(`UPDATE payment_records SET status = 'failed' WHERE order_id = $1`, [created.id]);
+        await seats(c, ids, 9);
+      }),
+    ).toEqual(['payment_checkout_record']);
     // The checkout record keeps the key as the client sent it; the order stores it as a UUID.
     expect(
       await checks(async (c, ids) => {

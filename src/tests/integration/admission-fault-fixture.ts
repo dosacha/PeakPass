@@ -734,7 +734,7 @@ async function build(image: string, prefix: string, options: TopologyOptions) {
         const current = await control(eventId);
         if (current?.mode !== 'ready') continue;
         const { rows } = await pool.query(
-          `SELECT admission_id AS "admissionId", outcome, COALESCE(reservation_id, order_id) AS "targetId",
+          `SELECT admission_id AS "admissionId", operation, outcome, COALESCE(reservation_id, order_id) AS "targetId",
             error_code AS "errorCode" FROM admission_results WHERE event_id = $1 AND epoch = $2`,
           [eventId, current.epoch],
         );

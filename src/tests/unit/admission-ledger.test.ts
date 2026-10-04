@@ -2,6 +2,7 @@ import { ledgerMismatches, LedgerRow, RedisEntry } from '../helpers/admission-le
 
 const row = (admissionId: string, outcome: LedgerRow['outcome'], extra: Partial<LedgerRow> = {}): LedgerRow => ({
   admissionId,
+  operation: 'reservation',
   outcome,
   targetId: null,
   errorCode: null,
@@ -74,6 +75,26 @@ describe('ledger rows against the Redis entries of one epoch', () => {
     expect(ledgerMismatches([row('a', 'consumed', { targetId: 'r1' })], [entry('a', 'cancelled')])).toEqual([
       'ledger row a (consumed) does not match its entry: cancelled',
     ]);
+    // The entry tells the purchase of the row: a reservation is not a direct checkout, and an
+    // outcome without a kind is none.
+    expect(
+      ledgerMismatches(
+        [row('a', 'consumed', { targetId: 'r1' })],
+        [entry('a', 'consumed', { fingerprint: 'f', outcome: { kind: 'direct-checkout', resourceId: 'r1' } })],
+      ),
+    ).toEqual(['ledger row a (consumed) does not match its entry: consumed']);
+    expect(
+      ledgerMismatches(
+        [row('a', 'consumed', { operation: 'direct-checkout', targetId: 'o1' })],
+        [entry('a', 'consumed', { fingerprint: 'f', outcome: { resourceId: 'o1' } })],
+      ),
+    ).toEqual(['ledger row a (consumed) does not match its entry: consumed']);
+    expect(
+      ledgerMismatches(
+        [row('a', 'consumed', { operation: 'direct-checkout', targetId: 'o1' })],
+        [entry('a', 'consumed', { fingerprint: 'f', outcome: { kind: 'direct-checkout', resourceId: 'o1' } })],
+      ),
+    ).toEqual([]);
     expect(
       ledgerMismatches(
         [row('a', 'rejected', { errorCode: 'INSUFFICIENT_INVENTORY' })],
