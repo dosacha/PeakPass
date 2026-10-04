@@ -343,6 +343,16 @@ faultSuite('admission under real Redis failures (real containers)', () => {
     await gate.granted;
     let staged = false;
     try {
+      // The coordinator that did not publish this event may still be finishing that recovery.
+      // What waits for the gate before the loss belongs to it and is let through first, so that
+      // every transaction counted below is one of the recovery from the loss.
+      for (let quiet = 0; quiet < 3; ) {
+        await sleep(150);
+        if ((await t.gateWaiters()).length) {
+          gate = await t.passGate(eventId, gate);
+          quiet = 0;
+        } else quiet += 1;
+      }
       await t.redisFaults.flush();
       // Stage 1: the loss is seen, nothing is durable yet.
       await bothWait();
