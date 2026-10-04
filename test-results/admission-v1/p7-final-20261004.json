@@ -1,6 +1,6 @@
 {
   "runId": "peakpass-p7-20261004",
-  "codeSha": "7b136a2d930f36f3486afa9d03a1374c45d0975d (final regression); the product code is that of d24f98ac02194bbae47b70508438e1bd60dae033, the commit that completes the F1 fix",
+  "codeSha": "78e51108eec9e58e170090a0985002db085f3d79 (final regression)",
   "baseSha": "5016b8c02bb2631a468258d03a5529cbbe72f0ce",
   "contract": {
     "revision": "admission-v1",
@@ -8,14 +8,15 @@
   },
   "productUnderTest": {
     "image": "peakpass:p7-issue16",
-    "imageId": "sha256:bcf48f532085eee4457822586324649774fc91c302e193d04b313b3d192ebd92",
-    "builtFrom": "the tree of 7b136a2; its product files are those of the image built from d24f98a (the same 213 files by hash, compared inside the containers); the two images differ only in the compiled test helpers, which the product does not load",
+    "imageId": "sha256:94c466c8af9557192a2388b9188fdf9e95b24acd8829ebf50b4ab5cc97c0d201",
+    "builtFrom": "the tree of 78e5110; the build compiles the test helpers into the image as well and the product does not load them; against the image before it this one differs in admission.service and in two test helpers",
     "node": "18.20.8",
-    "productChange": "one file, src/core/services/admission.service.ts: under the exclusive event gate recover() reads the Redis process again, without clearing readiness, before the probe and before the initialization, and a read that succeeded marks the instance ready on its current connection; in its second transaction it creates a namespace only for a generation that is still recovering, and for an open one it writes nothing and only checks that the namespace is intact",
+    "productChange": "one file, src/core/services/admission.service.ts: under the exclusive event gate recover() reads the Redis process again, without clearing readiness, before the probe and before the initialization, and a read that succeeded marks the instance ready on its current connection; in its second transaction it creates a namespace only for a generation that is still recovering and opens it only when the namespace was written on the connection the process was read on; for an open one it writes nothing and only checks that the namespace is intact",
     "imageBeforeTheFix": "sha256:ab60789926077faede244db0f59e1c55d6dd0a3a31cf90997eb644c65d40850b, built at 57d2d91",
     "imageOfTheFirstFormOfTheFix": "sha256:240796caa4ee705061a4548ce5f50f862a73ec18cdcbe4d0114a2aa0626df3f1, built from 92e1250",
     "imageOfTheSecondFormOfTheFix": "sha256:f7f3beb172a0f88a5188cc66e63ab3952aff49120be372c1617384b11abefa1b, built from e617e0e",
-    "imageBuiltFromD24f98a": "sha256:2bbf688601e4753e8ae206d14d813b836b87cbe069d9e2fcf9d9f72ebd899ca4"
+    "imageBuiltFromD24f98a": "sha256:2bbf688601e4753e8ae206d14d813b836b87cbe069d9e2fcf9d9f72ebd899ca4",
+    "imageBuiltFrom7b136a2": "sha256:bcf48f532085eee4457822586324649774fc91c302e193d04b313b3d192ebd92, with the product files of the image built from d24f98a (213 files by hash)"
   },
   "environment": {
     "host": "Windows, Node 24.15.0, Docker 29.1.5 (Linux containers)",
@@ -29,14 +30,14 @@
     "typecheck": "pass",
     "lintErrors": 0,
     "lintWarnings": 11,
-    "unitPassed": 250,
+    "unitPassed": 251,
     "unitSuites": 25,
-    "unitNewTests": 22,
-    "integrationPassed": 356,
+    "unitNewTests": 23,
+    "integrationPassed": 358,
     "integrationSkipped": 41,
     "integrationSuitesPassed": 31,
     "integrationSuitesSkipped": 5,
-    "integrationNewPassingTests": 10,
+    "integrationNewPassingTests": 12,
     "harnessPassed": 29,
     "callbackHarness": "pass",
     "redisOutageOptIn": "32/32 in three files; the ten cases that were skipped since P3 ran on the owned Redis",
@@ -56,10 +57,10 @@
     "browserFinalSqlRowsAfterEachRun": 0,
     "overlappingRequestsInPageTraces": 0,
     "overlappingRequestsInServerLogExtracts": 0,
-    "browserNote": "B1 to B8, one run each on 7b136a2 and the final image; earlier passes on the image before the fix and on the three earlier images with it gave the same results",
-    "lifecycleTestsAdded": "four in admission-http.test.ts. Two were RED on 92e1250 (readiness seen false during a recovery; a lost epoch written anew) and GREEN since e617e0e; the second is also RED on main. Two were RED on aa035f6 (a namespace removed right after the check of the second transaction was created again, by injection at that call; the instance was not ready after a recovery during which its connection was replaced) and GREEN at d24f98a",
-    "githubActions": "install-lint-test passed on c23c2f9, aa035f6 and 2eff7ed, the first three heads of the PR",
-    "stricterChecksAdded": "for the second auto-review: the ledger comparison requires the outcome kind of the row's operation (its new cases did not compile first, for the missing field), and the final SQL requires one checkout record per order, its own and pending (1 of 6 failed first). For the third: the ticket count takes every ticket row and the callback key must carry the status of its record unless a late success was written over it (2 of 6 failed first); a claimed entry without a ledger row is reported in any state and a sequence given to a second entry is a fifo violation (2 of 22 failed first)",
+    "browserNote": "B1 to B8, one run each on 78e5110 and the final image; earlier passes on the image before the fix and on the four earlier images with it gave the same results",
+    "lifecycleTestsAdded": "five in admission-http.test.ts. Two were RED on 92e1250 (readiness seen false during a recovery; a lost epoch written anew) and GREEN since e617e0e; the second is also RED on main. Two were RED on aa035f6 (a namespace removed right after the check of the second transaction was created again, by injection at that call; the instance was not ready after a recovery during which its connection was replaced) and GREEN since d24f98a. One was RED on 327320f (a recovering generation opened although the connection had been replaced before its namespace was written, by injection) and GREEN at 42e9f42",
+    "githubActions": "install-lint-test passed on c23c2f9, aa035f6, 2eff7ed and 327320f, the first four heads of the PR",
+    "stricterChecksAdded": "for the second auto-review: the ledger comparison requires the outcome kind of the row's operation (its new cases did not compile first, for the missing field), and the final SQL requires one checkout record per order, its own and pending (1 of 6 failed first). For the third: the ticket count takes every ticket row and the callback key must carry the status of its record unless a late success was written over it (2 of 6 failed first); a claimed entry without a ledger row is reported in any state and a sequence given to a second entry is a fifo violation (2 of 22 failed first). For the fourth: the final SQL compares an order with the reservation it was made from and checks the canonical shape of every fingerprint (cases in two of its tests failed first); the ledger comparison requires the reason of an expired entry to be the code of its closed row and the replay no longer takes a cancelled or expired entry for one that left the line for a promotion (2 of 23 failed first)",
     "mostPromotionsOfOneEventInARollingSecondOverAllEpochs": 2
   },
   "beforeTheFixOfF1": {
@@ -88,7 +89,7 @@
     "callbackHarness": "pass"
   },
   "found": {
-    "F1": "finding, product (reset lifecycle of P4): Redis changing while a recovery waits for the event gate. At the first wait one restart cost two generations; at the second wait a lost epoch could be written anew without a reset (also on main, when the namespace is lost without a change of the process). Fixed in 92e1250, e617e0e and d24f98a by the maintainer's decision of 2026-10-04; R2 and R3 and four lifecycle tests pass since",
+    "F1": "finding, product (reset lifecycle of P4): Redis changing while a recovery waits for the event gate. At the first wait one restart cost two generations; at the second wait a lost epoch could be written anew without a reset (also on main, when the namespace is lost without a change of the process). Fixed in 92e1250, e617e0e, d24f98a and 42e9f42 by the maintainer's decision of 2026-10-04; R2 and R3 and five lifecycle tests pass since",
     "F2": "limit, product (shutdown), not changed: after SIGTERM an instance that answered a request while shutting down stays up until that connection closes, 73.3 s with a keep-alive client",
     "O1": "not changed: the existing direct checkout without admission fields answers 500 when its serialization retries run out",
     "O2": "not changed: a reloaded page cannot reach an order whose checkout answer was lost",
@@ -104,7 +105,7 @@
     "fixedIn": "a34948f and 164c60b9f6c7dd6b799cb21045266b91ee902267; the fixes were verified by tests and by the final regression, not by a second review",
     "notReviewed": "the fix of F1 was read by the GitHub Codex auto-review only",
     "left": "timing assumptions that could fail a scenario on a loaded host, races that record the winner and require neither, a replay rule for UNLINK of a single set; see the plan's ledger and the validation document",
-    "autoReview": "GitHub Codex auto-review of PR #31. On c23c2f9, the first head: one P1 and two P2 on the fix of F1 and on the fixture; each reproduced or reasoned through and answered in e617e0e. On aa035f6, the second head: one P1 and three P2 on the fix and on the two checks; each reproduced by a failing test and answered in d24f98a. On 2eff7ed, the third head: five P2 on the verification code; four reproduced by a failing case and answered in 7b136a2; the fifth, the rate counted across a reset, not followed, because the contract keeps the promotion history per epoch (section 4), and left to the maintainer"
+    "autoReview": "GitHub Codex auto-review of PR #31. On c23c2f9, the first head: one P1 and two P2 on the fix of F1 and on the fixture; each reproduced or reasoned through and answered in e617e0e. On aa035f6, the second head: one P1 and three P2 on the fix and on the two checks; each reproduced by a failing test and answered in d24f98a. On 2eff7ed, the third head: five P2 on the verification code; four reproduced by a failing case and answered in 7b136a2; the fifth, the rate counted across a reset, not followed, because the contract keeps the promotion history per epoch (section 4), and kept per epoch by the maintainer's decision of 2026-10-04. On 327320f, the fourth head: one P1 (a process replaced between the read of the Redis process and the initialization of a recovering generation; not reachable as the code stands, by reading; a guard with a test added in 42e9f42) and four P2 on the verification code, each reproduced by a failing case and answered in 78e5110"
   },
   "skippedTestsNote": "the 41 skips of the default integration run are the 10 Redis-outage cases, the 5 Docker order-worker lifecycle cases and the 26 fault scenarios; each group was run with its opt-in and is counted above",
   "stoppedRuns": "two earlier starts of the final regression were stopped to change test code; their progress files and fault suite logs are kept under the label stopped-<commit>, and the logs of earlier single runs include failures the plan's ledger explains",
@@ -125,13 +126,18 @@
     "result": "the same regression passed completely: lint 0 errors / 13 warnings, unit 249, integration 356 passed / 41 skipped, the opt-ins 32/32 and 5/5, the image checks, 14 browser runs, and three rounds with the Redis suite 6/6, the process suite 14/14 and the flows suite 6/6 (78 scenario runs, none failed)"
   },
   "openForTheMaintainer": "whether R should also bind across a reset: the contract does not state it, the product keeps the promotion history per epoch and the replay counts per epoch",
+  "at7b136a2WithTheChecksOfTheThirdReview": {
+    "codeSha": "7b136a2d930f36f3486afa9d03a1374c45d0975d",
+    "imageId": "sha256:bcf48f532085eee4457822586324649774fc91c302e193d04b313b3d192ebd92",
+    "result": "the same regression passed completely: lint 0 errors / 11 warnings, unit 250, integration 356 passed / 41 skipped, the opt-ins 32/32 and 5/5, the image checks, 14 browser runs, and three rounds with the Redis suite 6/6, the process suite 14/14 and the flows suite 6/6 (78 scenario runs, none failed)"
+  },
   "archive": "p7-final-20261004.zip",
-  "archiveSha256": "22e8ba9057c066f266e6e933017fed4276c0b97db311f54bc0e050304f3acbb4",
+  "archiveSha256": "d60ebdbec6c57b7d903e4f029c7fb54801ff23da629764c82f439e1fdf4ea184",
   "files": [
     {
       "name": "README.txt",
-      "bytes": 5519,
-      "sha256": "81f8f09ea4acdc39aed0262d95da3d8bf1538eee7d7b7896587f46f52ee6ba9a"
+      "bytes": 6104,
+      "sha256": "c12e9a9fbdb437ad467f8e002c27a731664f08a5887832d7c96b4ed7ddbd9bad"
     },
     {
       "name": "browser-f1a/b1.console.txt",
@@ -344,6 +350,76 @@
       "sha256": "a05c34d7735999ee51112fe4ddaa66ce383a695b8919582fe9d0a846207d4249"
     },
     {
+      "name": "browser-f1d/b1.console.txt",
+      "bytes": 3231,
+      "sha256": "925b0f6d15a474b827deb7bf26fc72f7b69789567f0ca813436970c7b4513bc2"
+    },
+    {
+      "name": "browser-f1d/b2.console.txt",
+      "bytes": 4100,
+      "sha256": "891f7d961ce4d6afe36603bd378e6f63b1b76463cf760919ab7a811128e4e310"
+    },
+    {
+      "name": "browser-f1d/b3.console.txt",
+      "bytes": 3697,
+      "sha256": "3f26662bba26ac7dba794abe583be7e32a5cbffd0511a47d97bf61769170466d"
+    },
+    {
+      "name": "browser-f1d/b4.console.txt",
+      "bytes": 4254,
+      "sha256": "99eeb035a7f7ccf5a37b98072529023e5f2efb0de6430342c0d6c21b9de73044"
+    },
+    {
+      "name": "browser-f1d/b5.console.txt",
+      "bytes": 3142,
+      "sha256": "cfb906b36882b592cc0c849cc86d12908b8ad2508a763ddaee57c6c73fe983a0"
+    },
+    {
+      "name": "browser-f1d/b6a.console.txt",
+      "bytes": 2292,
+      "sha256": "765d231c0d885cae9ba0f9040199b29c35a87bb55110b7edff5e81f89fec7741"
+    },
+    {
+      "name": "browser-f1d/b6b.console.txt",
+      "bytes": 3947,
+      "sha256": "1f74d86e0f0ce9ea1bac89e2933a20adcc348aa03eb6f50dc1623ef3f2636a5f"
+    },
+    {
+      "name": "browser-f1d/b6c.console.txt",
+      "bytes": 4032,
+      "sha256": "a712be6805d370a738170708786774d52899130f7cfa0b656df4a2654e38970e"
+    },
+    {
+      "name": "browser-f1d/b6d.console.txt",
+      "bytes": 3912,
+      "sha256": "377f26f7b39f051f80783b32ced7700e35b47d056cee1a6314dc334dc6f78dbe"
+    },
+    {
+      "name": "browser-f1d/b6e.console.txt",
+      "bytes": 4112,
+      "sha256": "8042b0879594a28bcd8f99f6c44858fd38892a60eae0ab715ed15a2a9f412970"
+    },
+    {
+      "name": "browser-f1d/b6f.console.txt",
+      "bytes": 3261,
+      "sha256": "c4bb52151ad319947a2e449dd38b86e7344b0ce604ceac490b81d7f1540a2286"
+    },
+    {
+      "name": "browser-f1d/b7a.console.txt",
+      "bytes": 4460,
+      "sha256": "5f98d10fe0ce1c38cd94f595623b2e2d3bf3673fdd1eac807394a631210432eb"
+    },
+    {
+      "name": "browser-f1d/b7b.console.txt",
+      "bytes": 4481,
+      "sha256": "0ce3e711a425e115fee1c188b6c77cbc947a2ecfcf9475a4b6a91a59e17d1587"
+    },
+    {
+      "name": "browser-f1d/b8.console.txt",
+      "bytes": 4271,
+      "sha256": "bf909370d4c8ef33596ab3e8a887abb17da101077a8147fdd992b92e81489737"
+    },
+    {
       "name": "browser-pre-f1/b1.console.txt",
       "bytes": 3083,
       "sha256": "215e219e7264e668ec9703b63d18aaade495e943163a0709b7028b3c13892ddc"
@@ -416,307 +492,307 @@
     {
       "name": "browser/b1.applog.json",
       "bytes": 342,
-      "sha256": "20ae84e79ffa24646d74736bb067e878512733c1a5b6ef848fd0cc57136f2176"
+      "sha256": "ea75e21b669f46326892ccfcd6e710aa1e6a1d58cc857a8004e837d1edebcefe"
     },
     {
       "name": "browser/b1.console.txt",
-      "bytes": 3231,
-      "sha256": "925b0f6d15a474b827deb7bf26fc72f7b69789567f0ca813436970c7b4513bc2"
+      "bytes": 3240,
+      "sha256": "221f7e286728cd9de14d80fc1d24efd025b4497dfaf094ff9cd7754e89e08f67"
     },
     {
       "name": "browser/b1.fillers.log",
-      "bytes": 474,
-      "sha256": "b70f7a5eac62070facff66a04e2daec681d73c0e5d18aabc05f64a3ca930989f"
+      "bytes": 486,
+      "sha256": "53af1d9c0e3ec99da3658a42d562a7acc2520af25971c3f16c01d675b3765c73"
     },
     {
       "name": "browser/b1.requests.txt",
-      "bytes": 5248,
-      "sha256": "488e56a3b98dfc86576b55c782eb4ec6990f47ec56aa42300fa3609f496336bf"
+      "bytes": 5225,
+      "sha256": "270da6bb53d98146c69a133a48f43e3b664068a28988d1d34064ebcc5494d531"
     },
     {
       "name": "browser/b1.trace.json",
-      "bytes": 15786,
-      "sha256": "d25cebb9df4ab536bca05c3d8c29e5289e730e36e2a484ebc48d47c827430fe6"
+      "bytes": 15146,
+      "sha256": "b698398f87e37c74e56180fd607e2744f5d6bc470351d373392b9358ebe3d301"
     },
     {
       "name": "browser/b2.applog.json",
       "bytes": 319,
-      "sha256": "dbafdf5fb38611a818e3c090495c63a30f8f6634255f9659994fd4e56d8797ca"
+      "sha256": "d1995bef4f6e220c286a4e3f462da8c64721f3de98ea46e6011df516841d883a"
     },
     {
       "name": "browser/b2.console.txt",
-      "bytes": 4100,
-      "sha256": "891f7d961ce4d6afe36603bd378e6f63b1b76463cf760919ab7a811128e4e310"
+      "bytes": 4111,
+      "sha256": "508780324871e51950bee79dbd1964b2cec59e635883fc85730bcf61a6470581"
     },
     {
       "name": "browser/b2.fillers.log",
-      "bytes": 438,
-      "sha256": "091404153b27337155b554da670c31d36fa83b1cf225682700c8ffc83beedea7"
+      "bytes": 451,
+      "sha256": "91a908055646180bd07cc7adb1e377b259c1733bdf3525e4df756181c6c5de4c"
     },
     {
       "name": "browser/b2.requests.txt",
-      "bytes": 3342,
-      "sha256": "b0ca42ab0b301ee0d4cf55963ffceb6d711dd8ec09c8e7125edf4be8595c9115"
+      "bytes": 3451,
+      "sha256": "da526f4e9ce41dd05823c4ad561ebb491492e7f2bb3e07b294307fca6157c969"
     },
     {
       "name": "browser/b2.trace.json",
-      "bytes": 10317,
-      "sha256": "7c8ce459b5f83b7c00950a775bff19c45148756cfc0963f7733bed6378aaca67"
+      "bytes": 10827,
+      "sha256": "e0ed919e5d00da99a06dfe2b4b22b2ed950b8af05afc5bd536ed89260167518b"
     },
     {
       "name": "browser/b3.applog.json",
       "bytes": 332,
-      "sha256": "d38c44bc64d71f28d99b998cc0c40cb6f5b3c1e7dc537a8fca03ad376ef1986e"
+      "sha256": "ce6e49890639dfe5e39ab885630338b619ee6a44d9f9c21a6ac6960d6930100c"
     },
     {
       "name": "browser/b3.console.txt",
-      "bytes": 3697,
-      "sha256": "3f26662bba26ac7dba794abe583be7e32a5cbffd0511a47d97bf61769170466d"
+      "bytes": 3662,
+      "sha256": "1e5646ffd4a52f0f244bab229b2c304625ccc84c4176c898aa1dceee302b49d5"
     },
     {
       "name": "browser/b3.requests.txt",
       "bytes": 2317,
-      "sha256": "dbe908f15d6f0b30bd931d5f301be18385b34e746a511e4791f14f87fc1d7666"
+      "sha256": "6d53e96475fcea3dec9ba0eae542a0015736f030a4355a5683805f2f3fe8f472"
     },
     {
       "name": "browser/b3.trace.json",
-      "bytes": 5066,
-      "sha256": "76d1cb877c480410c34bc959431ad22b11a7e51065a2159947a07658745a3a30"
+      "bytes": 5007,
+      "sha256": "86a8b002e64ce8b85d86205d8b7e1f46d06e01f614b01595880c6b7ee10e0d3d"
     },
     {
       "name": "browser/b4.applog.json",
       "bytes": 344,
-      "sha256": "f7341ba5341bf8913b872c94ef766e7bd4254951260c88402971bd4bb989cb59"
+      "sha256": "be05d5ddc5e841e9c6648d74a84379f49cc8950ade3f2d64535a1d77f6744d75"
     },
     {
       "name": "browser/b4.console.txt",
-      "bytes": 4254,
-      "sha256": "99eeb035a7f7ccf5a37b98072529023e5f2efb0de6430342c0d6c21b9de73044"
+      "bytes": 4262,
+      "sha256": "24775e9ce10a258f04453a1ea134e297eb6a24d98301e06d99544fe4b2486727"
     },
     {
       "name": "browser/b4.requests.txt",
-      "bytes": 3092,
-      "sha256": "a83c76366209878bdafc6f6049eeb0b9c099b2b6beffbaf8e30e41f2bc405d97"
+      "bytes": 3201,
+      "sha256": "a4256fe4320949463b2a89ad57dcb05dc155231762adb98eb48a8a69f0e6c01e"
     },
     {
       "name": "browser/b4.trace.json",
-      "bytes": 6997,
-      "sha256": "2d2908a224e986846634438d8e4836c4ed8c1b49cb44f7f3a32a9ce4bf671273"
+      "bytes": 7198,
+      "sha256": "7655dea727cdc1a0aa5a5456459073935749605e45fe0e340fb453509415122a"
     },
     {
       "name": "browser/b5.applog.json",
       "bytes": 320,
-      "sha256": "fdb17632cc06943344678102b69bfdd6fea147b4b5a2d3f4bdd3023701125488"
+      "sha256": "423fde55a38e0d8f4f14aef381073edae2f30d6641b6cc7434030eec9b87cc40"
     },
     {
       "name": "browser/b5.console.txt",
-      "bytes": 3142,
-      "sha256": "cfb906b36882b592cc0c849cc86d12908b8ad2508a763ddaee57c6c73fe983a0"
+      "bytes": 3167,
+      "sha256": "0d82b50eee49e06f5751f2e406f7f6e68b981a1b6183bde8d462a6802bd23c15"
     },
     {
       "name": "browser/b5.fillers.log",
       "bytes": 1200,
-      "sha256": "fb1ac1c8ff17a3946d475f622d014e08409ce312c956a1dac86bdedf12342e47"
+      "sha256": "499cadc2324630c1411b0641b23bcd69063c6c9fa3c87dd3d1b9611e3bdf39b7"
     },
     {
       "name": "browser/b5.requests.txt",
       "bytes": 1830,
-      "sha256": "79e6ad4fa0e5152a35c3d8969073603bb75f7e299706be2e4d99eb5aa70d0518"
+      "sha256": "c702b901fbb274c092dac7cd2064280526f78a868067aeb2f8cdd988562e91cf"
     },
     {
       "name": "browser/b5.trace.json",
-      "bytes": 2287,
-      "sha256": "0c58ec3346f8b7a9b5c4fdc5f54a36c8bc42ab87e9ba1c82f1053012598b192e"
+      "bytes": 2335,
+      "sha256": "4df2a37a8cf0808d8b16ac839dda88c4a5f0ff56dfa52f97c98febc35fb39d82"
     },
     {
       "name": "browser/b6a.applog.json",
       "bytes": 319,
-      "sha256": "dabad03be4c09cc277d9d509a2bf1273b90f66029df863de5765f21facafce6c"
+      "sha256": "e4f61f34a5f46bd9400bb03867b4241d8fe3f23795f7a717dc83a26008e77cb8"
     },
     {
       "name": "browser/b6a.console.txt",
-      "bytes": 2292,
-      "sha256": "765d231c0d885cae9ba0f9040199b29c35a87bb55110b7edff5e81f89fec7741"
+      "bytes": 2293,
+      "sha256": "e8215989901cd0f786d2cd9191fc45e13389f19a5ed5cb062bdba0fea5b816b6"
     },
     {
       "name": "browser/b6a.requests.txt",
       "bytes": 2055,
-      "sha256": "f37e5773e1378c79659189b3904148c6b0ae0557ee4e36a28e82de9318065690"
+      "sha256": "e5128693623a4f9ba02ddb9f1b376702f4ee222ace1618e887ec97e6cf8841b6"
     },
     {
       "name": "browser/b6a.trace.json",
-      "bytes": 699,
-      "sha256": "933851a1bb7a4bfdf1328b048b585eacf14be8d4e9902010d384c43c24024d57"
+      "bytes": 727,
+      "sha256": "1f5a374fd4143bd0c9797f8ba07907cb09790f76c308bcfabaae23bc1979363e"
     },
     {
       "name": "browser/b6b.applog.json",
       "bytes": 318,
-      "sha256": "66111b52da5cbcd221f0307a62e461cfb0ca0072b0e5d2bca46cc4bb3d997178"
+      "sha256": "f3a93e17d6579a5c8bb3a3f70460e1350da2ff685aca4b39c2aa0d51a70c8959"
     },
     {
       "name": "browser/b6b.console.txt",
-      "bytes": 3947,
-      "sha256": "1f74d86e0f0ce9ea1bac89e2933a20adcc348aa03eb6f50dc1623ef3f2636a5f"
+      "bytes": 3932,
+      "sha256": "bffcd484b386208526f0cc07c857b576f14d7060a715074fd9ceb3017b980091"
     },
     {
       "name": "browser/b6b.requests.txt",
       "bytes": 2529,
-      "sha256": "16059df4565f073622b028916cbb1f83f6d8b6abe2f07f344fe35f97f04125b8"
+      "sha256": "9d6ece62bf86bf40c41e378087f6ec1f9d9b76effdc6584621e093c2fa81de34"
     },
     {
       "name": "browser/b6b.trace.json",
-      "bytes": 5396,
-      "sha256": "fea34728946244ab809ac7ff08de24c2a94c9321c25dc033b80f28d11965dcfd"
+      "bytes": 5346,
+      "sha256": "35ba9763275cb00053c641d508a5847d42c1af1956822b0733369233d8793191"
     },
     {
       "name": "browser/b6c.applog.json",
       "bytes": 332,
-      "sha256": "ddc8c4214e673573dbd85fddfd8d5bb72f7a6d4ab525f1810cb1057326099904"
+      "sha256": "ecd529cf425a8ae2a9b060d20868973d2955344b405bfe470c8779fd26c6b59c"
     },
     {
       "name": "browser/b6c.console.txt",
-      "bytes": 4032,
-      "sha256": "a712be6805d370a738170708786774d52899130f7cfa0b656df4a2654e38970e"
+      "bytes": 4035,
+      "sha256": "d05bcd9b80db97e7fe0d96ef42bc5826c6c1d8687a63292b3d87704d662bc3af"
     },
     {
       "name": "browser/b6c.other.txt",
       "bytes": 140,
-      "sha256": "3fa66f835eaa831c5f2918a20074c39d3633ed6dbd561ac94bbb2d411c57a608"
+      "sha256": "9b837d05fc813f9e05719a013b2ccba8ddb6a0402be68ae7e7cd6420027dee6b"
     },
     {
       "name": "browser/b6c.requests.txt",
-      "bytes": 2417,
-      "sha256": "055177604d9e8320776ec4a68c2e561b9159e4548e769d61bf6a0abbcc5f651f"
+      "bytes": 2308,
+      "sha256": "394164b6dfb6ab7bd8b5bd8dd6df74f16c1f30a841a0286b7cea2402067609e9"
     },
     {
       "name": "browser/b6c.trace.json",
-      "bytes": 4928,
-      "sha256": "d44e7c7e6fdd44d1f094810b9efdf67974b10e466ccc8c1e8f5cc59cf6ca6e8d"
+      "bytes": 4356,
+      "sha256": "991048b2db6584337417e68524bc8385444926ea1aa1f6bb2566f68ec576688b"
     },
     {
       "name": "browser/b6d.applog.json",
       "bytes": 318,
-      "sha256": "a51a29412db2f38ec366b96d8894b6b4deb432e1c610d4d6148102fa13a5bfa2"
+      "sha256": "799b9a632d337598647fbc5914bc07e8fd61440ebf69e646d120d5c77cbbf987"
     },
     {
       "name": "browser/b6d.console.txt",
-      "bytes": 3912,
-      "sha256": "377f26f7b39f051f80783b32ced7700e35b47d056cee1a6314dc334dc6f78dbe"
+      "bytes": 3901,
+      "sha256": "50ba0ac1128e0064a47d728c65f0c2646fff6988b0c37de3354b39a8b3a66ca8"
     },
     {
       "name": "browser/b6d.requests.txt",
       "bytes": 2243,
-      "sha256": "dd0b1120f884d850da6896df64ae7ffd60aff827fcd44c27e329290b100a9fe6"
+      "sha256": "12f89cd48276d5ed05f185c2915b70b4865143893c7fdad8d07ddd1737db6ed2"
     },
     {
       "name": "browser/b6d.trace.json",
-      "bytes": 4892,
-      "sha256": "211cb1bb85615db2572c6f19350e9f4679c0baca4cf85c25bc649adddfc41917"
+      "bytes": 4921,
+      "sha256": "b36e7aa79a3192ac30f38ba36078e7eaee1c37285f2402a450b73e459f2e1cea"
     },
     {
       "name": "browser/b6e.applog.json",
       "bytes": 318,
-      "sha256": "e8e49e125b8d94b378321575cf21f169adbacaa90974b97e6d3dd91fb5d5b529"
+      "sha256": "940607bcc90fddb1634f597077624c36f50a16e798941325c3389395d9ef4990"
     },
     {
       "name": "browser/b6e.console.txt",
-      "bytes": 4112,
-      "sha256": "8042b0879594a28bcd8f99f6c44858fd38892a60eae0ab715ed15a2a9f412970"
+      "bytes": 4111,
+      "sha256": "a5bc78840ee714306fff63944354b4a1b4c4756b9936284200cc0da99bfaa04e"
     },
     {
       "name": "browser/b6e.requests.txt",
       "bytes": 2352,
-      "sha256": "f60250dbdbfdbcfcfd609c3a00bb3938500b3a281188834549f427dde4e543a2"
+      "sha256": "326d7cd0abcb195bb2e80709beba6c9e748712e716d1f9f76140faf46ff9cc9b"
     },
     {
       "name": "browser/b6e.trace.json",
-      "bytes": 5392,
-      "sha256": "37fc6c18ac89f79a54b84b407082477f47027a65c9a2b35a011d9ac2345c166e"
+      "bytes": 5371,
+      "sha256": "afbd1af2afd51bd29b3ddb9c44c5a15934140ce47ce02d9b238f65df25ba7a2f"
     },
     {
       "name": "browser/b6f.applog.json",
       "bytes": 317,
-      "sha256": "9bac15f833fa50d13ac99eddf63ce68aedc0db71d91a52252f5609534e6997b4"
+      "sha256": "82ef2d662607592b97e2031ffe9fb00681b891f73443af4c1c828d86d0850ab1"
     },
     {
       "name": "browser/b6f.console.txt",
-      "bytes": 3261,
-      "sha256": "c4bb52151ad319947a2e449dd38b86e7344b0ce604ceac490b81d7f1540a2286"
+      "bytes": 3259,
+      "sha256": "5d01d6010ac618bb8aada5bfb81cada2de6f76fd179a72e530299410149eb1c0"
     },
     {
       "name": "browser/b6f.requests.txt",
-      "bytes": 2306,
-      "sha256": "6db9f85d86479acbcd44cef758a922f30b73c2cda8d8ccb73ef8d7e48978a3ac"
+      "bytes": 2303,
+      "sha256": "f8fc0b104dc654402b1fac2f36468c08dc40bec44f9c304cad870ff5a58a930a"
     },
     {
       "name": "browser/b6f.trace.json",
-      "bytes": 5245,
-      "sha256": "0a2c56b61dda6003ac74c8a3b2c1b3deba9be2d02dfaa72c1d3b301f2c1ae7d7"
+      "bytes": 5260,
+      "sha256": "a21dd1fe0ea07a688713bb312be72ca1f5a8dcd2066ec256ea137f4ed750f1d7"
     },
     {
       "name": "browser/b7a.applog.json",
       "bytes": 341,
-      "sha256": "c82961fcf61298289fc8f5ebaaf37aabb3036fce197a20ffb62598e075e19148"
+      "sha256": "c5671b9b7db91ace5f88b048c7f91bc2033f0c8b5a940c3cb92df592e985bd08"
     },
     {
       "name": "browser/b7a.console.txt",
-      "bytes": 4460,
-      "sha256": "5f98d10fe0ce1c38cd94f595623b2e2d3bf3673fdd1eac807394a631210432eb"
+      "bytes": 4452,
+      "sha256": "b3df490431739eba9a628149ae34944b2a0ec38f1e35bf6e977a5d1e3f40ecbf"
     },
     {
       "name": "browser/b7a.requests.txt",
       "bytes": 2573,
-      "sha256": "cdb3b3fbb069b31ddf08385ca8cff4797781049ddb154b82d5020d8736ea9b26"
+      "sha256": "1178381354be26806ca9fe7b8a97fcb3518d45c44f97914f0245431f4a47a522"
     },
     {
       "name": "browser/b7a.trace.json",
-      "bytes": 4653,
-      "sha256": "78b4ddc9b2ad8207ed27f4544c9e0f622d2ba59130c3bf3d787f5343b23927e3"
+      "bytes": 4601,
+      "sha256": "79160be7c63f06c622c384e8575e803c6ee67ca4754c8df37d3df14c0870ac44"
     },
     {
       "name": "browser/b7b.applog.json",
-      "bytes": 352,
-      "sha256": "90d6a6013fb357b1069463ad85e57c823de6b37a7d0fd7f64c52433c0a6cb63a"
+      "bytes": 353,
+      "sha256": "373ca4cb2b4991811ed2117d43eee056e3077aa625574044bc4104fc4c65a590"
     },
     {
       "name": "browser/b7b.console.txt",
-      "bytes": 4481,
-      "sha256": "0ce3e711a425e115fee1c188b6c77cbc947a2ecfcf9475a4b6a91a59e17d1587"
+      "bytes": 4482,
+      "sha256": "8ca6e38f561022b9e910c2c26a2403ddcadf4adc572741f82a73a7014b75cc1a"
     },
     {
       "name": "browser/b7b.requests.txt",
       "bytes": 3531,
-      "sha256": "d214c1443e63c701124857762e40437287d2df85775d9da0a5bd8bcdb3d15464"
+      "sha256": "1d6a4af4bb50b8feb4f04e10edeff3547334cde5416ba134e6239ab9fc4f85b8"
     },
     {
       "name": "browser/b7b.trace.json",
-      "bytes": 723,
-      "sha256": "bbc4c953c617e91b0e93a022f69434c2253f656a4c064c3fc088cb3467985c29"
+      "bytes": 709,
+      "sha256": "5694b3bbb863d5d9e7813c1e3724192c52fdb6a52f092995a0aafbc691602897"
     },
     {
       "name": "browser/b8.applog.json",
       "bytes": 334,
-      "sha256": "9cb51297a89a87c20f88ffc8fe9bc84cf1f8469a1776f9fa976f31037f504039"
+      "sha256": "1c6cbc5a6eed8e1697227e4cb6afc7ce59d5ee244e6beafac1d2a9834d2120a6"
     },
     {
       "name": "browser/b8.console.txt",
-      "bytes": 4271,
-      "sha256": "bf909370d4c8ef33596ab3e8a887abb17da101077a8147fdd992b92e81489737"
+      "bytes": 4222,
+      "sha256": "dc705730b9247451642fd07e19d029c5e323e80084746ab84ce8f47a9ccc5876"
     },
     {
       "name": "browser/b8.fillers.log",
-      "bytes": 558,
-      "sha256": "7f5875d38ef9d4d8a672c2f20849fb88b662e499ed2cb01353378504276583f3"
+      "bytes": 545,
+      "sha256": "6b8d4804851b8c4f4e2e654acb1dd1176439d495d1dfd03e210ae981ac9e34be"
     },
     {
       "name": "browser/b8.requests.txt",
       "bytes": 4935,
-      "sha256": "8ed1ef0cecf30601a3c64618d4ed966629bd47ed0089ff3f348642aa9cf4caeb"
+      "sha256": "efd2a4f7d2ca9801887670f75f40f15b50d62aa9ba684385a1d29fb9cd4e7e51"
     },
     {
       "name": "browser/b8.trace.json",
-      "bytes": 11149,
-      "sha256": "10babb50988bf60eb064c1cc8121aa3c49207a7ede6c58c87846762f86b954a5"
+      "bytes": 11120,
+      "sha256": "5cda65a83d4d59dab217ce644aaed75864e412613cf33cfcad652f51c3042737"
     },
     {
       "name": "fault/f1a-92e1250-r1-flows/flows-notes.jsonl",
@@ -869,139 +945,184 @@
       "sha256": "6e9d7283e6f467e85a09d62c43862c2bb7d1444312a609f20f7fcebf45458fcd"
     },
     {
-      "name": "fault/final-r1-flows/flows-notes.jsonl",
+      "name": "fault/f1d-7b136a2-r1-flows/flows-notes.jsonl",
       "bytes": 4711,
       "sha256": "6f8d810de003d1d9eae324c117b5638ef94749b4cb513d8da286143744bd4602"
     },
     {
-      "name": "fault/final-r1-flows/flows-requests.jsonl",
-      "bytes": 112790,
-      "sha256": "daf3e1f4f1fe20d728eb17f4673b60ff24214abdcd74682c6dff3ab496f24aad"
-    },
-    {
-      "name": "fault/final-r1-flows/flows-transitions.log",
-      "bytes": 633836,
-      "sha256": "896d7c89fe13078b2803e24658aac71d36daca6224a12d3eec845a901b036520"
-    },
-    {
-      "name": "fault/final-r1-process/process-notes.jsonl",
+      "name": "fault/f1d-7b136a2-r1-process/process-notes.jsonl",
       "bytes": 9162,
       "sha256": "64b965f85fc0aca83f67bef732de26bf25fbda705a7b0e1beeade299bdf47e65"
     },
     {
-      "name": "fault/final-r1-process/process-requests.jsonl",
-      "bytes": 91384,
-      "sha256": "b1c903cf9a14aec4a560f9fd6bfd1ffcc5bc5cab27f624965052a49c4f14d90d"
-    },
-    {
-      "name": "fault/final-r1-process/process-transitions.log",
-      "bytes": 742224,
-      "sha256": "b88762a731a9657d81f5ec284c1aaf9431ea703f6bc0c410294f1572e1532cb9"
-    },
-    {
-      "name": "fault/final-r1-redis/redis-notes.jsonl",
+      "name": "fault/f1d-7b136a2-r1-redis/redis-notes.jsonl",
       "bytes": 4371,
       "sha256": "a9223c8914bd4b68477681a1285440d7accb99c2e2167470aa66628599ae74ee"
     },
     {
-      "name": "fault/final-r1-redis/redis-requests.jsonl",
-      "bytes": 28550,
-      "sha256": "6eda8ff3dfd4189e01f66079e24ae5cfd29466073c67697509f0124bc1a5858c"
-    },
-    {
-      "name": "fault/final-r1-redis/redis-transitions.log",
-      "bytes": 212704,
-      "sha256": "8064c33e5f7ded3f9c4e56cfb2967ba13d887c844cdca0e24f1af18ab1d4890d"
-    },
-    {
-      "name": "fault/final-r2-flows/flows-notes.jsonl",
+      "name": "fault/f1d-7b136a2-r2-flows/flows-notes.jsonl",
       "bytes": 4710,
       "sha256": "8f127671c06e44baabc8d7a7d93ec535ab8ae2c0e2f67bfa8170764369f74613"
     },
     {
-      "name": "fault/final-r2-flows/flows-requests.jsonl",
-      "bytes": 112057,
-      "sha256": "dc5bca7d9fff7a7e10e5367666e106a3437b8713402782e6cefe04cf22f575b0"
-    },
-    {
-      "name": "fault/final-r2-flows/flows-transitions.log",
-      "bytes": 634543,
-      "sha256": "72f7ec810a2682c85cc0a38caefbd869767501b1fead75cb1729b7df6bb16378"
-    },
-    {
-      "name": "fault/final-r2-process/process-notes.jsonl",
+      "name": "fault/f1d-7b136a2-r2-process/process-notes.jsonl",
       "bytes": 9160,
       "sha256": "dc4b5d6de9427eab496e26b5cab2625c368668a32faf4209ade424504021bf99"
     },
     {
-      "name": "fault/final-r2-process/process-requests.jsonl",
-      "bytes": 91398,
-      "sha256": "d8de5f6b183c71f8a36971224749388394e7d23d47043ef2d34417fe113b5fdd"
-    },
-    {
-      "name": "fault/final-r2-process/process-transitions.log",
-      "bytes": 741841,
-      "sha256": "c53b2d0a4924b8ebd009b6a5797b9975b6baffa6ce6d8e248094b5f861b7c4d8"
-    },
-    {
-      "name": "fault/final-r2-redis/redis-notes.jsonl",
+      "name": "fault/f1d-7b136a2-r2-redis/redis-notes.jsonl",
       "bytes": 4370,
       "sha256": "efe037d45605471cc9d7454e7b5e96272176f3e62858a78591d695487135fbac"
     },
     {
-      "name": "fault/final-r2-redis/redis-requests.jsonl",
-      "bytes": 28372,
-      "sha256": "76c43a33b820a49fc4f36bb332dd752f52981757e43b27556f528ab6a425602b"
-    },
-    {
-      "name": "fault/final-r2-redis/redis-transitions.log",
-      "bytes": 210882,
-      "sha256": "4c34b46b3d712aa65f1911afc5c728f2ba0ab43b4efbd3b25e7af4602468e1f2"
-    },
-    {
-      "name": "fault/final-r3-flows/flows-notes.jsonl",
+      "name": "fault/f1d-7b136a2-r3-flows/flows-notes.jsonl",
       "bytes": 4710,
       "sha256": "1e369bb37a0bab6fc31a152d9aec2c3ddb47ac17a90386bd55768a40e1fa499b"
     },
     {
-      "name": "fault/final-r3-flows/flows-requests.jsonl",
-      "bytes": 115034,
-      "sha256": "15317d572186e98f81c36ccdae717acb8b3cd5995b316a4677a771e764797c76"
-    },
-    {
-      "name": "fault/final-r3-flows/flows-transitions.log",
-      "bytes": 635638,
-      "sha256": "946dc62e2bcf2debd39603eb198a4bbce461b97086ec237c51c12550ac93a397"
-    },
-    {
-      "name": "fault/final-r3-process/process-notes.jsonl",
+      "name": "fault/f1d-7b136a2-r3-process/process-notes.jsonl",
       "bytes": 9175,
       "sha256": "f36effd675ba607408d52c4abf0022c92de6c0e0b6e06ae7ede0fd20d7246d24"
     },
     {
-      "name": "fault/final-r3-process/process-requests.jsonl",
-      "bytes": 90148,
-      "sha256": "509b5218e0768e4d5e580f80ecdf11b64bbc20df9c9d204e0aff69a141f9b2f7"
-    },
-    {
-      "name": "fault/final-r3-process/process-transitions.log",
-      "bytes": 740199,
-      "sha256": "aa9a6e0c1f3a1db2360eaa48a1cc8aa77a1810e849147f3166e2a20298da8694"
-    },
-    {
-      "name": "fault/final-r3-redis/redis-notes.jsonl",
+      "name": "fault/f1d-7b136a2-r3-redis/redis-notes.jsonl",
       "bytes": 4369,
       "sha256": "641cb6275e74877442baaf46569ceb4268db2ef4e39c9886de502befe633c012"
     },
     {
+      "name": "fault/final-r1-flows/flows-notes.jsonl",
+      "bytes": 4714,
+      "sha256": "3095aafd8ef766c7ec09aa6aeedef689b39e557d89809e184c53ad6c94ea7046"
+    },
+    {
+      "name": "fault/final-r1-flows/flows-requests.jsonl",
+      "bytes": 110557,
+      "sha256": "da77f9d655b088b1ff20d0d273e20e5431c197ab0f2003f375e2f905dd68d45a"
+    },
+    {
+      "name": "fault/final-r1-flows/flows-transitions.log",
+      "bytes": 634776,
+      "sha256": "3c9618d3417e7bfb8dfbd24999b494b73d05fbc4a4ae23fe1be5074f241fe914"
+    },
+    {
+      "name": "fault/final-r1-process/process-notes.jsonl",
+      "bytes": 9164,
+      "sha256": "3ae140cac312864e4b5ef7153872746f5ca55ec596ceef7a665c2bcafd31ba6e"
+    },
+    {
+      "name": "fault/final-r1-process/process-requests.jsonl",
+      "bytes": 91218,
+      "sha256": "36aeef3b19ce2340d6cb0535bc108c420d7ed14ecdc67f85ad1a816dba589c59"
+    },
+    {
+      "name": "fault/final-r1-process/process-transitions.log",
+      "bytes": 739937,
+      "sha256": "b58376f475136d577fd25935faf6f27ae874fe5cd8238a710276c8ce0a048485"
+    },
+    {
+      "name": "fault/final-r1-redis/redis-notes.jsonl",
+      "bytes": 4367,
+      "sha256": "81fe6cdd90c89156c4a5275525330e551ab3ab58b0f5a42b554a01d9691cafae"
+    },
+    {
+      "name": "fault/final-r1-redis/redis-requests.jsonl",
+      "bytes": 26933,
+      "sha256": "0b2c23dd4f6ac21a5d1be82fd65f9bbe9c1f928f32a78bd8f316a1f022829232"
+    },
+    {
+      "name": "fault/final-r1-redis/redis-transitions.log",
+      "bytes": 207846,
+      "sha256": "2a43217e13c3b2a565acfab5d45eb92a8593224bc367fb97bcfd9186b2543cc6"
+    },
+    {
+      "name": "fault/final-r2-flows/flows-notes.jsonl",
+      "bytes": 4707,
+      "sha256": "5bf5ad205f83d7324377edfa7265e4241d93dbfdcb6adbbaef14c533d5188d15"
+    },
+    {
+      "name": "fault/final-r2-flows/flows-requests.jsonl",
+      "bytes": 109452,
+      "sha256": "92ce786c85df5170c12147f561064db6801d3a4ab177a156126180b81c281859"
+    },
+    {
+      "name": "fault/final-r2-flows/flows-transitions.log",
+      "bytes": 630938,
+      "sha256": "d9f0af3ea0fe6049e38dee2c9f2ddd1416825106f9654527496e0eb4ab884cf9"
+    },
+    {
+      "name": "fault/final-r2-process/process-notes.jsonl",
+      "bytes": 9174,
+      "sha256": "37242e4e4fb3e6038847776879f76dbff859fa50e1a41260877bcff777d017d2"
+    },
+    {
+      "name": "fault/final-r2-process/process-requests.jsonl",
+      "bytes": 91038,
+      "sha256": "f91b499c5a4046d710c66e23922010829b678c83756a8efba4f462b08b805d23"
+    },
+    {
+      "name": "fault/final-r2-process/process-transitions.log",
+      "bytes": 736402,
+      "sha256": "6fee7c1c1a1ec0e2039691018ee1fc0a62012ad35af0d0572fb8555224f7f61e"
+    },
+    {
+      "name": "fault/final-r2-redis/redis-notes.jsonl",
+      "bytes": 4370,
+      "sha256": "8e993fa216fe63159cb999725fa43c165a9a46cfccdc92b7c3e5481c53e819f4"
+    },
+    {
+      "name": "fault/final-r2-redis/redis-requests.jsonl",
+      "bytes": 27821,
+      "sha256": "5634a1ce3ed7d0e745f5887bb5094d1050fd8f3fad77fc79e2d27774f9d2c4cb"
+    },
+    {
+      "name": "fault/final-r2-redis/redis-transitions.log",
+      "bytes": 213280,
+      "sha256": "04f6abb4c38083e0d326264fbb13daf96dc897bd5e8f4a48f12f3065fc71aed0"
+    },
+    {
+      "name": "fault/final-r3-flows/flows-notes.jsonl",
+      "bytes": 4708,
+      "sha256": "f675280ccbee3f583490e0fc3c1fa0db4d7795bb81d635ae50ce32c26af8599b"
+    },
+    {
+      "name": "fault/final-r3-flows/flows-requests.jsonl",
+      "bytes": 114557,
+      "sha256": "edfab107b0b4624f2e70d73a004f97abcfcdd3aed4b424ca60d5464e38642ed2"
+    },
+    {
+      "name": "fault/final-r3-flows/flows-transitions.log",
+      "bytes": 636881,
+      "sha256": "fc52b6ef2eed4d1ce468ef9e93138cc96765aa9464eadb1474f2ef0bd1858cea"
+    },
+    {
+      "name": "fault/final-r3-process/process-notes.jsonl",
+      "bytes": 9128,
+      "sha256": "2fbef5a5fa0566aab6f3be6dedc1e1d5597d619542cc7f41bf73cbfcd4236640"
+    },
+    {
+      "name": "fault/final-r3-process/process-requests.jsonl",
+      "bytes": 91541,
+      "sha256": "5e6a874048dc4c18a0c9dcc9500fe63277cf3279b681af343dfa36a5521b1676"
+    },
+    {
+      "name": "fault/final-r3-process/process-transitions.log",
+      "bytes": 741815,
+      "sha256": "f8d5073d1ec8412800560731aa9073718b2203d40593085b3bb258f5c19b8dd5"
+    },
+    {
+      "name": "fault/final-r3-redis/redis-notes.jsonl",
+      "bytes": 4363,
+      "sha256": "c9f042fc8976da096662512d2a40aad66c0ab5241447a7dd395be9cea240422f"
+    },
+    {
       "name": "fault/final-r3-redis/redis-requests.jsonl",
-      "bytes": 28569,
-      "sha256": "27b89200d626fc548d990726396dc974b04b214f01eb9599937e85ee2b1a1334"
+      "bytes": 28514,
+      "sha256": "3415c3c1e94c7cdb3546ecfa160ab904744cc89fa1556c64ac929bf118cec624"
     },
     {
       "name": "fault/final-r3-redis/redis-transitions.log",
-      "bytes": 216874,
-      "sha256": "56d81cf9f92458b4d7f4a97d6104a1116550ecf740093ece9a02ebd4c98d639d"
+      "bytes": 211768,
+      "sha256": "0d83f1dd099e2c237a4e0531ce9bf43bee65532aed442703171ec9d4ce3118e2"
     },
     {
       "name": "fault/fixpass-flows/flows-notes.jsonl",
@@ -1290,18 +1411,18 @@
     },
     {
       "name": "logs/browser-proxy.log",
-      "bytes": 114027,
-      "sha256": "0836718617114e437ea155b3375f1182c62e63d5688acc9db55460a4bb2e4d47"
+      "bytes": 139668,
+      "sha256": "5ab1aa5f99b300b4bf75940844de35cecbdd59ae8e1676a11288d050dcc3d920"
     },
     {
       "name": "logs/browser-seed.log",
       "bytes": 1118,
-      "sha256": "a8dcf7733ee576a5764e030484afb66e1ac034c0d309ae953af3c1698b5f2dd0"
+      "sha256": "4842b4739ea3fe3ab2db5b4fbfb7626f9523d92d6cf6baf44d7de920cb6912f6"
     },
     {
       "name": "logs/chain.txt",
       "bytes": 7692,
-      "sha256": "b10ea899aecb7e9f95b341849931a60360b211fba16aff823e2366892400bc0e"
+      "sha256": "9cf5825258e60bf9664f8f34b9f7ca28f317f04c711182d0675476d41c6663c9"
     },
     {
       "name": "logs/f1a-92e1250-r1-flows.log",
@@ -1479,6 +1600,61 @@
       "sha256": "e9200de896d349e1efd70feae1b67a669ec25b90fbc1eb76c0deecf8c41193e0"
     },
     {
+      "name": "logs/f1d-7b136a2-chain.txt",
+      "bytes": 7692,
+      "sha256": "b10ea899aecb7e9f95b341849931a60360b211fba16aff823e2366892400bc0e"
+    },
+    {
+      "name": "logs/f1d-7b136a2-r1-flows.log",
+      "bytes": 6072,
+      "sha256": "601a0bef1fae57c36958fe0b6460fbd13a7440d17fabc3b4fdff743f2aed096a"
+    },
+    {
+      "name": "logs/f1d-7b136a2-r1-process.log",
+      "bytes": 11489,
+      "sha256": "3e6d7a265793d11bed11d3f8f2eb9c6ff0a0bd23dc981ae9c6505f8609c3d534"
+    },
+    {
+      "name": "logs/f1d-7b136a2-r1-redis.log",
+      "bytes": 5532,
+      "sha256": "af4f96b68c90c2a4e264df381741d11914ee5d2cb8c1148c541db7febc7ceba9"
+    },
+    {
+      "name": "logs/f1d-7b136a2-r2-flows.log",
+      "bytes": 6071,
+      "sha256": "cb4e710ddbb48513fa6ed06ea312aee8d4059c847d0d6a3f858c3640aa9cde3f"
+    },
+    {
+      "name": "logs/f1d-7b136a2-r2-process.log",
+      "bytes": 11470,
+      "sha256": "07e7259fbac9d4c3414f10df084af51d615d1c11ab76fff43a00426a6fca8aa4"
+    },
+    {
+      "name": "logs/f1d-7b136a2-r2-redis.log",
+      "bytes": 5547,
+      "sha256": "a8cb580320f42718d754a462aa238a89c5e4daf0cbf55bf5ddb81dd0430a1558"
+    },
+    {
+      "name": "logs/f1d-7b136a2-r3-flows.log",
+      "bytes": 6053,
+      "sha256": "e4ec52c6cbf84cddf8d6202e2f67fd133bf3ad06a7220a0b29a054e83f23c982"
+    },
+    {
+      "name": "logs/f1d-7b136a2-r3-process.log",
+      "bytes": 11487,
+      "sha256": "25ee4523ac62f9e9eb3a041345df9ba4333120e863e3cbdd6693be721f4a37df"
+    },
+    {
+      "name": "logs/f1d-7b136a2-r3-redis.log",
+      "bytes": 5531,
+      "sha256": "85da129652387375f31f09cd2da875b51499d79ed41d61a306cb26dd31db4cda"
+    },
+    {
+      "name": "logs/f1d-7b136a2.txt",
+      "bytes": 1714,
+      "sha256": "33ca080b20b810ea798ca35246cd246366dc6b674f0f74cb8d5ba2b057ac50f3"
+    },
+    {
       "name": "logs/final-build.log",
       "bytes": 94,
       "sha256": "b1549c2c034dd03e6b5ea3ea465f2ea87716fe6eaf9d08c5c2e361930a7701a0"
@@ -1486,22 +1662,22 @@
     {
       "name": "logs/final-callback.log",
       "bytes": 264,
-      "sha256": "59e9cf0204dc3f8623f4410ab4e2bd41e5b83e879af9d7a8cee2f19a013adbb6"
+      "sha256": "ddac3edc7c40bc71cc6765fd1125f4faeaa2eb2e8013c4afc823c2cb542c413e"
     },
     {
       "name": "logs/final-docker-lifecycle.log",
-      "bytes": 381468,
-      "sha256": "d3447420ecdd7e18cb360998286155af454877be99d722f4bc787b4edcc8f0e6"
+      "bytes": 378246,
+      "sha256": "e5102dea52e9033d87541749b3ea27bda7d03f524b5eaaad32bd53baab3a64a2"
     },
     {
       "name": "logs/final-harness.log",
-      "bytes": 3065,
-      "sha256": "af080737e05347a9d2b7ed944a3e6b2c8c629d0559990184dfcf713bdaa14879"
+      "bytes": 3064,
+      "sha256": "c6a07febeecd76fd2dae7cfac34c271b2db4fd9c309f9807adc6ec756520dc2d"
     },
     {
       "name": "logs/final-integration.log",
-      "bytes": 696477,
-      "sha256": "ebdf140e5c41fd8293bee13bb355550f01d5f706af19bad73a2aeba5f490a205"
+      "bytes": 697149,
+      "sha256": "d6127ee2bcedcb497c635e5b37c98961bdd6589d5a38b017bb75dd8f604a393e"
     },
     {
       "name": "logs/final-lint.log",
@@ -1511,57 +1687,57 @@
     {
       "name": "logs/final-migrate.log",
       "bytes": 1663,
-      "sha256": "1d0c01a3c9efbf029f874ba4ab8dcfbbcc1f5ed32bec3e84a2056f62e4db3379"
+      "sha256": "8e73e1f9bb1c7d4a44abb85bb4cddc93c9eef9bf404ca33dcf1cd4cafac77893"
     },
     {
       "name": "logs/final-outage.log",
-      "bytes": 68109,
-      "sha256": "ddb340731057db695b9d911489662196eea5255467474b532039eacf17650fc6"
+      "bytes": 67338,
+      "sha256": "2993fe3790a0a09a70b9a056a0429b3a7e58f76ee56401a59d897741c1bf0a8a"
     },
     {
       "name": "logs/final-r1-flows.log",
-      "bytes": 6072,
-      "sha256": "601a0bef1fae57c36958fe0b6460fbd13a7440d17fabc3b4fdff743f2aed096a"
+      "bytes": 6075,
+      "sha256": "97e99bbbf12b27c5436d1a3a9fa7729427c5573d94443a31d93d7515cd239767"
     },
     {
       "name": "logs/final-r1-process.log",
-      "bytes": 11489,
-      "sha256": "3e6d7a265793d11bed11d3f8f2eb9c6ff0a0bd23dc981ae9c6505f8609c3d534"
+      "bytes": 11491,
+      "sha256": "7d82f2fa66b7850487f2f4d7f7326cf820c7e1e09bf74e1f4bc8bb7169d739a3"
     },
     {
       "name": "logs/final-r1-redis.log",
-      "bytes": 5532,
-      "sha256": "af4f96b68c90c2a4e264df381741d11914ee5d2cb8c1148c541db7febc7ceba9"
+      "bytes": 5544,
+      "sha256": "05eb51848922472af12fec16d1891c50029c75599dca8df3e9a0ccf8ae80a297"
     },
     {
       "name": "logs/final-r2-flows.log",
-      "bytes": 6071,
-      "sha256": "cb4e710ddbb48513fa6ed06ea312aee8d4059c847d0d6a3f858c3640aa9cde3f"
+      "bytes": 6068,
+      "sha256": "5f611aca7877e1fcf086e77ae7692f3f0d786c6151cd92e4516384f6f9629e55"
     },
     {
       "name": "logs/final-r2-process.log",
-      "bytes": 11470,
-      "sha256": "07e7259fbac9d4c3414f10df084af51d615d1c11ab76fff43a00426a6fca8aa4"
+      "bytes": 11501,
+      "sha256": "c62f3814e89d4fe6f9e1241f1263877cac6fb16c0d8dcb2d61c704486568d9b1"
     },
     {
       "name": "logs/final-r2-redis.log",
-      "bytes": 5547,
-      "sha256": "a8cb580320f42718d754a462aa238a89c5e4daf0cbf55bf5ddb81dd0430a1558"
+      "bytes": 5533,
+      "sha256": "d819a3fb094e53b03d56284f09035514555c8d8ec53a5ce631a8baa662cc9027"
     },
     {
       "name": "logs/final-r3-flows.log",
-      "bytes": 6053,
-      "sha256": "e4ec52c6cbf84cddf8d6202e2f67fd133bf3ad06a7220a0b29a054e83f23c982"
+      "bytes": 6052,
+      "sha256": "ca6fa5ccee1ed35347f038d7f466976813cf0e4f7aee3829f2327571e30dae67"
     },
     {
       "name": "logs/final-r3-process.log",
-      "bytes": 11487,
-      "sha256": "25ee4523ac62f9e9eb3a041345df9ba4333120e863e3cbdd6693be721f4a37df"
+      "bytes": 11440,
+      "sha256": "3ba7a1254f4dcf5999c04ef333b73021f98681ce3ccc5c1205c50eed843dffbf"
     },
     {
       "name": "logs/final-r3-redis.log",
-      "bytes": 5531,
-      "sha256": "85da129652387375f31f09cd2da875b51499d79ed41d61a306cb26dd31db4cda"
+      "bytes": 5540,
+      "sha256": "a847789f9b86f897a1597c40183da5c7583981e8185ebc69105d047fa9336490"
     },
     {
       "name": "logs/final-typecheck.log",
@@ -1570,13 +1746,13 @@
     },
     {
       "name": "logs/final-unit.log",
-      "bytes": 16886,
-      "sha256": "1b3540cc8bc80c4123bd3c9b469b6b339f4124926f1c23c36420296b2094a56b"
+      "bytes": 16865,
+      "sha256": "beb408d1e9029b3f832919aefc4a84d9c4bccd1fd907d34cd42799843356741b"
     },
     {
       "name": "logs/final.txt",
       "bytes": 1714,
-      "sha256": "33ca080b20b810ea798ca35246cd246366dc6b674f0f74cb8d5ba2b057ac50f3"
+      "sha256": "57a07ef4a2bc7727b35b7c480216840a6699668ad922c6f913828b7150aa9704"
     },
     {
       "name": "logs/fixpass-flows.log",
@@ -1649,6 +1825,26 @@
       "sha256": "801a692a16b0b892dbcb12e1c9ce51c08d416ac9ef8e15ee9dbb0a6975d54dac"
     },
     {
+      "name": "logs/green-9-final-sql-lifecycle.log",
+      "bytes": 29306,
+      "sha256": "ca251797aaa44d9ef2de2d53bba800ce9ac81c2e5efb894710c4ca507bb5a07f"
+    },
+    {
+      "name": "logs/green-9-lint.log",
+      "bytes": 1602,
+      "sha256": "292cb856980310aee2295e79f6a13663445c5f13b2741411147ce6e6c15a280a"
+    },
+    {
+      "name": "logs/green-9-typecheck.log",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "name": "logs/green-9-unit.log",
+      "bytes": 347,
+      "sha256": "f06a2cd6b746958861b279d8312eff59ec8f3187f8ced81db56630291b3f69b2"
+    },
+    {
       "name": "logs/green-cleanup.log",
       "bytes": 6522,
       "sha256": "270e55044e65d1de59558f0741faf7202c4ca33d48b24d0f41c01d441717446e"
@@ -1682,6 +1878,11 @@
       "name": "logs/image-build-f1d.log",
       "bytes": 2591,
       "sha256": "2c394729c564295b0b661b2e8eb8b6821d3c14d83e5a580d822064a2534c1dbb"
+    },
+    {
+      "name": "logs/image-build-f1e.log",
+      "bytes": 2591,
+      "sha256": "140b5ddddf1050d76e5a172245587aed72898865e122ad8f2bebe7927fbf09d8"
     },
     {
       "name": "logs/image-build.log",
@@ -1802,6 +2003,41 @@
       "name": "logs/image-f1d-product-files.txt",
       "bytes": 887,
       "sha256": "b5227fea1bfce8a022846f6f68d0ac5e74d3f6323d239832bda00fd4a9bdadfd"
+    },
+    {
+      "name": "logs/image-f1e-docker-lifecycle.log",
+      "bytes": 377840,
+      "sha256": "6835501ff971797bdec1c324818598fcdb42c94b9b034bca86f91cbb187b1b43"
+    },
+    {
+      "name": "logs/image-f1e-existing-db.log",
+      "bytes": 1093,
+      "sha256": "f97e48d57958881eed89c5767e425f119e4b66fa206c786ff1d0d5c16b740a93"
+    },
+    {
+      "name": "logs/image-f1e-files-after.txt",
+      "bytes": 25374,
+      "sha256": "8fea0ea167a33b4b50b6966ad663c27f609096ee1ed53219f86c52c817205f70"
+    },
+    {
+      "name": "logs/image-f1e-files-before.txt",
+      "bytes": 25374,
+      "sha256": "65b5339cdae777e15701f3b4d78c4d9565b5105e9c4a510d9312ef561d88bdb6"
+    },
+    {
+      "name": "logs/image-f1e-image-id.txt",
+      "bytes": 79,
+      "sha256": "b7cd6440331267166b6c16498ab535dbc090a51a7dd8f7235ed6e3b77526e855"
+    },
+    {
+      "name": "logs/image-f1e-image-off.log",
+      "bytes": 6099,
+      "sha256": "8a3a9e285302a2658a96bc57db41e20108fa408be8c836474a59f2677103af8d"
+    },
+    {
+      "name": "logs/image-f1e-image-on.log",
+      "bytes": 6098,
+      "sha256": "a87fe68c00293e965c40c6aa1e1438543cc53729f186640bd2e2e21e207490d7"
     },
     {
       "name": "logs/image-image-id.txt",
@@ -2054,6 +2290,16 @@
       "sha256": "6d8a6b0e8e35c79c3c74909b973bb6c89e4deacc8145d207d69004c948926961"
     },
     {
+      "name": "logs/red-9-final-sql-lifecycle.log",
+      "bytes": 32522,
+      "sha256": "8fca2e3e9de6d1ab5aa676890471dda5fb581cebbae623df10e73ca44784e289"
+    },
+    {
+      "name": "logs/red-9-unit.log",
+      "bytes": 2401,
+      "sha256": "6baddfec4b56be6f37ea5d754bc600c55ad11b360394e45b915118229c272405"
+    },
+    {
       "name": "logs/red-cleanup.log",
       "bytes": 6775,
       "sha256": "141f9a5b4aa8c1c8c075544023d473bf68a1e69662c38397046916ab82773d5e"
@@ -2062,6 +2308,11 @@
       "name": "logs/redis-full-1.log",
       "bytes": 6638,
       "sha256": "bcc41db04ffc1b3932528be695d65a8a5e8ee705f4db6d22adebeff304952af8"
+    },
+    {
+      "name": "logs/stopped-78e5110-chain.txt",
+      "bytes": 999,
+      "sha256": "55beb44bad55e38bc286944cfca436e15aeae57849048f8432e42729ec7d0b18"
     },
     {
       "name": "logs/stopped-a34948f-r1-flows.log",
@@ -2122,6 +2373,11 @@
       "name": "logs/watch-pr-2eff7ed.txt",
       "bytes": 3324,
       "sha256": "d69b611a3c0223c292b127f9a019d9298056c6d09e639d55053fc1a5a81a56a3"
+    },
+    {
+      "name": "logs/watch-pr-327320f.txt",
+      "bytes": 4461,
+      "sha256": "830cb3cfa04604318b42417724c126ec420f26e878fae82719a54e28f688adae"
     },
     {
       "name": "scripts/applog.mjs",
@@ -2195,8 +2451,8 @@
     },
     {
       "name": "scripts/pack.py",
-      "bytes": 5730,
-      "sha256": "31d1cadc5e26624dcee6de3a0e93b127c985ba4b937d831c24ea1e110cf2cde3"
+      "bytes": 5755,
+      "sha256": "7fffb6aef1f7a934e8b56833e6f1ff030dc1bdb00ea98d6a9ff92970506d76f8"
     },
     {
       "name": "scripts/protect.ts",
