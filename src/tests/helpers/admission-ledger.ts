@@ -19,6 +19,8 @@ export interface RedisEntry {
   phase: string;
   /** Set by the claim and kept afterwards: the entry was used for a purchase request. */
   fingerprint?: string | null;
+  /** Why a terminal entry ended, as the script wrote it. */
+  reason?: string | null;
   outcome?: { kind?: string; code?: string | null; resourceId?: string | null } | null;
 }
 
@@ -37,7 +39,7 @@ export function ledgerMismatches(rows: LedgerRow[], entries: RedisEntry[]): stri
     if (open(entry)) continue;
     const fits =
       row.outcome === 'closed'
-        ? entry.state === 'expired'
+        ? entry.state === 'expired' && (entry.reason ?? null) === row.errorCode
         : entry.state === 'consumed' &&
           (row.outcome === 'rejected'
             ? entry.outcome?.kind === 'rejected' && entry.outcome.code === row.errorCode

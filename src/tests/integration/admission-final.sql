@@ -9,7 +9,11 @@
 --   ticket_identity          a ticket belongs to the user and the event of its order
 --   result_target            a consumed result names a target of the same owner, event, tier,
 --                            quantity and, for a direct checkout, checkout key
---   result_fingerprint       a result's fingerprint carries its own user, event, epoch and operation
+--   result_fingerprint       a result's fingerprint is the canonical array of seven and carries its
+--                            own user, event, epoch and operation; a tier, a quantity and the
+--                            checkout key of a direct checkout, none for a reservation
+--   order_reservation        an order made from a reservation has its owner, event, tier and
+--                            quantity, and the reservation is converted
 --   unlinked_occupation      on a protected event every reservation and every order without a
 --                            reservation has its consumed result (read it only for an event that
 --                            was protected before its first purchase)
@@ -70,10 +74,24 @@ WHERE a.outcome = 'consumed' AND NOT COALESCE(
 UNION ALL
 SELECT 'result_fingerprint', a.event_id, format('admission=%s', a.admission_id)
 FROM admission_results a
-WHERE a.fingerprint::jsonb ->> 0 IS DISTINCT FROM a.user_id::text
-  OR a.fingerprint::jsonb ->> 1 IS DISTINCT FROM a.event_id::text
-  OR a.fingerprint::jsonb ->> 2 IS DISTINCT FROM a.epoch::text
-  OR a.fingerprint::jsonb ->> 3 IS DISTINCT FROM a.operation
+CROSS JOIN LATERAL (SELECT a.fingerprint::jsonb AS shape) f
+WHERE CASE WHEN jsonb_typeof(f.shape) = 'array' THEN jsonb_array_length(f.shape) END IS DISTINCT FROM 7
+  OR f.shape ->> 0 IS DISTINCT FROM a.user_id::text
+  OR f.shape ->> 1 IS DISTINCT FROM a.event_id::text
+  OR f.shape ->> 2 IS DISTINCT FROM a.epoch::text
+  OR f.shape ->> 3 IS DISTINCT FROM a.operation
+  OR jsonb_typeof(f.shape -> 4) IS DISTINCT FROM 'string'
+  OR jsonb_typeof(f.shape -> 5) IS DISTINCT FROM 'number'
+  OR jsonb_typeof(f.shape -> 6) IS DISTINCT FROM
+    CASE a.operation WHEN 'reservation' THEN 'null' ELSE 'string' END
+
+UNION ALL
+SELECT 'order_reservation', o.event_id, format('order=%s reservation=%s', o.id, r.id)
+FROM orders o
+JOIN reservations r ON r.id = o.reservation_id
+WHERE o.user_id <> r.user_id OR o.event_id <> r.event_id
+  OR o.tier_id IS DISTINCT FROM r.tier_id OR o.quantity <> r.quantity
+  OR r.status <> 'converted'
 
 UNION ALL
 SELECT 'unlinked_occupation', r.event_id, format('reservation=%s', r.id)

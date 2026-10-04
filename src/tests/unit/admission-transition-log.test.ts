@@ -157,6 +157,18 @@ describe('replay of the admission transition log', () => {
     ).toEqual(['fifo']);
   });
 
+  it('reports an entry that takes a slot after it left the line for good', () => {
+    // A cancel or an expiry takes the entry out of every set; that is no promotion.
+    expect(
+      rules([
+        ...publish('1', EPOCH, T0),
+        ...join('a', 1),
+        ...finish('a', T0 + 500),
+        lua(T0 + 1000, 'ZADD', key('active'), String(T0 + 31000), 'a'),
+      ]),
+    ).toEqual(['fifo']);
+  });
+
   it('reports a sequence that is given to a second entry', () => {
     expect(rules([...publish('1', EPOCH, T0), ...join('a', 1), ...join('b', 1)])).toEqual(['fifo']);
     // Also once the first holder has left the line: the order of the two can no longer be told.

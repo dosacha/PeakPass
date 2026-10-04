@@ -218,8 +218,13 @@ export function replayAdmissionLog(
         if (structure === 'waiting' && ns.waiting.has(member)) {
           ns.left.set(member, ns.waiting.get(member)!);
           ns.waiting.delete(member);
-        } else if (structure === 'active') ns.active.delete(member);
-        else if (structure === 'claims') ns.claims.delete(member);
+        } else if (structure === 'active' || structure === 'claims') {
+          // A promotion takes an entry out of the line and into a slot. A cancel or an expiry
+          // takes it out of every set: an entry that left the line that way was not promoted.
+          ns.left.delete(member);
+          if (structure === 'active') ns.active.delete(member);
+          else ns.claims.delete(member);
+        }
       }
       continue;
     }

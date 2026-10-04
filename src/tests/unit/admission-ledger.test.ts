@@ -27,7 +27,7 @@ describe('ledger rows against the Redis entries of one epoch', () => {
         [
           entry('bought', 'consumed', { fingerprint: 'f', outcome: { kind: 'reservation', resourceId: 'r1' } }),
           entry('sold-out', 'consumed', { fingerprint: 'f', outcome: { kind: 'rejected', code: 'INSUFFICIENT_INVENTORY' } }),
-          entry('abandoned', 'expired', { fingerprint: 'f' }),
+          entry('abandoned', 'expired', { fingerprint: 'f', reason: 'ADMISSION_EXPIRED' }),
           // Never claimed: an idle admission that ran out, a cancelled one and one still waiting.
           entry('idle', 'expired'),
           entry('left', 'cancelled'),
@@ -80,6 +80,13 @@ describe('ledger rows against the Redis entries of one epoch', () => {
     expect(ledgerMismatches([row('a', 'consumed', { targetId: 'r1' })], [entry('a', 'cancelled')])).toEqual([
       'ledger row a (consumed) does not match its entry: cancelled',
     ]);
+    // A closed row carries the reason its entry ended with.
+    expect(
+      ledgerMismatches(
+        [row('a', 'closed', { errorCode: 'ADMISSION_EXPIRED' })],
+        [entry('a', 'expired', { fingerprint: 'f', reason: 'ADMISSION_CANCELLED' })],
+      ),
+    ).toEqual(['ledger row a (closed) does not match its entry: expired']);
     // The entry tells the purchase of the row: a reservation is not a direct checkout, and an
     // outcome without a kind is none.
     expect(

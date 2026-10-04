@@ -247,6 +247,47 @@ describe('final SQL of admission-v1 §8', () => {
         await seats(c, ids, 8);
       }),
     ).toEqual(['result_fingerprint']);
+    // The fingerprint is the canonical array of seven; a reservation carries no checkout key.
+    expect(
+      await checks(async (c, ids) => {
+        const held = await reservation(c, ids, 2);
+        await consumed(c, ids, 'reservation', held, [ids.user, ids.event, EPOCH, 'reservation', 'general', 2, randomUUID()]);
+        await seats(c, ids, 8);
+      }),
+    ).toEqual(['result_fingerprint']);
+    expect(
+      await checks(async (c, ids) => {
+        const held = await reservation(c, ids, 2);
+        await consumed(c, ids, 'reservation', held, [ids.user, ids.event, EPOCH, 'reservation', 'general', 2]);
+        await seats(c, ids, 8);
+      }),
+    ).toEqual(['result_fingerprint']);
+  });
+
+  it('reports an order that does not match the reservation it was made from', async () => {
+    expect(
+      await checks(async (c, ids) => {
+        const converted = await reservation(c, ids, 2, 'converted');
+        await order(c, ids, 3, 'pending', converted);
+        await seats(c, ids, 7);
+      }),
+    ).toEqual(['order_reservation']);
+    expect(
+      await checks(async (c, ids) => {
+        const converted = await reservation(c, ids, 2, 'converted');
+        const created = await order(c, ids, 2, 'pending', converted);
+        await c.query('UPDATE orders SET user_id = $2 WHERE id = $1', [created.id, ids.other]);
+        await seats(c, ids, 8);
+      }),
+    ).toEqual(['order_reservation']);
+    // The checkout converts the reservation; one that still holds its seats is not converted.
+    expect(
+      await checks(async (c, ids) => {
+        const held = await reservation(c, ids, 2);
+        await order(c, ids, 2, 'pending', held);
+        await seats(c, ids, 6);
+      }),
+    ).toEqual(['order_reservation']);
   });
 
   it('reports an occupation of a protected event that no admission result stands for', async () => {
