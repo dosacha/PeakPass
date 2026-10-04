@@ -108,7 +108,7 @@ Files: new `src/tests/integration/admission-fault-flows.test.ts`.
 
 ## Task 6: Production image
 
-- [ ] `production-image-check.mjs` with the feature off and on, on empty databases; a restart on a database at 013 with rows applies nothing and changes no row; the five Docker lifecycle cases with `WAVE4_TEST_IMAGE`.
+- [x] `production-image-check.mjs` with the feature off and on, on empty databases; a restart on a database at 013 with rows applies nothing and changes no row; the five Docker lifecycle cases with `WAVE4_TEST_IMAGE`.
 
 ## Task 7: Browser
 
@@ -156,4 +156,5 @@ Files: new `docs/ISSUE_16_VALIDATION.md`, `docs/README.md`, `test-results/admiss
 - Task 5: Ruling: L1 allows 500 `INTERNAL_ERROR` for direct checkouts without admission fields and nothing else beyond 201 and 400; reservations must be 201 or 400 only — the first version expected only 201 and 400 on both paths, which was wrong about the existing checkout — cost if wrong: a new 500 on the direct path before activation would pass L1; after activation the request is refused before it touches the event row.
 - Task 5: Ruling: the creation time of an order is read from the commit time of its checkout payment record, because the order row itself is rewritten when it expires — cost if wrong: none; the record is written in the same transaction and never changed.
 - Task 5: Ruling: in the purchase-against-deletion rounds the deletion may also end as the victim of a lock cycle (40P01) and the purchase is repeated with the same identity — the purchase holds the policy row the cascade needs while the deletion holds the event row the purchase needs — cost if wrong: none; both outcomes leave either the event with its reservation or neither.
+- Task 6: production image `peakpass:p7-issue16` (`sha256:ab60789926077faede244db0f59e1c55d6dd0a3a31cf90997eb644c65d40850b`, built from the worktree at `57d2d91`; no file the image takes changed afterwards). `production-image-check.mjs` passed on two empty databases with the feature off and on (migrations 001–013, unchanged rerun, ready, signed GraphQL smoke). On a database made by the accepted P5 image at 013 with rows, the P7 image applied nothing twice, changed no row, became ready and served an existing-reservation checkout, a new reservation and the replay of a stored result. The five Docker order-worker lifecycle cases passed with `WAVE4_TEST_IMAGE` set to this image.
 - Task 1: Ruling: M1 verifies existing behaviour and so never failed first. That it can fail rests on the unit tests of the replay, the SQL test, the late-capture assertion and the sensitivity step of Task 8 — cost if wrong: a vacuous assertion stays unnoticed until Task 8.
