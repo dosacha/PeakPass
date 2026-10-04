@@ -160,6 +160,95 @@ describe('admission actual authenticated HTTP and epoch lifecycle', () => {
     expect(active.body.admission.admissionId).not.toBe(id);
     expect(await redis.keys(`peakpass:ratelimit:*:${owner}`)).toEqual(before);
   });
+  it('writes nothing for an open generation, so a namespace lost right after its check is not created again', async () => {
+    const { admissionKeys } = await import('@/infra/redis/admission');
+    const before = (await service.control(eventId))!;
+    const owner = randomUUID();
+    await service.join(eventId, owner, before.epoch, randomUUID());
+    // Injection: the namespace disappears between the check of the second transaction and
+    // whatever follows it. Every other call is real.
+    const checked = service as unknown as { probe(policy: unknown): Promise<{ ok: boolean }> };
+    const probe = checked.probe.bind(service);
+    let probes = 0;
+    const spy = jest.spyOn(checked, 'probe').mockImplementation(async (policy) => {
+      const result = await probe(policy);
+      if (++probes === 2) await redis.del(admissionKeys(eventId, before.epoch).slice(0, 12));
+      return result;
+    });
+    try {
+      await expect(service.recover(eventId, null)).rejects.toMatchObject({ code: 'ADMISSION_RECOVERING' });
+      expect(probes).toBe(2);
+    } finally {
+      spy.mockRestore();
+    }
+    expect(await service.control(eventId)).toBeNull();
+    await service.maintain();
+    const after = (await service.control(eventId))!;
+    expect(BigInt(after.generation)).toBe(BigInt(before.generation) + 1n);
+    expect(after.epoch).not.toBe(before.epoch);
+  });
+  it('does not open a recovering generation whose namespace was written after the connection was replaced', async () => {
+    const { admissionKeys } = await import('@/infra/redis/admission');
+    const before = (await service.control(eventId))!;
+    await redis.del(admissionKeys(eventId, before.epoch).slice(0, 12));
+    // Injection: the connection on which the process was read is replaced before the write that
+    // follows the read. The recovery yields nowhere between the two, so only a test places it there.
+    const read = service as unknown as { currentProcess(): Promise<unknown> };
+    const currentProcess = read.currentProcess.bind(service);
+    let reads = 0;
+    const spy = jest.spyOn(read, 'currentProcess').mockImplementation(async () => {
+      const result = await currentProcess();
+      if (++reads === 2) {
+        const id = await redis.clientId();
+        await redis.sendCommand(['CLIENT', 'KILL', 'ID', String(id), 'SKIPME', 'no']).catch(() => undefined);
+        for (let i = 0; i < 100 && !(redis.isReady && (await redis.clientId().catch(() => id)) !== id); i++)
+          await new Promise((resolve) => setTimeout(resolve, 50));
+      }
+      return result;
+    });
+    try {
+      await expect(service.recover(eventId, null)).rejects.toMatchObject({ code: 'ADMISSION_RECOVERING' });
+      expect(reads).toBe(2);
+      const phase = await pool.query('SELECT phase FROM admission_events WHERE event_id=$1', [eventId]);
+      expect(phase.rows[0].phase).toBe('recovering');
+      expect((await service.control(eventId))?.mode).toBe('initializing');
+    } finally {
+      spy.mockRestore();
+      await service.verifyEnvironment();
+    }
+    // The same process after all: the next attempt adopts what was written and publishes it.
+    await service.maintain();
+    const after = (await service.control(eventId))!;
+    expect(after.mode).toBe('ready');
+    expect(BigInt(after.generation)).toBe(BigInt(before.generation) + 1n);
+  }, 30000);
+  it('is ready again after a recovery during which the connection to the same Redis process was replaced', async () => {
+    const first = await pool.connect();
+    let recovery: Promise<void> | undefined;
+    try {
+      await first.query('BEGIN');
+      const pid = (await first.query('SELECT pg_backend_pid() AS pid')).rows[0].pid;
+      await readAdmissionPolicy(first, eventId, 'shared');
+      recovery = service.recover(eventId, null);
+      recovery.catch(() => undefined);
+      await blocked(pool, pid);
+      // The recovery waits for the gate. Its connection is closed by the server and opened again:
+      // the same Redis process, another connection.
+      const id = await redis.clientId();
+      await redis.sendCommand(['CLIENT', 'KILL', 'ID', String(id), 'SKIPME', 'no']).catch(() => undefined);
+      for (let i = 0; i < 100 && !(redis.isReady && (await redis.clientId().catch(() => id)) !== id); i++)
+        await new Promise((resolve) => setTimeout(resolve, 50));
+      expect(service.isReady()).toBe(false);
+      await first.query('COMMIT');
+      await recovery;
+      expect(service.isReady()).toBe(true);
+    } finally {
+      await first.query('ROLLBACK').catch(() => undefined);
+      first.release();
+      await recovery?.catch(() => undefined);
+      await service.verifyEnvironment();
+    }
+  }, 30000);
   it('serializes two recovery coordinators and rejects the retired epoch', async () => {
     const before = await service.control(eventId);
     await service.freeze(eventId, before!);
@@ -177,6 +266,72 @@ describe('admission actual authenticated HTTP and epoch lifecycle', () => {
     const before = await service.control(eventId);
     await service.recover(eventId, null);
     expect(await service.control(eventId)).toEqual(before);
+  });
+  it('stays ready for every other request while it recovers an intact namespace', async () => {
+    // Status, join and purchase of every event ask isReady(): the recovery of one event must not
+    // take the instance out of service while Redis is healthy.
+    const samples: boolean[] = [];
+    let sampling = true;
+    const sample = () => {
+      samples.push(service.isReady());
+      if (sampling) setImmediate(sample);
+    };
+    setImmediate(sample);
+    try {
+      await service.recover(eventId, null);
+    } finally {
+      sampling = false;
+    }
+    expect(samples.length).toBeGreaterThan(0);
+    expect(samples).not.toContain(false);
+  });
+  it('never writes the same epoch anew when its namespace is lost after a recovery adopted it', async () => {
+    const { admissionKeys } = await import('@/infra/redis/admission');
+    const before = (await service.control(eventId))!;
+    const owner = randomUUID();
+    await service.join(eventId, owner, before.epoch, randomUUID());
+    const first = await pool.connect();
+    const second = await pool.connect();
+    let recovery: Promise<void> | undefined;
+    try {
+      // One holder of the shared gate keeps the recovery before its first transaction, and a
+      // second one, queued behind the recovery, keeps it before its second.
+      await first.query('BEGIN');
+      const firstPid = (await first.query('SELECT pg_backend_pid() AS pid')).rows[0].pid;
+      await readAdmissionPolicy(first, eventId, 'shared');
+      recovery = service.recover(eventId, null);
+      recovery.catch(() => undefined);
+      await blocked(pool, firstPid);
+      await second.query('BEGIN');
+      const secondPid = (await second.query('SELECT pg_backend_pid() AS pid')).rows[0].pid;
+      const queued = readAdmissionPolicy(second, eventId, 'shared');
+      await blocked(pool, firstPid, 2);
+      // The first transaction finds the namespace intact and adopts it.
+      await first.query('COMMIT');
+      await queued;
+      await blocked(pool, secondPid);
+      // Redis loses the namespace while the recovery waits for the gate again.
+      await redis.del(admissionKeys(eventId, before.epoch).slice(0, 12));
+      await second.query('COMMIT');
+      // The adopted epoch is gone. Writing it again would drop every registration without a
+      // reset, so this recovery gives up and the loss is decided anew.
+      await expect(recovery).rejects.toMatchObject({ code: 'ADMISSION_RECOVERING' });
+      await service.maintain();
+      const after = (await service.control(eventId))!;
+      expect(after.mode).toBe('ready');
+      expect(BigInt(after.generation)).toBe(BigInt(before.generation) + 1n);
+      expect(after.epoch).not.toBe(before.epoch);
+      await expect(service.join(eventId, owner, before.epoch, randomUUID())).rejects.toMatchObject({
+        code: 'ADMISSION_RESET',
+        statusCode: 410,
+      });
+    } finally {
+      await first.query('ROLLBACK').catch(() => undefined);
+      await second.query('ROLLBACK').catch(() => undefined);
+      first.release();
+      second.release();
+      await recovery?.catch(() => undefined);
+    }
   });
   it('waits for existing shared-gate transactions before publishing a new epoch', async () => {
     const c = await pool.connect();

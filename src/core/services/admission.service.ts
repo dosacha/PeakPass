@@ -92,9 +92,8 @@ export class AdmissionService {
     return freezeAdmission(eventId, observed.epoch, observed.generation);
   }
 
-  async verifyEnvironment(): Promise<void> {
-    this.healthy = false;
-    if (this.stopping) throw new AdmissionError('ADMISSION_UNAVAILABLE', 503, 1000);
+  /** The run id of the Redis process, once its configuration was checked. It changes no state. */
+  private async environment(): Promise<string> {
     const data = await withRedis(async (r) => ({
       config: Object.assign(
         {},
@@ -113,10 +112,37 @@ export class AdmissionService {
     }
     const runId = /^run_id:(.+)\r?$/m.exec(data.info)?.[1].trim();
     if (!runId) throw new AdmissionError('ADMISSION_UNAVAILABLE', 503, 1000);
+    return runId;
+  }
+  async verifyEnvironment(): Promise<void> {
+    this.healthy = false;
+    if (this.stopping) throw new AdmissionError('ADMISSION_UNAVAILABLE', 503, 1000);
+    const runId = await this.environment();
     if (this.stopping) throw new AdmissionError('ADMISSION_UNAVAILABLE', 503, 1000);
     this.runId = runId;
     this.version = getRedisConnectionVersion();
     this.healthy = true;
+  }
+  /**
+   * Under the exclusive gate, which may have been waited for behind a writer: Redis may have been
+   * replaced meanwhile, or only the connection to it. The process is read again while the instance
+   * keeps serving every other event; what the instance holds changes once that read has succeeded.
+   * Returns the connection the process was read on.
+   */
+  private async currentProcess(): Promise<number> {
+    if (this.stopping) throw new AdmissionError('ADMISSION_UNAVAILABLE', 503, 1000);
+    let runId: string;
+    try {
+      runId = await this.environment();
+    } catch (error) {
+      this.healthy = false;
+      throw error;
+    }
+    if (this.stopping) throw new AdmissionError('ADMISSION_UNAVAILABLE', 503, 1000);
+    this.runId = runId;
+    this.version = getRedisConnectionVersion();
+    this.healthy = true;
+    return this.version;
   }
 
   // The cold/error path classifies policy but NEVER creates/reset a Redis namespace.
@@ -264,6 +290,8 @@ export class AdmissionService {
     const policy = await serializableTransactionWithRetry(async (c) => {
       const current = await this.barrier(c, eventId);
       if (!current) return null;
+      // The run id that names the Redis process is read again before anything is compared.
+      await this.currentProcess();
       // An observer of an older loss follows the current recovery instead of incrementing again.
       const advanced =
         old && (current.generation !== old.generation || current.epoch !== old.epoch);
@@ -283,9 +311,23 @@ export class AdmissionService {
       const current = await this.barrier(c, eventId);
       if (!current || current.generation !== policy.generation || current.epoch !== policy.epoch)
         return;
+      // This gate was waited for as well. A generation that is still recovering was never
+      // written and is created under the process that is there now. An open one was written
+      // before and nothing is written for it again: if its namespace is no longer intact, it was
+      // lost after the decision above, and the next attempt decides that loss from the start. A
+      // loss after this check is met by the publication, which checks and writes in one script.
+      const connection = await this.currentProcess();
+      if (current.phase === 'open') {
+        if (!(await this.probe(current)).ok) throw new AdmissionError('ADMISSION_RECOVERING', 503, 1000);
+        return;
+      }
       accepted(await initializeAdmission(current, this.runId));
-      if (current.phase === 'recovering')
-        await c.query("UPDATE admission_events SET phase='open' WHERE event_id=$1", [eventId]);
+      // The run id was read on one connection. A namespace written after that connection was
+      // replaced may sit in another process than the one that was read: it is not opened, and the
+      // next attempt reads again and adopts or replaces it.
+      if (connection !== getRedisConnectionVersion())
+        throw new AdmissionError('ADMISSION_RECOVERING', 503, 1000);
+      await c.query("UPDATE admission_events SET phase='open' WHERE event_id=$1", [eventId]);
     });
     // Deliberately a new transaction. Holding the exclusive gate through CAS fences late publishers.
     await serializableTransactionWithRetry(async (c) => {

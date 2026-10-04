@@ -7,6 +7,7 @@
 
 2026-10-03 기준으로 P1~P6가 main에 병합됐고 다음 단계는 P7([#16](https://github.com/dosacha/PeakPass/issues/16), 실제 장애·동시성·수량 불변식 검증)이다. 단계별 수용 상태와 SHA의 단일 기준은 총괄 [#9](https://github.com/dosacha/PeakPass/issues/9)의 상태표이고, 각 단계가 고치지 않고 남긴 한계는 #25(P4)·#27(P5)·#29(P6)에 있다.
 
+- [P7 / Issue #16 실제 장애·동시성 검증과 P8 인계](ISSUE_16_VALIDATION.md) — 제품 이미지 컨테이너 여러 개에 가한 실제 Redis·PostgreSQL·프로세스 장애, Redis 전이 로그 재생과 최종 SQL·원장 대조, 실제 브라우저의 장애 시나리오, 발견한 결함 F1(Redis 재시작 1회에 세대 2개 소모)의 수정, 남긴 한계 F2와 관찰·미검증 항목. 제품 코드 변경은 F1 수정 하나다. 수용 상태는 총괄 #9를 따른다.
 - [P6 / Issue #15 구현 검증과 P7·P8 인계](ISSUE_15_VALIDATION.md) — 대기 카드, 고정·적응형 폴링과 jitter, 요청 직렬화와 늦은 응답 폐기, 구매 연결과 결과 미확인 구매의 복구, 입장 인지 계측, 실제 브라우저 검증 범위와 미검증 항목. PR #28로 병합됨(main `2ba3a5c`). 수용 상태는 총괄 #9를 따른다.
 - [P5 / Issue #14 구현 검증과 P6·P7·P8 인계](ISSUE_14_VALIDATION.md) — 예약·직접 checkout의 admission 소비 원장, 재시도·회수, 구매 요청 인터페이스, 검증 범위와 미검증 항목. PR #26으로 병합됨(main `2d67cc3`). 수용 상태는 총괄 #9를 따른다.
 - [P4 / Issue #13 구현 검증과 P5·P6 인계](ISSUE_13_VALIDATION.md) — 인증 대기열 API와 Redis Lua 전이, 정책·epoch 수명주기, P5 협력 인터페이스와 P6 API 인계, 검증 범위, PR #24 오토리뷰 후속. PR #24로 병합됨(main `678ac7c`). 수용 상태는 총괄 #9를 따른다.

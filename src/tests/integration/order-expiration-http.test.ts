@@ -13,6 +13,7 @@ import { initRedis, closeRedis, getReadyRedis, withRedis } from '@/infra/redis/c
 import { invalidateEventCache } from '@/infra/redis/commands';
 import { OrderExpirationService } from '@/core/services/order-expiration.service';
 import { getConfig } from '@/infra/config';
+import { ownedRedis } from './redis-outage-fixture';
 
 describe('expired order HTTP acknowledgment and durable reconciliation', () => {
   let app: FastifyInstance;
@@ -145,14 +146,7 @@ describe('expired order HTTP acknowledgment and durable reconciliation', () => {
     const provider = uuid();
     expect((await callback('settled', provider)).status).toBe(200);
     await assertExpired(1); // transaction is visibly committed before Redis is stopped.
-    const name = process.env.WAVE3_REDIS_CONTAINER;
-    const id = process.env.WAVE3_REDIS_CONTAINER_ID;
-    if (name !== 'peakpass-wave3-0928-redis' || !id || process.env.REDIS_HOST !== '127.0.0.1' || process.env.REDIS_PORT !== '63532') {
-      throw new Error('Requires the explicit dedicated Wave3 Redis fixture');
-    }
-    const before = JSON.parse(execFileSync('docker', ['inspect', name], { encoding: 'utf8', windowsHide: true }))[0];
-    expect(before.Id).toBe(id);
-    expect(before.Config.Labels['peakpass.task']).toBe('wave3');
+    const { name, id } = ownedRedis();
     try {
       execFileSync('docker', ['stop', '-t', '0', id], { windowsHide: true });
       await expect(withRedis(redis => redis.ping())).rejects.toThrow();
