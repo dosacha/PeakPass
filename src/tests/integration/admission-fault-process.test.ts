@@ -228,10 +228,16 @@ faultSuite('admission across application processes and process failures (real co
     await Promise.all(holders.map((holder) => holder.buyer.admitted(eventId)));
     const before = await t.seats(eventId);
     for (const [round, delayMs] of [0, 120, 260, 400].entries()) {
+      // The round before left one slot free. It goes to one more holder, so that the capacity
+      // is full again and the user who joins next stays waiting.
+      while (((await t.slots(eventId)) ?? 0) < 8) {
+        const buyer = await t.buyer();
+        holders.push({ buyer, admission: await buyer.enter(eventId) });
+      }
       const next = await t.buyer();
       const waiting = await next.queue(eventId, second);
       expect(await t.entry(eventId, waiting)).toMatchObject({ state: 'waiting' });
-      const holder = holders[round];
+      const holder = holders.shift()!;
       const [freed, cancelled] = await Promise.all([
         holder.buyer.cancel(eventId, holder.admission, first),
         sleep(delayMs).then(() => next.cancel(eventId, waiting, second)),

@@ -689,11 +689,13 @@ export async function startTopology(
    * The two checks every scenario ends with: the final SQL and the complete transition log. The
    * log is replayed from its beginning, and the violations of earlier scenarios stay theirs.
    */
-  async function verify(ignore: string[] = []) {
+  async function verify(ignore: string[] = [], ignoreRules: string[] = []) {
     expect(await violations(ignore)).toEqual([]);
     const log = await transitions();
     expect(log.incomplete).toEqual([]);
-    expect(log.violations.filter((violation) => violation.time >= since)).toEqual([]);
+    expect(
+      log.violations.filter((violation) => violation.time >= since && !ignoreRules.includes(violation.rule)),
+    ).toEqual([]);
     return log;
   }
   /** What a capture that begins now would report: the reason it cannot be trusted, if any. */

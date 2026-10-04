@@ -299,6 +299,9 @@ faultSuite('admission under real Redis failures (real containers)', () => {
     expect(again.admissionEpoch).toBe(after.policy.epoch);
     expect((await idle.reserve(eventId, again, 1)).final.status).toBe(201);
     await t.quiet(eventId);
+    // A second generation shows in this count and in the `run-id` rule of the log. Everything
+    // else is checked before them, so that it is still asserted when the count does not hold.
+    await t.verify([], ['run-id']);
     expect(generations).toBe(1);
     await t.verify();
   }
