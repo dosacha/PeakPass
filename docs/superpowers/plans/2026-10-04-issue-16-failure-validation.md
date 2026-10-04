@@ -121,9 +121,9 @@ Outside the repository: the proxy, the filler-user script, the scenario scripts 
 
 Files: new `docs/ISSUE_16_VALIDATION.md`, `docs/README.md`, `test-results/admission-v1/p7-*.{json,zip}`.
 
-- [ ] Build, typecheck, lint, unit, full integration with every opt-in, harness and callback checks. The fault suites three times in a row.
-- [ ] Sensitivity: three or four product branches changed one at a time in a throwaway image, the named fault test fails each time, the source is restored.
-- [ ] Record commands, results, evidence kinds, what stays unverified, limits and the notes for P8. Re-check the consumed inputs. Commit locally; report the review scope; no push.
+- [x] Build, typecheck, lint, unit, full integration with every opt-in, harness and callback checks. The fault suites three times in a row.
+- [x] Sensitivity: three or four product branches changed one at a time in a throwaway image, the named fault test fails each time, the source is restored.
+- [x] Record commands, results, evidence kinds, what stays unverified, limits and the notes for P8. Re-check the consumed inputs. Commit locally; report the review scope; no push.
 
 ## Execution ledger
 
@@ -186,3 +186,8 @@ Files: new `docs/ISSUE_16_VALIDATION.md`, `docs/README.md`, `test-results/admiss
 - Final: minor (deferred): the replay drops a namespace when `UNLINK` names only one of its sets; a retirement split over several commands could then be reported as incomplete (not seen).
 - Final: minor (deferred): timing assumptions that could fail a scenario on a loaded host — K4's four assertions between the claim deadline and the idle timeout, T1's upper bound of 5.9 s, M4's 300 ms and 100 ms margins, K1's retry inside the dead backend's sleep, K3's kill within the 5 s command bound, R1's sequence inside the 30 s TTL; R5's `passGate` can assert one transaction early (not seen in any run).
 - Final: minor (deferred): M2, the second half of M3 and L4's deadline race record which side won and require neither; M1's promotion count holds only because M1 is the first scenario of its file; the fixed sleeps after a reset (1.5 s and 2 s) bound how long a second reset is looked for.
+- Task 8: final regression at `164c60b` on the owned resources, with the image of Task 6 (no product file changed since its build): build and typecheck passed, lint 0 errors/11 warnings, unit 249/249 (25 suites), integration 352 passed/41 skipped (31 suites passed, 5 skipped), harness 29/29, callback check passed, the Redis-outage opt-in 32/32, the Docker lifecycle opt-in 5/5. The fault suites three times in a row: the Redis suite 4 passed and 2 failed each time (R2 and R3, each on the one expectation of F1: 2 generations and 1 initialization under a stale run id, six of six), the process suite 14/14 each time, the flows suite 6/6 each time; no container or network was left behind; about 12 minutes a round.
+- Task 8: the consumed inputs were read again at the end: origin/main `5016b8c`, the contract blob and its SHA256, the six ancestor commits, migrations up to 013, no open PR, and #9 with P4, P5 and P6 valid and P7 not created; none of the issues had changed since 2026-10-03.
+- Task 8: `docs/ISSUE_16_VALIDATION.md`, the index line in `docs/README.md`, and the evidence archive `test-results/admission-v1/p7-final-20261004.{json,zip}` (224 files; no credential, env file, token or request header: the packer checks every staged file against the values of the env files and against token-like strings; the application logs of the fault topologies are left out because of O4).
+- Task 8: Ruling: the archive keeps the request lists and the transition logs of the three final rounds and only the notes of every earlier run — with every run it was 1.9 MB — cost if wrong: an earlier run's transition log is in the run directory, outside the repository, and not in the archive.
+- Finding F1 and limit F2 are not fixed, and observations O1–O4 are not acted on: reported to the maintainer for a decision. Nothing is pushed.
