@@ -264,6 +264,9 @@ export class AdmissionService {
     const policy = await serializableTransactionWithRetry(async (c) => {
       const current = await this.barrier(c, eventId);
       if (!current) return null;
+      // The gate may have been waited for behind a writer, and Redis may have been replaced
+      // meanwhile. The run id that names its process is read again before anything is compared.
+      await this.verifyEnvironment();
       // An observer of an older loss follows the current recovery instead of incrementing again.
       const advanced =
         old && (current.generation !== old.generation || current.epoch !== old.epoch);
@@ -283,6 +286,9 @@ export class AdmissionService {
       const current = await this.barrier(c, eventId);
       if (!current || current.generation !== policy.generation || current.epoch !== policy.epoch)
         return;
+      // This gate was waited for as well: the namespace is written under the run id of the
+      // process that receives it, or one restart would cost a second generation.
+      await this.verifyEnvironment();
       accepted(await initializeAdmission(current, this.runId));
       if (current.phase === 'recovering')
         await c.query("UPDATE admission_events SET phase='open' WHERE event_id=$1", [eventId]);
