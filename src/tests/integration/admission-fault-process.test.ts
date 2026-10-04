@@ -7,6 +7,7 @@ import {
   AdmissionRef,
   AppBox,
   Buyer,
+  sleep,
   until,
 } from './admission-fault-fixture';
 
@@ -209,6 +210,117 @@ faultSuite('admission across application processes and process failures (real co
     expect(copies.map((copy) => copy.final.status)).toEqual(Array(10).fill(201));
     expect(new Set(copies.map((copy) => copy.final.body!.id)).size).toBe(1);
     expect((await t.seats(eventId)).available).toBe(20 - 6);
+    await t.quiet(eventId);
+    await t.verify();
+  });
+
+  it('M3 cancel against promotion and against the purchase claim, across instances: one winner each time', async () => {
+    const eventId = await event(20);
+    const [first, second] = t.apps;
+    // A04 across processes, first half: eight admitted users fill the capacity. Each round frees
+    // one slot by a cancel on one instance, and the user who is next in line cancels on the other
+    // instance a moment later: before or after the tick that would promote it.
+    const holders: Array<{ buyer: Buyer; admission: AdmissionRef }> = [];
+    for (let i = 0; i < 8; i++) {
+      const buyer = await t.buyer();
+      holders.push({ buyer, admission: await buyer.queue(eventId, i % 2 ? first : second) });
+    }
+    await Promise.all(holders.map((holder) => holder.buyer.admitted(eventId)));
+    const before = await t.seats(eventId);
+    for (const [round, delayMs] of [0, 120, 260, 400].entries()) {
+      const next = await t.buyer();
+      const waiting = await next.queue(eventId, second);
+      expect(await t.entry(eventId, waiting)).toMatchObject({ state: 'waiting' });
+      const holder = holders[round];
+      const [freed, cancelled] = await Promise.all([
+        holder.buyer.cancel(eventId, holder.admission, first),
+        sleep(delayMs).then(() => next.cancel(eventId, waiting, second)),
+      ]);
+      expect(freed.status).toBe(200);
+      expect(cancelled.status).toBe(200);
+      expect(cancelled.body!.admission.state).toBe('cancelled');
+      const entry = (await t.entry(eventId, waiting))!;
+      expect(entry).toMatchObject({ state: 'cancelled', reason: 'ADMISSION_CANCELLED' });
+      // Whichever came first, the cancelled entry buys nothing.
+      const late = await next.reserve(eventId, waiting, 1, [first]);
+      expect(late.final).toMatchObject({ status: 410, code: 'ADMISSION_CANCELLED' });
+      t.note('M3 cancel against promotion', { round, delayMs, promotedBeforeCancel: entry.admittedAt != null });
+    }
+    expect(await t.seats(eventId)).toEqual(before);
+
+    // Second half: an admitted user's purchase arrives at one instance and its cancel at the
+    // other, the cancel a few milliseconds later each round: before or after the claim.
+    const tally = { bought: 0, cancelled: 0 };
+    for (const [round, cancelAfterMs] of [0, 4, 8, 12, 18, 30].entries()) {
+      const { buyer, admission } = await admitted(eventId, round % 2 ? first : second);
+      const seatsBefore = await t.seats(eventId);
+      const [purchase, cancel] = await Promise.all([
+        buyer.reserve(eventId, admission, 1, [first]),
+        sleep(cancelAfterMs).then(() => buyer.cancel(eventId, admission, second)),
+      ]);
+      const seatsAfter = await t.seats(eventId);
+      if (purchase.final.status === 201) {
+        // The claim won: the cancel is refused and the purchase is the one result.
+        expect(cancel.status).toBe(409);
+        expect(['ADMISSION_IN_PROGRESS', 'ADMISSION_ALREADY_CONSUMED']).toContain(cancel.code);
+        expect(seatsAfter).toMatchObject({ available: seatsBefore.available - 1, results: seatsBefore.results + 1 });
+        expect(await resultOf(eventId, admission)).toMatchObject({ outcome: 'consumed', reservationId: purchase.final.body!.id });
+        tally.bought += 1;
+      } else {
+        // The cancel won: nothing is occupied and nothing is recorded.
+        expect(cancel.status).toBe(200);
+        expect(cancel.body!.admission.state).toBe('cancelled');
+        expect(purchase.final).toMatchObject({ status: 410, code: 'ADMISSION_CANCELLED' });
+        expect(seatsAfter).toEqual(seatsBefore);
+        expect(await resultOf(eventId, admission)).toBeUndefined();
+        tally.cancelled += 1;
+      }
+      t.note('M3 cancel against claim', { round, cancelAfterMs, purchase: brief(purchase.final), cancel: brief(cancel) });
+    }
+    t.note('M3', tally);
+    await t.quiet(eventId);
+    await t.verify();
+  });
+
+  it('M4 the 30 s admission ends while the purchase arrives: bought before the end, expired after it, never both', async () => {
+    const eventId = await event(20);
+    const [first, second] = t.apps;
+    const before = await t.seats(eventId);
+    const buyers = [];
+    for (const [index, offsetMs] of [-600, -300, -100, -30, 0, 30, 100, 300].entries()) {
+      const { buyer, admission } = await admitted(eventId, index % 2 ? first : second);
+      buyers.push({ buyer, admission, offsetMs, app: index % 2 ? second : first });
+    }
+    // Redis' clock decides the expiry, so the purchases are timed on it. Real time: every buyer
+    // waits for the end of its own 30 s and sends its purchase that many milliseconds around it.
+    const skew = Date.now() - (await t.redisNow());
+    const outcomes = await Promise.all(
+      buyers.map(async ({ buyer, admission, offsetMs, app }) => {
+        const expiresAt: number = (await t.entry(eventId, admission))!.expiresAt;
+        await sleep(Math.max(0, expiresAt + offsetMs + skew - Date.now()));
+        return { admission, offsetMs, purchase: await buyer.reserve(eventId, admission, 1, [app]) };
+      }),
+    );
+    for (const { admission, offsetMs, purchase } of outcomes) {
+      const answer = purchase.final;
+      const result = await resultOf(eventId, admission);
+      if (answer.status === 201) {
+        expect(result).toMatchObject({ outcome: 'consumed', reservationId: answer.body!.id });
+      } else {
+        // An expired admission occupies nothing and leaves no ledger row.
+        expect(answer).toMatchObject({ status: 410, code: 'ADMISSION_EXPIRED' });
+        expect(result).toBeUndefined();
+        expect(await t.entry(eventId, admission)).toMatchObject({ state: 'expired', reason: 'ADMISSION_EXPIRED' });
+      }
+      // Well before the end it buys, unless its first answer was a transient 503; after it, never.
+      if (offsetMs <= -300 && purchase.attempts.length === 1) expect(answer.status).toBe(201);
+      if (offsetMs >= 100) expect(answer.status).toBe(410);
+    }
+    const bought = outcomes.filter((outcome) => outcome.purchase.final.status === 201).length;
+    expect(await t.seats(eventId)).toMatchObject({ available: before.available - bought, results: before.results + bought });
+    t.note('M4', {
+      outcomes: outcomes.map((o) => ({ offsetMs: o.offsetMs, ...brief(o.purchase.final), attempts: o.purchase.attempts.length })),
+    });
     await t.quiet(eventId);
     await t.verify();
   });
