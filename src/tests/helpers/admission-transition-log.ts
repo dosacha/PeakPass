@@ -81,6 +81,8 @@ interface Namespace {
   window: number[];
   /** Sequence of an entry that just left waiting, read when it enters active. */
   left: Map<string, number>;
+  /** Every sequence given out in this namespace, with the entry that holds it. */
+  sequences: Map<number, string>;
 }
 interface Control {
   generation: string;
@@ -114,7 +116,15 @@ export function replayAdmissionLog(
   const namespace = (id: string) => {
     let found = namespaces.get(id);
     if (!found) {
-      found = { waiting: new Map(), active: new Set(), claims: new Set(), promoted: new Set(), window: [], left: new Map() };
+      found = {
+        waiting: new Map(),
+        active: new Set(),
+        claims: new Set(),
+        promoted: new Set(),
+        window: [],
+        left: new Map(),
+        sequences: new Map(),
+      };
       namespaces.set(id, found);
     }
     return found;
@@ -221,8 +231,15 @@ export function replayAdmissionLog(
       continue;
     }
     const ns = namespace(id);
-    if (structure === 'waiting') ns.waiting.set(member, Number(score));
-    else if (structure === 'active') {
+    if (structure === 'waiting') {
+      const sequence = Number(score);
+      const holder = ns.sequences.get(sequence);
+      // §4: a sequence is given once in an epoch. Two entries that share one have no order.
+      if (holder !== undefined && holder !== member)
+        report('fifo', time, `sequence ${sequence} was given to ${holder} and to ${member} in ${id}`);
+      ns.sequences.set(sequence, member);
+      ns.waiting.set(member, sequence);
+    } else if (structure === 'active') {
       promotions++;
       const sequence = ns.left.get(member);
       if (ns.promoted.has(member)) report('repromotion', time, `${member} entered active again in ${id}`);
@@ -237,7 +254,9 @@ export function replayAdmissionLog(
       if (ns.active.size > profile.capacity)
         report('capacity', time, `${ns.active.size} entries in use in ${id}, capacity ${profile.capacity}`);
       // The slot's score is the script's `now` plus the admission TTL. The rate is counted from
-      // these instants, not from the window the product keeps for itself.
+      // these instants, not from the window the product keeps for itself. Like the capacity it is
+      // the bound of one epoch: §4 keeps the promotion history in the epoch's namespace, and a
+      // reset (§6) starts a new one.
       const now = Number(score) - ttlMs;
       ns.window.push(now);
       const inSecond = ns.window.filter((t) => t > now - 1000 && t <= now).length;

@@ -57,6 +57,11 @@ describe('ledger rows against the Redis entries of one epoch', () => {
     expect(ledgerMismatches([], [entry('b', 'expired', { fingerprint: 'f' })])).toEqual([
       'entry b was claimed and expired without a closed row',
     ]);
+    // A claim ends consumed or closed. A claimed entry in any other state gave its slot back
+    // without either; one that was never claimed needs no row.
+    expect(
+      ledgerMismatches([], [entry('c', 'cancelled', { fingerprint: 'f' }), entry('d', 'cancelled')]),
+    ).toEqual(['entry c was claimed and is cancelled without a ledger row']);
   });
 
   it('reports a ledger row whose entry is missing or tells another story', () => {

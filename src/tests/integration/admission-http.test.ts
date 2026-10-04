@@ -167,10 +167,11 @@ describe('admission actual authenticated HTTP and epoch lifecycle', () => {
     await service.join(eventId, owner, before.epoch, randomUUID());
     // Injection: the namespace disappears between the check of the second transaction and
     // whatever follows it. Every other call is real.
-    const probe = (service as any).probe.bind(service);
+    const checked = service as unknown as { probe(policy: unknown): Promise<{ ok: boolean }> };
+    const probe = checked.probe.bind(service);
     let probes = 0;
-    const spy = jest.spyOn(service as any, 'probe').mockImplementation(async (...args: unknown[]) => {
-      const result = await probe(...args);
+    const spy = jest.spyOn(checked, 'probe').mockImplementation(async (policy) => {
+      const result = await probe(policy);
       if (++probes === 2) await redis.del(admissionKeys(eventId, before.epoch).slice(0, 12));
       return result;
     });

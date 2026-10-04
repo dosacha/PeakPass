@@ -4,7 +4,8 @@
 --   seat_bounds              0 <= available <= total
 --   seat_equation            available + active reservations + pending/paid/delivered orders = total
 --                            (a converted reservation is counted once, through its order)
---   ticket_count             a paid or delivered order has one ticket per seat, any other order none
+--   ticket_count             a paid or delivered order has one ticket per seat, any other order none;
+--                            every ticket row counts, the product cancels none
 --   ticket_identity          a ticket belongs to the user and the event of its order
 --   result_target            a consumed result names a target of the same owner, event, tier,
 --                            quantity and, for a direct checkout, checkout key
@@ -14,7 +15,8 @@
 --                            was protected before its first purchase)
 --   payment_settled          exactly a paid or delivered order has one settled payment that is no
 --                            reconciliation fact
---   payment_callback_key     a provider payment record has its durable callback key
+--   payment_callback_key     a provider payment record has its durable callback key, with the
+--                            status of the record unless a late success was written over it
 --   payment_checkout_record  an order has one checkout payment record and no other: under its own
 --                            key and pending, as the checkout wrote it
 WITH held AS (
@@ -42,7 +44,7 @@ SELECT 'ticket_count', o.event_id,
   format('order=%s status=%s quantity=%s tickets=%s', o.id, o.status, o.quantity, t.issued)
 FROM orders o
 CROSS JOIN LATERAL (
-  SELECT COUNT(*) AS issued FROM tickets t WHERE t.order_id = o.id AND t.status <> 'cancelled'
+  SELECT COUNT(*) AS issued FROM tickets t WHERE t.order_id = o.id
 ) t
 WHERE t.issued <> CASE WHEN o.status IN ('paid', 'delivered') THEN o.quantity ELSE 0 END
 
@@ -104,7 +106,8 @@ JOIN orders o ON o.id = p.order_id
 WHERE p.provider_transaction_id IS NOT NULL AND NOT EXISTS (
   SELECT 1 FROM payment_callback_keys k
   WHERE k.idempotency_key = p.idempotency_key AND k.order_id = p.order_id
-    AND k.provider_transaction_id = p.provider_transaction_id)
+    AND k.provider_transaction_id = p.provider_transaction_id
+    AND (p.reconciliation_required OR k.callback_status = p.status))
 
 UNION ALL
 SELECT 'payment_checkout_record', o.event_id,

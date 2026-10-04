@@ -46,10 +46,14 @@ export function ledgerMismatches(rows: LedgerRow[], entries: RedisEntry[]): stri
       problems.push(`ledger row ${row.admissionId} (${row.outcome}) does not match its entry: ${entry.state}`);
   }
   for (const entry of entries) {
-    if (rowOf.has(entry.admissionId)) continue;
+    if (rowOf.has(entry.admissionId) || open(entry)) continue;
     if (entry.state === 'consumed') problems.push(`entry ${entry.admissionId} is consumed without a ledger row`);
     else if (entry.state === 'expired' && entry.fingerprint)
       problems.push(`entry ${entry.admissionId} was claimed and expired without a closed row`);
+    // A claim ends consumed or closed. A claimed entry in any other state returned its slot
+    // without either.
+    else if (entry.fingerprint)
+      problems.push(`entry ${entry.admissionId} was claimed and is ${entry.state} without a ledger row`);
   }
   return problems;
 }

@@ -105,11 +105,18 @@ describe('final SQL of admission-v1 §8', () => {
         [key, orderId, provider],
       );
   }
-  const tickets = async (c: PoolClient, ids: Ids, orderId: string, count: number, user = ids.user) => {
+  const tickets = async (
+    c: PoolClient,
+    ids: Ids,
+    orderId: string,
+    count: number,
+    user = ids.user,
+    status = 'active',
+  ) => {
     for (let i = 0; i < count; i++)
       await c.query(
-        `INSERT INTO tickets(id,order_id,event_id,user_id,ticket_number,status) VALUES($1,$2,$3,$4,$5,'active')`,
-        [randomUUID(), orderId, ids.event, user, `P7-${randomUUID()}`],
+        `INSERT INTO tickets(id,order_id,event_id,user_id,ticket_number,status) VALUES($1,$2,$3,$4,$5,$6)`,
+        [randomUUID(), orderId, ids.event, user, `P7-${randomUUID()}`, status],
       );
   };
   async function paid(c: PoolClient, ids: Ids, quantity: number) {
@@ -193,6 +200,21 @@ describe('final SQL of admission-v1 §8', () => {
         await seats(c, ids, 8);
       }),
     ).toEqual(['ticket_count']);
+    // A cancelled ticket is a ticket: the product cancels none, so it cannot make a count fit.
+    expect(
+      await checks(async (c, ids) => {
+        const created = await paid(c, ids, 1);
+        await tickets(c, ids, created.id, 1, ids.user, 'cancelled');
+        await seats(c, ids, 9);
+      }),
+    ).toEqual(['ticket_count']);
+    expect(
+      await checks(async (c, ids) => {
+        const created = await order(c, ids, 1);
+        await tickets(c, ids, created.id, 1, ids.user, 'cancelled');
+        await seats(c, ids, 9);
+      }),
+    ).toEqual(['ticket_count']);
     expect(
       await checks(async (c, ids) => {
         const created = await order(c, ids, 1, 'paid');
@@ -268,6 +290,22 @@ describe('final SQL of admission-v1 §8', () => {
         await seats(c, ids, 9);
       }),
     ).toEqual(['payment_callback_key']);
+    // The key carries the status of the callback that wrote the record. Only a reconciliation
+    // fact may differ: a late success is written over the record of an earlier failure.
+    expect(
+      await checks(async (c, ids) => {
+        const created = await paid(c, ids, 1);
+        await c.query(`UPDATE payment_callback_keys SET callback_status = 'failed' WHERE order_id = $1`, [created.id]);
+        await seats(c, ids, 9);
+      }),
+    ).toEqual(['payment_callback_key']);
+    expect(
+      await checks(async (c, ids) => {
+        const created = await order(c, ids, 1, 'expired');
+        await settlement(c, created.id, { reconciliation: true });
+        await c.query(`UPDATE payment_callback_keys SET callback_status = 'failed' WHERE order_id = $1`, [created.id]);
+      }),
+    ).toEqual([]);
     expect(
       await checks(async (c, ids) => {
         await order(c, ids, 1, 'pending', null, false);

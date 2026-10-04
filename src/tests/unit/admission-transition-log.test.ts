@@ -157,6 +157,15 @@ describe('replay of the admission transition log', () => {
     ).toEqual(['fifo']);
   });
 
+  it('reports a sequence that is given to a second entry', () => {
+    expect(rules([...publish('1', EPOCH, T0), ...join('a', 1), ...join('b', 1)])).toEqual(['fifo']);
+    // Also once the first holder has left the line: the order of the two can no longer be told.
+    expect(
+      rules([...publish('1', EPOCH, T0), ...join('a', 1), ...promote('a', T0 + 1000), ...join('b', 1, T0 + 2000)]),
+    ).toEqual(['fifo']);
+    expect(rules([...publish('1', EPOCH, T0), ...join('a', 1), ...join('a', 1), ...join('b', 2)])).toEqual([]);
+  });
+
   it('reports a claim for an entry that holds no slot', () => {
     expect(
       rules([...publish('1', EPOCH, T0), ...join('a', 1), ...claim('a', T0 + 1000)]),
