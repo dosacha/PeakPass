@@ -92,9 +92,8 @@ export class AdmissionService {
     return freezeAdmission(eventId, observed.epoch, observed.generation);
   }
 
-  async verifyEnvironment(): Promise<void> {
-    this.healthy = false;
-    if (this.stopping) throw new AdmissionError('ADMISSION_UNAVAILABLE', 503, 1000);
+  /** The run id of the Redis process, once its configuration was checked. It changes no state. */
+  private async environment(): Promise<string> {
     const data = await withRedis(async (r) => ({
       config: Object.assign(
         {},
@@ -113,7 +112,33 @@ export class AdmissionService {
     }
     const runId = /^run_id:(.+)\r?$/m.exec(data.info)?.[1].trim();
     if (!runId) throw new AdmissionError('ADMISSION_UNAVAILABLE', 503, 1000);
+    return runId;
+  }
+  async verifyEnvironment(): Promise<void> {
+    this.healthy = false;
     if (this.stopping) throw new AdmissionError('ADMISSION_UNAVAILABLE', 503, 1000);
+    const runId = await this.environment();
+    if (this.stopping) throw new AdmissionError('ADMISSION_UNAVAILABLE', 503, 1000);
+    this.runId = runId;
+    this.version = getRedisConnectionVersion();
+    this.healthy = true;
+  }
+  /**
+   * Under the exclusive gate, which may have been waited for behind a writer: Redis may have been
+   * replaced meanwhile. The process is read again while the instance keeps serving every other
+   * event, and only a process other than the verified one changes what the instance holds.
+   */
+  private async currentProcess(): Promise<void> {
+    if (this.stopping) throw new AdmissionError('ADMISSION_UNAVAILABLE', 503, 1000);
+    let runId: string;
+    try {
+      runId = await this.environment();
+    } catch (error) {
+      this.healthy = false;
+      throw error;
+    }
+    if (this.stopping) throw new AdmissionError('ADMISSION_UNAVAILABLE', 503, 1000);
+    if (runId === this.runId) return;
     this.runId = runId;
     this.version = getRedisConnectionVersion();
     this.healthy = true;
@@ -264,9 +289,8 @@ export class AdmissionService {
     const policy = await serializableTransactionWithRetry(async (c) => {
       const current = await this.barrier(c, eventId);
       if (!current) return null;
-      // The gate may have been waited for behind a writer, and Redis may have been replaced
-      // meanwhile. The run id that names its process is read again before anything is compared.
-      await this.verifyEnvironment();
+      // The run id that names the Redis process is read again before anything is compared.
+      await this.currentProcess();
       // An observer of an older loss follows the current recovery instead of incrementing again.
       const advanced =
         old && (current.generation !== old.generation || current.epoch !== old.epoch);
@@ -286,9 +310,13 @@ export class AdmissionService {
       const current = await this.barrier(c, eventId);
       if (!current || current.generation !== policy.generation || current.epoch !== policy.epoch)
         return;
-      // This gate was waited for as well: the namespace is written under the run id of the
-      // process that receives it, or one restart would cost a second generation.
-      await this.verifyEnvironment();
+      // This gate was waited for as well. A generation that is still recovering was never
+      // written and is created under the process that is there now. An open one was written
+      // before: if its namespace is no longer intact, it was lost after the decision above, and
+      // the same epoch is never written anew. The next attempt decides that loss from the start.
+      await this.currentProcess();
+      if (current.phase === 'open' && !(await this.probe(current)).ok)
+        throw new AdmissionError('ADMISSION_RECOVERING', 503, 1000);
       accepted(await initializeAdmission(current, this.runId));
       if (current.phase === 'recovering')
         await c.query("UPDATE admission_events SET phase='open' WHERE event_id=$1", [eventId]);

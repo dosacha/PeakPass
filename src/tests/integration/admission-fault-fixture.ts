@@ -886,11 +886,22 @@ async function build(image: string, prefix: string, options: TopologyOptions) {
       await fault('stop', redisId, '-t', '0');
       monitor.detach();
     },
-    /** Starts the stopped server. The log is attached before any application can write to it. */
+    /**
+     * Starts the stopped server. The log must be attached before any application writes to the
+     * new process, and arming it first does not decide that race: the applications are frozen
+     * for the moment the server starts (synthetic) and released once the capture is attached.
+     */
     async start() {
-      const attached = monitor.attach(true);
-      await fault('start', redisId);
-      await attached;
+      const frozen: AppBox[] = [];
+      for (const app of apps)
+        if (await fault('pause', app.id).then(() => true, () => false)) frozen.push(app);
+      try {
+        const attached = monitor.attach(true);
+        await fault('start', redisId);
+        await attached;
+      } finally {
+        for (const app of frozen) await fault('unpause', app.id).catch(() => undefined);
+      }
       redis = await newRedis();
     },
     async flush() {

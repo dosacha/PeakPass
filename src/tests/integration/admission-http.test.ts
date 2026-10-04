@@ -178,6 +178,72 @@ describe('admission actual authenticated HTTP and epoch lifecycle', () => {
     await service.recover(eventId, null);
     expect(await service.control(eventId)).toEqual(before);
   });
+  it('stays ready for every other request while it recovers an intact namespace', async () => {
+    // Status, join and purchase of every event ask isReady(): the recovery of one event must not
+    // take the instance out of service while Redis is healthy.
+    const samples: boolean[] = [];
+    let sampling = true;
+    const sample = () => {
+      samples.push(service.isReady());
+      if (sampling) setImmediate(sample);
+    };
+    setImmediate(sample);
+    try {
+      await service.recover(eventId, null);
+    } finally {
+      sampling = false;
+    }
+    expect(samples.length).toBeGreaterThan(0);
+    expect(samples).not.toContain(false);
+  });
+  it('never writes the same epoch anew when its namespace is lost after a recovery adopted it', async () => {
+    const { admissionKeys } = await import('@/infra/redis/admission');
+    const before = (await service.control(eventId))!;
+    const owner = randomUUID();
+    await service.join(eventId, owner, before.epoch, randomUUID());
+    const first = await pool.connect();
+    const second = await pool.connect();
+    let recovery: Promise<void> | undefined;
+    try {
+      // One holder of the shared gate keeps the recovery before its first transaction, and a
+      // second one, queued behind the recovery, keeps it before its second.
+      await first.query('BEGIN');
+      const firstPid = (await first.query('SELECT pg_backend_pid() AS pid')).rows[0].pid;
+      await readAdmissionPolicy(first, eventId, 'shared');
+      recovery = service.recover(eventId, null);
+      recovery.catch(() => undefined);
+      await blocked(pool, firstPid);
+      await second.query('BEGIN');
+      const secondPid = (await second.query('SELECT pg_backend_pid() AS pid')).rows[0].pid;
+      const queued = readAdmissionPolicy(second, eventId, 'shared');
+      await blocked(pool, firstPid, 2);
+      // The first transaction finds the namespace intact and adopts it.
+      await first.query('COMMIT');
+      await queued;
+      await blocked(pool, secondPid);
+      // Redis loses the namespace while the recovery waits for the gate again.
+      await redis.del(admissionKeys(eventId, before.epoch).slice(0, 12));
+      await second.query('COMMIT');
+      // The adopted epoch is gone. Writing it again would drop every registration without a
+      // reset, so this recovery gives up and the loss is decided anew.
+      await expect(recovery).rejects.toMatchObject({ code: 'ADMISSION_RECOVERING' });
+      await service.maintain();
+      const after = (await service.control(eventId))!;
+      expect(after.mode).toBe('ready');
+      expect(BigInt(after.generation)).toBe(BigInt(before.generation) + 1n);
+      expect(after.epoch).not.toBe(before.epoch);
+      await expect(service.join(eventId, owner, before.epoch, randomUUID())).rejects.toMatchObject({
+        code: 'ADMISSION_RESET',
+        statusCode: 410,
+      });
+    } finally {
+      await first.query('ROLLBACK').catch(() => undefined);
+      await second.query('ROLLBACK').catch(() => undefined);
+      first.release();
+      second.release();
+      await recovery?.catch(() => undefined);
+    }
+  });
   it('waits for existing shared-gate transactions before publishing a new epoch', async () => {
     const c = await pool.connect();
     let recovery: Promise<void> | undefined;
