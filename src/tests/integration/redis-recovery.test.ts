@@ -4,6 +4,7 @@ import { randomUUID, createHmac } from 'crypto';
 import jwt from 'jsonwebtoken';
 import type { FastifyInstance } from 'fastify';
 import type { RedisClientType } from 'redis';
+import { ownedRedis } from './redis-outage-fixture';
 
 const enabled = process.env.WAVE3_REDIS_DESTRUCTIVE === '1';
 const suite = enabled ? describe : describe.skip;
@@ -16,17 +17,8 @@ async function until(predicate: () => boolean, timeout = 15000) {
   }
 }
 function container(action: 'stop' | 'start' | 'pause' | 'unpause') {
-  const name = process.env.WAVE3_REDIS_CONTAINER;
-  const id = process.env.WAVE3_REDIS_CONTAINER_ID;
-  if (!enabled || name !== 'peakpass-wave3-0928-redis' || !id ||
-      process.env.REDIS_HOST !== '127.0.0.1' || process.env.REDIS_PORT !== '63532') {
-    throw new Error('Requires explicit dedicated Wave3 Redis fixture opt-in');
-  }
-  const metadata = JSON.parse(execFileSync('docker', ['inspect', name], { encoding: 'utf8' }))[0];
-  if (metadata.Id !== id || metadata.Config.Labels['peakpass.task'] !== 'wave3') {
-    throw new Error('Redis fixture ownership mismatch');
-  }
-  if (action === 'start' && metadata.State.Paused) execFileSync('docker', ['unpause', id], { windowsHide: true });
+  const { id, paused } = ownedRedis();
+  if (action === 'start' && paused) execFileSync('docker', ['unpause', id], { windowsHide: true });
   execFileSync('docker', action === 'stop' ? ['stop', '-t', '0', id] : [action, id], { windowsHide: true });
   process.stdout.write(JSON.stringify({ action, time: new Date().toISOString(), pid: process.pid }) + '\n');
 }

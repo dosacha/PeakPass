@@ -57,8 +57,8 @@ Browser: B1 join to ticket; B2 Redis restart while waiting and while admitted; B
 
 Outside the repository: `run/setup.mjs` (owned containers, env files), run logs.
 
-- [ ] Re-check origin/main, the contract hash and the issue gates. `npm ci`. Owned PostgreSQL (`track_commit_timestamp=on`) and Redis instances with the task label and explicit host ports; credentials in files outside the repository.
-- [ ] Record build, typecheck, lint, unit, full integration, harness and callback results at the base before any change, and compare them with the stored P6 result (unit 228, integration 346 passed / 15 skipped, harness 29).
+- [x] Re-check origin/main, the contract hash and the issue gates. `npm ci`. Owned PostgreSQL (`track_commit_timestamp=on`) and Redis instances with the task label and explicit host ports; credentials in files outside the repository.
+- [x] Record build, typecheck, lint, unit, full integration, harness and callback results at the base before any change, and compare them with the stored P6 result (unit 228, integration 346 passed / 15 skipped, harness 29).
 
 ## Task 1: Harness
 
@@ -71,11 +71,11 @@ Interfaces:
 - `admission-final.sql`: one statement, no parameter, rows `(check_name, event_id, detail)`; no row means every check holds.
 - `admission-fault-fixture.ts`: `faultSuite` (`describe` or `describe.skip` by `ADMISSION_FAULT_IMAGE`); `startTopology(options)` returning the owned network, PostgreSQL, Redis and application containers with `pool`, `redis`, `apps`, `docker()`, `event()`, `protect()`, `buyer()`, `holdGate()`, `slow()`, `violations()`, `transitions()` and `destroy()`.
 
-- [ ] Failing unit tests for the replay: nine entries in `active` is a `capacity` violation and eight is none; three promotions inside one rolling second is a `rate` violation and two is none; an entry promoted twice; a promotion that leaves a lower sequence waiting; a claim for an entry without a slot; a `ready` publication of a lower generation; `UNLINK` and `FLUSHALL` clear the state; a script body with quotes and escapes parses.
-- [ ] Implement the parser and the replay; the unit file passes.
-- [ ] The final SQL file with the checks of contract §8: bounds, the seat equation, tickets against orders, consumed results against their targets, occupations of a protected event without a result, payment records against callback keys.
-- [ ] The fixture: topology, migrations through the image, `MONITOR` capture on a raw socket that reads the admission keys and subscribes in one pipeline, buyers with the same-identity retry rule, gate and trigger stimuli, cleanup by label.
-- [ ] Build the image. M1 passes both checks; a capture that starts late fails as incomplete.
+- [x] Failing unit tests for the replay: nine entries in `active` is a `capacity` violation and eight is none; three promotions inside one rolling second is a `rate` violation and two is none; an entry promoted twice; a promotion that leaves a lower sequence waiting; a claim for an entry without a slot; a `ready` publication of a lower generation; `UNLINK` and `FLUSHALL` clear the state; a script body with quotes and escapes parses.
+- [x] Implement the parser and the replay; the unit file passes.
+- [x] The final SQL file with the checks of contract §8: bounds, the seat equation, tickets against orders, consumed results against their targets, occupations of a protected event without a result, payment records against callback keys.
+- [x] The fixture: topology, migrations through the image, `MONITOR` capture on a raw socket that reads the admission keys and subscribes in one pipeline, buyers with the same-identity retry rule, gate and trigger stimuli, cleanup by label.
+- [x] Build the image. M1 passes both checks; a capture that starts late fails as incomplete.
 
 ## Task 2: The ten fixed-port Redis-outage tests
 
@@ -83,8 +83,8 @@ Files: new `src/tests/integration/redis-outage-fixture.ts`; `redis-recovery.test
 
 Interface: `ownedRedis(): { name: string; id: string }` throws unless `WAVE3_REDIS_DESTRUCTIVE=1`, `WAVE3_REDIS_CONTAINER` and `WAVE3_REDIS_CONTAINER_ID` are set, `docker inspect` returns that id, the container carries the label `peakpass.redis-outage=owned`, and its explicit host port of `6379/tcp` on `127.0.0.1` equals `REDIS_PORT`.
 
-- [ ] Replace the four literal checks by the helper; nothing else changes in those files.
-- [ ] Run the ten cases on the owned Redis. A failure is classified (test rot or product regression) before anything is changed.
+- [x] Replace the four literal checks by the helper; nothing else changes in those files.
+- [x] Run the ten cases on the owned Redis. A failure is classified (test rot or product regression) before anything is changed.
 
 ## Task 3: Real Redis failures and reset stages
 
@@ -130,3 +130,14 @@ Files: new `docs/ISSUE_16_VALIDATION.md`, `docs/README.md`, `test-results/admiss
 - Base `5016b8c02bb2631a468258d03a5529cbbe72f0ce` (origin/main rechecked 2026-10-04 by `git ls-remote`, no open PR among the phase branches). Contract blob `47cb6fbe4f0d84d437008a1981f16a929cc5732f`, SHA256 unchanged. P4 `4b8847e`/`51d331b`, P5 `e3fb7e2`/`9eca324` and P6 `621e937` are ancestors. Worktree `claude/issue-16-p7-failure-validation`, created with `--no-track`; the user's main checkout and every other worktree untouched.
 - Ruling: the user's "no objection, proceed as recommended" after the reviewed chat design is the execution instruction and approves the plan, `npm ci`, the owned resources and local commits per task, as in P5 and P6. The accepted contract and that design are the spec, so no separate spec or plan approval stage is added. Push, PR and independent review remain unapproved.
 - Ruling: the ledger is this section and the working files are in the run directory outside the repository, as in P5 and P6.
+- Owned resources (run `peakpass-p7-20261004`): PostgreSQL 16.12 with `track_commit_timestamp=on` and the databases `peakpass_test`, `peakpass_browser`, `peakpass_image_off`, `peakpass_image_on` and `peakpass_upgrade`; two Redis 7.4.8 instances (save "", appendonly no, noeviction, 256MiB), one for the integration suite and one for the browser environment. Every host port was asked from the operating system at creation and published explicitly. Labels `peakpass.task=peakpass-p7-20261004`, and `peakpass.redis-outage=owned` on the two Redis containers. Credentials are kept in files outside the repository. The fault suites create and remove their own network, PostgreSQL, Redis and application containers on each run.
+- Task 0: baseline at `5016b8c` on the owned resources — build and typecheck passed, lint 0 errors/11 warnings, unit 228/228 (23 suites), integration 346 passed/15 skipped (30 suites passed, 2 skipped), harness 29/29, callback check passed. The same counts as the stored P6 result.
+- Task 1: `8be7d53` transition-log replay. RED (the helper missing) → GREEN 14/14.
+- Task 1: `a522705` final SQL. RED 6 failed (the file missing) → GREEN 6/6.
+- Task 1: Ruling: `unlinked_occupation` reports every reservation of a protected event without its consumed result, also one that expired or was converted since — it was an occupation when it was made; the first GREEN run failed on a test state that had an expired reservation without a result, and the test input was corrected, not the SQL — cost if wrong: none for the product; a reader must not read the check on an event that was protected only after its first purchase, which the file's header says.
+- Task 1: Ruling: the label of the fault containers comes from `ADMISSION_FAULT_TASK` (default `admission-fault`) and each run adds `peakpass.fault-run=<its prefix>`; a suite removes only containers whose run label is its own — a dated task label does not belong in the source tree, and the run script sets `peakpass-p7-20261004` — cost if wrong: none.
+- Task 1: Ruling: the MONITOR capture is a raw socket from the test process, not `redis-cli`, and it reads the admission keys in the same pipeline that subscribes — one read is executed back to back by Redis, so "no key seen" proves that nothing was written before the capture — cost if wrong: an incomplete log would be read as complete; the replayed end state is compared with Redis as a second check, and a capture that begins late is asserted to report itself (M1).
+- Task 1: Ruling: a Redis restart is a stop followed by a start, with the capture armed before the start — a single `docker restart` gives no moment at which only the new process can be reached — cost if wrong: the `docker restart` command is exercised for PostgreSQL only.
+- Task 1: `57d2d91` fault fixture and M1. Image `peakpass:p7-issue16` built from the worktree. M1 passed on its first run and again with the late-capture check; one run recorded 22 buyers, 20 promotions, 11 purchases, 7 sold-out rejections, 5 requests answered 503 by the instance with the feature off (observations of one local run).
+- Task 2: guard of the ten fixed-port Redis-outage cases. RED: with the old guard on the owned Redis, 10 failed (the fixed fixture was refused: the name literal, port 63532, the `wave3` label) and 22 passed. GREEN: 32/32 in the three files; the ten cases ran for the first time on code later than P3 and passed without a change to their assertions. The owned Redis kept its host port through every stop and start of those cases.
+- Task 1: Ruling: M1 verifies existing behaviour and so never failed first. That it can fail rests on the unit tests of the replay, the SQL test, the late-capture assertion and the sensitivity step of Task 8 — cost if wrong: a vacuous assertion stays unnoticed until Task 8.

@@ -8,6 +8,7 @@ import { getConfig } from '@/infra/config';
 import { sweepExpiredOrders, startOrderSweeper } from '@/infra/cron/order-sweeper';
 import { fixture, until, lockOrder, blocked, release } from './order-sweeper-fixture';
 import { execFileSync } from 'child_process';
+import { ownedRedis } from './redis-outage-fixture';
 
 jest.setTimeout(30000);
 describe('bounded order sweeper on real PostgreSQL and Redis', () => {
@@ -151,10 +152,8 @@ describe('bounded order sweeper on real PostgreSQL and Redis', () => {
   });
   const destructive = process.env.WAVE3_REDIS_DESTRUCTIVE === '1' ? it : it.skip;
   destructive('commits orders during actual Redis outage and retries no committed business side effects', async () => {
-    const name = process.env.WAVE3_REDIS_CONTAINER!, expected = process.env.WAVE3_REDIS_CONTAINER_ID!;
-    expect(name).toBe('peakpass-wave3-0928-redis'); expect(getConfig()).toMatchObject({ REDIS_HOST: '127.0.0.1', REDIS_PORT: 63532 });
-    const info = JSON.parse(execFileSync('docker', ['inspect', name], { encoding: 'utf8', windowsHide: true }))[0];
-    expect(info.Id).toBe(expected); expect(info.Config.Labels['peakpass.task']).toBe('wave3');
+    const { name, port } = ownedRedis();
+    expect(getConfig()).toMatchObject({ REDIS_HOST: '127.0.0.1', REDIS_PORT: port });
     const id = await data.order();
     try {
       execFileSync('docker', ['stop', name], { windowsHide: true });
@@ -168,11 +167,8 @@ describe('bounded order sweeper on real PostgreSQL and Redis', () => {
     }
   });
   destructive('a Redis disconnect triggered after COMMIT cannot turn an expired order into failed work', async () => {
-    const name = process.env.WAVE3_REDIS_CONTAINER!, expected = process.env.WAVE3_REDIS_CONTAINER_ID!;
-    expect(name).toBe('peakpass-wave3-0928-redis');
-    expect(getConfig()).toMatchObject({ REDIS_HOST: '127.0.0.1', REDIS_PORT: 63532 });
-    const info = JSON.parse(execFileSync('docker', ['inspect', name], { encoding: 'utf8', windowsHide: true }))[0];
-    expect(info.Id).toBe(expected); expect(info.Config.Labels['peakpass.task']).toBe('wave3');
+    const { name, port } = ownedRedis();
+    expect(getConfig()).toMatchObject({ REDIS_HOST: '127.0.0.1', REDIS_PORT: port });
     await data.order(); const redis = await getReadyRedis(), del = redis.del.bind(redis);
     let committedBeforeOutage = false;
     // Instrument the real DEL boundary solely to stop the verified container after observing COMMIT.
