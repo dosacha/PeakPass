@@ -65,7 +65,7 @@ Evidence kinds. **Real**: the product runs as containers of the production image
 | Real browser | B1–B8 on the image above, one run each. Every scenario ended with the final SQL returning no row, and no page trace or server log extract shows overlapping requests of the tab. |
 | GitHub Actions | Not run: nothing is pushed. The fault suites are opt-in and would be skipped there. |
 
-Raw outputs: [manifest](../test-results/admission-v1/p7-final-20261004.json) / [ZIP](../test-results/admission-v1/p7-final-20261004.zip). The ZIP holds the logs of every command above, the notes, request lists and transition logs of the three rounds and of the earlier runs, the browser consoles, traces, request lists and server log extracts, and the scripts of the run. It holds no credential, env file, token or request header, and the application logs of the fault topologies are left out (O4).
+Raw outputs: [manifest](../test-results/admission-v1/p7-final-20261004.json) / [ZIP](../test-results/admission-v1/p7-final-20261004.zip). The ZIP holds the logs of every command above, the notes, request lists and transition logs of the three final rounds, the notes of the earlier runs, the browser consoles, traces, request lists and server log extracts, and the scripts of the run. It holds no credential, env file, token or request header, and the application logs of the fault topologies are left out (O4).
 
 ### Scenarios
 
