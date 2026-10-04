@@ -111,6 +111,6 @@ FROM orders o
 CROSS JOIN LATERAL (
   SELECT COUNT(*) AS records FROM payment_records p
   WHERE p.order_id = o.id AND p.provider_transaction_id IS NULL
-    AND p.idempotency_key = o.idempotency_key::text
+    AND lower(p.idempotency_key) = o.idempotency_key::text
 ) p
 WHERE p.records <> 1

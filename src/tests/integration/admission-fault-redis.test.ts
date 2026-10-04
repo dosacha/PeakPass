@@ -46,12 +46,17 @@ faultSuite('admission under real Redis failures (real containers)', () => {
   async function held(buyer: Buyer, eventId: string, admission: AdmissionRef, app: AppBox, seconds: number) {
     const remove = await t.slow('reservations', buyer.userId, seconds);
     const answer = buyer.call(app, 'POST', '/reservations', buyer.reservationBody(eventId, admission, 1), undefined, 30000);
-    await until(
-      async () => (await t.backends('%INSERT INTO reservations%')).some((b) => b.wait_event === 'PgSleep'),
-      10000,
-      'the purchase to reach its held statement',
-      50,
-    );
+    try {
+      await until(
+        async () => (await t.backends('%INSERT INTO reservations%')).some((b) => b.wait_event === 'PgSleep'),
+        10000,
+        'the purchase to reach its held statement',
+        50,
+      );
+    } catch (error) {
+      await remove();
+      throw error;
+    }
     return { answer, remove };
   }
   const existingCheckout = (buyer: Buyer, app: AppBox, eventId: string, reservationId: string, key: string) =>
@@ -86,6 +91,7 @@ faultSuite('admission under real Redis failures (real containers)', () => {
     const before = { policy: await t.policy(eventId), control: await t.control(eventId) };
 
     const hold = await held(writer, eventId, writerAdmission, first, 3);
+    const deadline: number = (await t.entry(eventId, writerAdmission))!.deadline;
     let writerAnswer: Answer;
     try {
       await t.redisFaults.pause();
@@ -153,14 +159,17 @@ faultSuite('admission under real Redis failures (real containers)', () => {
     const settled = await t.settle(first, checkout.final.body!.order.id);
     expect(settled.status).toBe(200);
     expect(settled.body!.order.status).toBe('paid');
-    // The purchase that committed during the pause reaches Redis afterwards: its own finalization
-    // if the pause ended before the 5 s command bound, otherwise a reclaimer after the deadline.
+    // The purchase that committed during the pause could not tell Redis: its finalization went
+    // with the connection that the 5 s command bound gave up. Its slot stayed in use, which is why
+    // the waiting users above kept their places, until a reclaimer reflects the result after the
+    // claim deadline.
     await until(
       async () => (await t.entry(eventId, writerAdmission))?.state === 'consumed',
       40000,
       'the reclaimer to reflect the committed purchase',
       500,
     );
+    expect(await t.redisNow()).toBeGreaterThanOrEqual(deadline);
     // The idle admissions expire after their 30 s; the two waiting users are admitted in order.
     for (const entry of waiting) {
       await entry.buyer.admitted(eventId, 60000, second);
@@ -174,6 +183,7 @@ faultSuite('admission under real Redis failures (real containers)', () => {
   /** R2–R4: the Redis state is lost while buyers are attached. */
   async function loss(kind: 'stop' | 'restart' | 'flush') {
     const eventId = await event();
+    const began = await t.redisNow();
     const [first, second] = t.apps;
     const done = await t.buyer();
     const doneBody = done.reservationBody(eventId, await done.enter(eventId), 1);
@@ -199,7 +209,7 @@ faultSuite('admission under real Redis failures (real containers)', () => {
           return answer.status === 410;
         }, 30000, 'the old admission to be answered 410', 50);
         t.note('R4 answers to the old admission until the reset', { seen: [...seen] });
-        const allowed = ['503 ADMISSION_RECOVERING', '503 ADMISSION_UNAVAILABLE', '409 ADMISSION_IN_PROGRESS', '410 ADMISSION_RESET'];
+        const allowed = ['503 ADMISSION_RECOVERING', '503 ADMISSION_UNAVAILABLE', '410 ADMISSION_RESET'];
         expect([...seen].filter((answer) => !allowed.includes(answer))).toEqual([]);
       } else {
         await t.redisFaults.stop();
@@ -249,6 +259,8 @@ faultSuite('admission under real Redis failures (real containers)', () => {
     t.note(`${kind}: generations spent on one loss`, { generations });
     expect(after.policy.epoch).not.toBe(before.policy.epoch);
     expect(after.control).toMatchObject({ generation: after.policy.generation, epoch: after.policy.epoch });
+    // The loss was the one the title names: another Redis process after a stop, the same after a flush.
+    expect(after.control.runId === before.control.runId).toBe(kind === 'flush');
 
     // The old admission and the old epoch occupy nothing any more.
     const reservations = (await t.seats(eventId)).reservations;
@@ -299,11 +311,15 @@ faultSuite('admission under real Redis failures (real containers)', () => {
     expect(again.admissionEpoch).toBe(after.policy.epoch);
     expect((await idle.reserve(eventId, again, 1)).final.status).toBe(201);
     await t.quiet(eventId);
-    // A second generation shows in this count and in the `run-id` rule of the log. Everything
-    // else is checked before them, so that it is still asserted when the count does not hold.
-    await t.verify([], ['run-id']);
-    expect(generations).toBe(1);
-    await t.verify();
+    // Everything else is checked first, so that it is still asserted when the next line fails.
+    const log = await t.verify([], ['run-id']);
+    // One loss costs one generation, and no namespace is initialized under the run id of the
+    // Redis process that is gone.
+    const stale = log.violations.filter((violation) => violation.rule === 'run-id' && violation.time >= began);
+    expect({ generations, initializedUnderAnOldRunId: stale.length }).toEqual({
+      generations: 1,
+      initializedUnderAnOldRunId: 0,
+    });
   }
 
   it('R2 stop and start: the state is lost, one new generation, old admissions end, durable results stay', () =>
@@ -325,6 +341,7 @@ faultSuite('admission under real Redis failures (real containers)', () => {
     // before each of the three transactions of the reset. The kills are real.
     let gate = t.holdGate(eventId);
     await gate.granted;
+    let staged = false;
     try {
       await t.redisFaults.flush();
       // Stage 1: the loss is seen, nothing is durable yet.
@@ -355,8 +372,11 @@ faultSuite('admission under real Redis failures (real containers)', () => {
       await t.appFaults.start(second);
       await bothWait();
       await t.appFaults.kill(first);
+      staged = true;
     } finally {
       await gate.release();
+      // A scenario that stopped half-way leaves no coordinator dead for the next one.
+      if (!staged) for (const app of t.apps) await t.appFaults.start(app).catch(() => undefined);
     }
     await until(async () => (await t.control(eventId))?.mode === 'ready', 60000, 'the publication', 200);
     await t.appFaults.start(first);

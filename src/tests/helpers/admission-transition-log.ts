@@ -2,8 +2,8 @@
  * The Redis transition log of admission-v1 §8, read from a `MONITOR` stream.
  *
  * MONITOR reports every command the server runs, including the ones a Lua script issues (source
- * `lua`), in the order Redis applied them. Replaying the writes to the waiting, active, claims and
- * window sets therefore gives the capacity in use after every command and the promotions of every
+ * `lua`), in the order Redis applied them. Replaying the writes to the waiting, active and claims
+ * sets therefore gives the capacity in use after every command and the promotions of every
  * rolling second, which a sampled read cannot.
  */
 export interface MonitorEntry {
@@ -98,8 +98,9 @@ const KEY = /^peakpass:admission:([0-9a-f-]{36}):(?:(control)|([0-9a-f-]{36}):(\
 
 export function replayAdmissionLog(
   entries: MonitorEntry[],
-  profile: { rate: number; capacity: number } = { rate: 2, capacity: 8 },
+  profile: { rate: number; capacity: number; ttlMs?: number } = { rate: 2, capacity: 8 },
 ): Replay {
+  const ttlMs = profile.ttlMs ?? 30000;
   const violations: ReplayViolation[] = [];
   const namespaces = new Map<string, Namespace>();
   const current = new Map<string, Control>();
@@ -223,8 +224,10 @@ export function replayAdmissionLog(
     if (structure === 'waiting') ns.waiting.set(member, Number(score));
     else if (structure === 'active') {
       promotions++;
-      if (ns.promoted.has(member)) report('repromotion', time, `${member} entered active again in ${id}`);
       const sequence = ns.left.get(member);
+      if (ns.promoted.has(member)) report('repromotion', time, `${member} entered active again in ${id}`);
+      else if (sequence === undefined)
+        report('fifo', time, `${member} entered active without having left waiting in ${id}`);
       const ahead = [...ns.waiting].filter(([, other]) => sequence !== undefined && other < sequence);
       if (ahead.length)
         report('fifo', time, `${member} (sequence ${sequence}) was promoted before ${ahead.map(([m]) => m).join(', ')} in ${id}`);
@@ -233,8 +236,9 @@ export function replayAdmissionLog(
       ns.active.add(member);
       if (ns.active.size > profile.capacity)
         report('capacity', time, `${ns.active.size} entries in use in ${id}, capacity ${profile.capacity}`);
-    } else if (structure === 'window') {
-      const now = Number(score);
+      // The slot's score is the script's `now` plus the admission TTL. The rate is counted from
+      // these instants, not from the window the product keeps for itself.
+      const now = Number(score) - ttlMs;
       ns.window.push(now);
       const inSecond = ns.window.filter((t) => t > now - 1000 && t <= now).length;
       if (inSecond > profile.rate)

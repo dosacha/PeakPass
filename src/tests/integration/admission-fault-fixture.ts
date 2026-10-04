@@ -15,6 +15,7 @@ import {
   parseMonitorLine,
   replayAdmissionLog,
 } from '../helpers/admission-transition-log';
+import { ledgerMismatches } from '../helpers/admission-ledger';
 
 /**
  * Real failures at the integration boundary (admission-v1 §8, P7).
@@ -88,24 +89,31 @@ class Monitor {
   readonly lines: string[] = [];
   incomplete: string[] = [];
   private socket: Socket | null = null;
+  /** The server is being stopped by the fixture: the stream is expected to end with it. */
+  private ending = false;
   constructor(private port: number) {}
 
   /** `restarted`: the server process was replaced, so everything the log knew is gone. */
   async attach(restarted = false): Promise<void> {
-    const keys = await until(() => this.open(), 30000, 'the Redis MONITOR connection', 20);
+    this.ending = false;
+    const keys = await until(() => this.open(restarted), 30000, 'the Redis MONITOR connection', 20);
     if (keys.length)
       this.incomplete.push(`capture began with ${keys.length} admission keys present`);
-    else if (restarted)
-      this.entries.push({ time: Date.now(), source: 'fixture:restart', args: ['FLUSHALL'] });
   }
   /** The admission keys present when MONITOR began, or null when the server did not answer. */
-  private open(): Promise<string[] | null> {
+  private open(restarted: boolean): Promise<string[] | null> {
     return new Promise((resolve) => {
       const socket = connect(this.port, '127.0.0.1');
       let text = '';
       let streaming = false;
       const fail = () => {
-        if (streaming) return;
+        if (streaming) {
+          // A stream that ends although nobody detached it has missed whatever came after.
+          if (this.socket === socket && !this.ending)
+            this.incomplete.push('the capture ended before the fixture detached it');
+          if (this.socket === socket) this.socket = null;
+          return;
+        }
         socket.destroy();
         resolve(null);
       };
@@ -131,6 +139,13 @@ class Monitor {
         if (lines[1 + count * 2] !== '+OK') return fail();
         streaming = true;
         this.socket = socket;
+        if (restarted && count === 0) {
+          // Written like a line of the stream and before anything the new process ran, so that
+          // the kept log replays exactly as the suite saw it.
+          const mark = `${(Date.now() / 1000).toFixed(6)} [0 fixture:restart] "FLUSHALL"`;
+          this.lines.push(mark);
+          this.entries.push(parseMonitorLine(mark)!);
+        }
         text = this.take(lines.slice(2 + count * 2).join('\r\n'));
         resolve(Array.from({ length: count }, (_, i) => lines[2 + i * 2]));
       });
@@ -160,24 +175,46 @@ class Monitor {
     }
     return text.slice(from);
   }
+  /** The fixture is about to stop the server: the stream may end without being detached. */
+  expectEnd() {
+    this.ending = true;
+  }
   detach() {
-    this.socket?.destroy();
+    const socket = this.socket;
     this.socket = null;
+    socket?.destroy();
   }
 }
 
-export type Topology = Awaited<ReturnType<typeof startTopology>>;
+export type Topology = Awaited<ReturnType<typeof build>>;
+interface TopologyOptions {
+  /** One entry per application container; `admission` is its ENABLE_ADMISSION. */
+  apps?: Array<{ admission: boolean; env?: Record<string, string> }>;
+  env?: Record<string, string>;
+}
 
-export async function startTopology(
-  options: {
-    /** One entry per application container; `admission` is its ENABLE_ADMISSION. */
-    apps?: Array<{ admission: boolean; env?: Record<string, string> }>;
-    env?: Record<string, string>;
-  } = {},
-) {
+/** Removes the containers and the network of one run, found by its own run label. */
+async function removeRun(prefix: string) {
+  const docker = (...args: string[]) => run('docker', args, { encoding: 'utf8', windowsHide: true });
+  const found = await docker('ps', '-aq', '--filter', `label=peakpass.fault-run=${prefix}`).catch(() => null);
+  for (const id of found?.stdout.split(/\s+/).filter(Boolean) ?? [])
+    await docker('rm', '-f', '-v', id).catch(() => undefined);
+  await docker('network', 'rm', prefix).catch(() => undefined);
+}
+
+/** A topology that failed to start leaves nothing behind. */
+export async function startTopology(options: TopologyOptions = {}) {
   if (!faultImage) throw new Error('ADMISSION_FAULT_IMAGE is required');
-  const image = faultImage;
   const prefix = `pp-fault-${randomBytes(4).toString('hex')}`;
+  try {
+    return await build(faultImage, prefix, options);
+  } catch (error) {
+    await removeRun(prefix);
+    throw error;
+  }
+}
+
+async function build(image: string, prefix: string, options: TopologyOptions) {
   const labels = ['--label', `peakpass.task=${TASK}`, '--label', `peakpass.fault-run=${prefix}`];
   const secrets = {
     DB_PASSWORD: randomBytes(18).toString('base64url'),
@@ -215,7 +252,6 @@ export async function startTopology(
         maxBuffer: 256 * 1024 * 1024,
       })
     ).stdout.trim();
-  const created: string[] = [];
   const names = new Map<string, string>();
   const started = Date.now();
   const notes: Json[] = [];
@@ -232,14 +268,12 @@ export async function startTopology(
     '--network-alias', 'pg', ...labels, '-e', 'POSTGRES_USER=peakpass', '-e', 'POSTGRES_PASSWORD',
     '-e', 'POSTGRES_DB=peakpass', '-p', `127.0.0.1:${pgPort}:5432`, 'postgres:16-alpine',
     '-c', 'track_commit_timestamp=on');
-  created.push(pgId);
   names.set(pgId, 'pg');
   const redisPort = await freePort();
   const redisId = await docker('run', '-d', '--name', `${prefix}-redis`, '--network', prefix,
     '--network-alias', 'redis', ...labels, '-p', `127.0.0.1:${redisPort}:6379`, 'redis:7-alpine',
     'redis-server', '--save', '', '--appendonly', 'no', '--maxmemory', '256mb',
     '--maxmemory-policy', 'noeviction');
-  created.push(redisId);
   names.set(redisId, 'redis');
 
   const newPool = () => {
@@ -297,7 +331,6 @@ export async function startTopology(
     const id = await docker('run', '-d', '--name', name, '--network', prefix, ...labels,
       '-p', `127.0.0.1:${port}:3000`,
       ...containerEnv({ ENABLE_ADMISSION: String(spec.admission), ...spec.env }), image);
-    created.push(id);
     names.set(id, `app${index + 1}`);
     apps.push({ index, id, name, url: `http://127.0.0.1:${port}`, admission: spec.admission });
   }
@@ -406,7 +439,10 @@ export async function startTopology(
     });
   }
 
-  /** One logical request, repeated with the same identity while its outcome is unknown. */
+  /**
+   * One logical request, repeated with the same identity while its outcome is unknown. A 500 is
+   * not an outage answer of an admission path: it ends the request, so that the scenario sees it.
+   */
   async function decided(
     send: (attempt: number) => Promise<Answer>,
     deadlineMs = 60000,
@@ -419,7 +455,7 @@ export async function startTopology(
       const unknown =
         answer.status === 0 ||
         answer.status === 429 ||
-        answer.status >= 500 ||
+        answer.status > 500 ||
         (answer.status === 409 && answer.code === 'ADMISSION_IN_PROGRESS');
       if (!unknown || Date.now() >= end) return { final: answer, attempts };
       await sleep(Math.max(Number(answer.body?.nextPollAfterMs) || 0, Math.min(250 * 2 ** attempt, 2000)));
@@ -583,21 +619,23 @@ export async function startTopology(
    * this session. `granted` resolves once PostgreSQL grants them, which may be after a wait.
    */
   function holdGate(eventId: string) {
-    let client: PoolClient | null = null;
-    const granted = (async () => {
-      client = await pool.connect();
+    let released = false;
+    const connected = pool.connect();
+    const granted = connected.then(async (client) => {
       await client.query('BEGIN');
       await readAdmissionPolicy(client, eventId, 'shared');
-    })();
+    });
     granted.catch(() => undefined);
     return {
       granted,
       async release() {
-        await granted.catch(() => undefined);
-        if (!client) return;
-        await client.query('ROLLBACK').catch(() => undefined);
-        client.release();
-        client = null;
+        const client: PoolClient | null = await connected.catch(() => null);
+        if (!client || released) return;
+        released = true;
+        const settled = await Promise.race([granted.then(() => true, () => true), sleep(0).then(() => false)]);
+        if (settled) await client.query('ROLLBACK').catch(() => undefined);
+        // A holder that still waits for the gate is ended together with its connection.
+        client.release(!settled);
       },
     };
   }
@@ -622,9 +660,9 @@ export async function startTopology(
       `a statement like ${queryLike} to be held`,
       50,
     );
-  /** The server log of PostgreSQL, where its own timers report what they ended. */
-  const pgLog = async () => {
-    const { stdout, stderr } = await run('docker', ['logs', pgId], {
+  /** The server log of PostgreSQL since an instant, where its own timers report what they ended. */
+  const pgLog = async (since: Date) => {
+    const { stdout, stderr } = await run('docker', ['logs', '--since', since.toISOString(), pgId], {
       encoding: 'utf8',
       windowsHide: true,
       maxBuffer: 256 * 1024 * 1024,
@@ -679,22 +717,57 @@ export async function startTopology(
     }
     return { ...replay, incomplete };
   }
-  /** Marks the start of a scenario: `verify` reports the log violations from here on. */
-  let since = 0;
-  async function begin(name: string) {
-    since = await redisNow();
+  /** Names the scenario in the notes. */
+  function begin(name: string) {
     note('scenario', { name });
   }
   /**
-   * The two checks every scenario ends with: the final SQL and the complete transition log. The
-   * log is replayed from its beginning, and the violations of earlier scenarios stay theirs.
+   * The ledger of every published epoch against its Redis entries (contract §5): a slot was
+   * returned for a durable reason, and a durable result has its entry. Read twice when something
+   * does not fit, so that a result on its way from PostgreSQL to Redis is not taken for a loss.
    */
+  async function ledgerProblems() {
+    const read = async () => {
+      const problems: string[] = [];
+      for await (const key of redis.scanIterator({ MATCH: 'peakpass:admission:*:control', COUNT: 100 })) {
+        const eventId = key.slice('peakpass:admission:'.length, -':control'.length);
+        const current = await control(eventId);
+        if (current?.mode !== 'ready') continue;
+        const { rows } = await pool.query(
+          `SELECT admission_id AS "admissionId", outcome, COALESCE(reservation_id, order_id) AS "targetId",
+            error_code AS "errorCode" FROM admission_results WHERE event_id = $1 AND epoch = $2`,
+          [eventId, current.epoch],
+        );
+        // The hash carries the sentinel field of the namespace next to the entries.
+        const entries = Object.entries(
+          await redis.hGetAll(`peakpass:admission:${eventId}:${current.epoch}:entries`),
+        )
+          .filter(([field]) => field !== '__')
+          .map(([, raw]) => JSON.parse(raw));
+        problems.push(...ledgerMismatches(rows, entries).map((problem) => `${eventId}: ${problem}`));
+      }
+      return problems;
+    };
+    const first = await read();
+    if (!first.length) return first;
+    await sleep(1000);
+    return read();
+  }
+  /**
+   * The checks every scenario ends with: the final SQL, the complete transition log and the
+   * ledger against Redis. The log is replayed from its beginning; a violation is reported once,
+   * by the first `verify` that runs after it.
+   */
+  let checked = 0;
   async function verify(ignore: string[] = [], ignoreRules: string[] = []) {
+    const from = checked;
+    checked = await redisNow();
     expect(await violations(ignore)).toEqual([]);
     const log = await transitions();
     expect(log.incomplete).toEqual([]);
+    expect(await ledgerProblems()).toEqual([]);
     expect(
-      log.violations.filter((violation) => violation.time >= since && !ignoreRules.includes(violation.rule)),
+      log.violations.filter((violation) => violation.time >= from && !ignoreRules.includes(violation.rule)),
     ).toEqual([]);
     return log;
   }
@@ -747,14 +820,28 @@ export async function startTopology(
   async function passGate(eventId: string, current: ReturnType<typeof holdGate>) {
     const waiting = await advisoryWaiters();
     const queued = holdGate(eventId);
-    await Promise.race([
-      queued.granted,
-      until(async () => (await advisoryWaiters()) > waiting, 10000, 'the next gate holder to queue', 20),
-    ]);
-    await current.release();
-    await queued.granted;
+    try {
+      await Promise.race([
+        queued.granted,
+        until(async () => (await advisoryWaiters()) > waiting, 10000, 'the next gate holder to queue', 20),
+      ]);
+      await current.release();
+      await queued.granted;
+    } catch (error) {
+      // A gate that was never handed on is not left held by a session nobody releases.
+      await queued.release();
+      throw error;
+    }
     return queued;
   }
+  /** When Redis took the entry out of the slots in use, on Redis' clock, or null if it never did. */
+  const freedAt = (eventId: string, admission: AdmissionRef) =>
+    monitor.entries.find(
+      (logged) =>
+        logged.args[0]?.toUpperCase() === 'ZREM' &&
+        logged.args[1] === `peakpass:admission:${eventId}:${admission.admissionEpoch}:active` &&
+        logged.args.includes(admission.admissionId),
+    )?.time ?? null;
   const entry = async (eventId: string, admission: AdmissionRef): Promise<Json | null> => {
     const raw = await redis.hGet(
       `peakpass:admission:${eventId}:${admission.admissionEpoch}:entries`,
@@ -794,8 +881,10 @@ export async function startTopology(
     unpause: () => fault('unpause', redisId),
     async stop() {
       await redis.disconnect().catch(() => undefined);
-      monitor.detach();
+      // The capture ends with the server, so that every command it still ran is in the log.
+      monitor.expectEnd();
       await fault('stop', redisId, '-t', '0');
+      monitor.detach();
     },
     /** Starts the stopped server. The log is attached before any application can write to it. */
     async start() {
@@ -821,14 +910,11 @@ export async function startTopology(
     }, 60000, 'PostgreSQL to answer again', 200);
   };
   const pgFaults = {
-    /** A fast shutdown and a start: every session is ended with an administrator-command error. */
-    async restart() {
-      await fault('restart', pgId, '-t', '20');
-      await pgBack();
-    },
-    /** SIGKILL and a start: sessions end without a word and the server recovers from its log. */
-    async crash() {
-      await fault('kill', pgId, '--signal', 'KILL');
+    /** A fast shutdown: every session is ended with an administrator-command error. */
+    stop: () => fault('stop', pgId, '-t', '20'),
+    /** SIGKILL: sessions end without a word, and the server recovers from its log when started. */
+    kill: () => fault('kill', pgId, '--signal', 'KILL'),
+    async start() {
       await fault('start', pgId);
       await pgBack();
     },
@@ -857,26 +943,27 @@ export async function startTopology(
   };
 
   async function destroy(suite: string) {
-    monitor.detach();
-    if (EVIDENCE) {
-      mkdirSync(EVIDENCE, { recursive: true });
-      const lines = (rows: Json[]) => rows.map((row) => JSON.stringify(row)).join('\n') + '\n';
-      writeFileSync(join(EVIDENCE, `${suite}-notes.jsonl`), lines(notes));
-      writeFileSync(join(EVIDENCE, `${suite}-requests.jsonl`), lines(requests));
-      writeFileSync(join(EVIDENCE, `${suite}-transitions.log`), monitor.lines.join('\n') + '\n');
-      for (const app of apps)
-        writeFileSync(
-          join(EVIDENCE, `${suite}-${names.get(app.id)}.log`),
-          await docker('logs', app.id).catch((error) => String(error)),
-        );
+    try {
+      monitor.detach();
+      if (EVIDENCE) {
+        mkdirSync(EVIDENCE, { recursive: true });
+        const lines = (rows: Json[]) => rows.map((row) => JSON.stringify(row)).join('\n') + '\n';
+        writeFileSync(join(EVIDENCE, `${suite}-notes.jsonl`), lines(notes));
+        writeFileSync(join(EVIDENCE, `${suite}-requests.jsonl`), lines(requests));
+        writeFileSync(join(EVIDENCE, `${suite}-transitions.log`), monitor.lines.join('\n') + '\n');
+        for (const app of apps)
+          writeFileSync(
+            join(EVIDENCE, `${suite}-${names.get(app.id)}.log`),
+            await docker('logs', app.id).catch((error) => String(error)),
+          );
+      }
+    } finally {
+      // The containers go first and whatever else fails: nothing of a run may stay behind.
+      await removeRun(prefix);
+      await redis.disconnect().catch(() => undefined);
+      // A client that was never returned would keep `end` waiting; its server is gone by now.
+      await Promise.race([pool.end().catch(() => undefined), sleep(5000)]);
     }
-    await redis.disconnect().catch(() => undefined);
-    await pool.end().catch(() => undefined);
-    for (const id of created) {
-      const owner = await docker('inspect', '--format', '{{index .Config.Labels "peakpass.fault-run"}}', id).catch(() => '');
-      if (owner === prefix) await docker('rm', '-f', '-v', id).catch(() => undefined);
-    }
-    await docker('network', 'rm', prefix).catch(() => undefined);
   }
 
   return {
@@ -914,6 +1001,7 @@ export async function startTopology(
     release,
     gateWaiters,
     passGate,
+    freedAt,
     entry,
     results,
     seats,

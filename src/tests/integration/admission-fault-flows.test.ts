@@ -352,7 +352,7 @@ faultSuite('admission lifecycle and existing flows across processes (real contai
     const paid = await t.settle(first, paying.body.order.id, 'settled', key, provider);
     expect(paid.body).toMatchObject({ order: { status: 'paid' }, duplicate: false });
     await t.quiet(eventId);
-    expect(await t.violations()).toEqual([]);
+    await t.verify();
     await t.redisFaults.stop();
     await t.redisFaults.start();
     await Promise.all(t.apps.map((app) => t.ready(app)));
@@ -364,7 +364,9 @@ faultSuite('admission lifecycle and existing flows across processes (real contai
     expect(replay.body!.tickets).toHaveLength(2);
     const reused = await t.settle(first, paying.body.order.id, 'settled', key, `p7-${randomUUID()}`);
     expect(reused.status).toBe(409);
-    expect(await t.violations()).toEqual([]);
+    // The restart cost the queue one generation, and the log of it is complete.
+    await until(async () => (await t.control(eventId))?.mode === 'ready', 30000, 'the namespace after the restart');
+    await t.verify();
   });
 
   it('L4c the five-minute reservation sweeper of the product returns the seats of an expired reservation', async () => {
@@ -379,6 +381,6 @@ faultSuite('admission lifecycle and existing flows across processes (real contai
     );
     // The reservation holds nothing any more and the seat equation still adds up: its two seats
     // came back exactly once.
-    expect(await t.violations()).toEqual([]);
+    await t.verify();
   });
 });

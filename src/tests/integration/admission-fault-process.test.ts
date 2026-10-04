@@ -383,6 +383,8 @@ faultSuite('admission across application processes and process failures (real co
       t.note('K2 closed', { afterDeadlineMs: new Date(closed.committedAt).getTime() - deadline });
       await until(async () => (await t.entry(eventId, admission))?.state === 'expired', 10000, 'the slot to be returned');
       expect(await t.slots(eventId)).toBe(0);
+      // The slot went back only after that row was committed.
+      expect(t.freedAt(eventId, admission)).toBeGreaterThanOrEqual(new Date(closed.committedAt).getTime());
       // The writer that comes back late reads the closed result and occupies nothing.
       const late = await buyer.reserve(eventId, admission, 1, [second]);
       expect(late.final).toMatchObject({ status: 410, code: 'ADMISSION_EXPIRED' });
@@ -443,6 +445,7 @@ faultSuite('admission across application processes and process failures (real co
     const [first, second] = t.apps;
     const { buyer, admission, body } = await admitted(eventId, second);
     const before = await t.seats(eventId);
+    const began = await t.pgNow();
     // Two held statements keep the transaction alive past the first seconds of the claim.
     const removeFirst = await t.slow('reservations', buyer.userId, 4);
     const removeSecond = await t.slow('admission_results', buyer.userId, 4);
@@ -463,10 +466,12 @@ faultSuite('admission across application processes and process failures (real co
         expect(await t.slots(eventId)).toBe(1);
         // idle_in_transaction_session_timeout fires by its own timer and PostgreSQL ends the session.
         await until(async () => (await t.session(pid)) === null, 30000, 'PostgreSQL to end the idle session', 250);
-        expect(await t.pgLog()).toContain('terminating connection due to idle-in-transaction timeout');
-        // Only now the reclaimer can decide: it closes the claim and returns the slot.
+        expect(await t.pgLog(began)).toContain('terminating connection due to idle-in-transaction timeout');
+        // Only now the reclaimer can decide: it closes the claim and then returns the slot.
         const closed = await until(() => resultOf(eventId, admission), 20000, 'the claim to be closed', 250);
         expect(closed).toMatchObject({ outcome: 'closed', errorCode: 'ADMISSION_EXPIRED' });
+        await until(async () => (await t.entry(eventId, admission))?.state === 'expired', 10000, 'the slot to be returned');
+        expect(t.freedAt(eventId, admission)).toBeGreaterThanOrEqual(new Date(closed.committedAt).getTime());
       } finally {
         await t.appFaults.unpause(first);
       }
@@ -544,6 +549,7 @@ faultSuite('admission across application processes and process failures (real co
     const [first] = t.apps;
     const { buyer, admission, body } = await admitted(eventId, first);
     const before = await t.seats(eventId);
+    const began = await t.pgNow();
     // Synthetic stimulus: the INSERT sleeps for 6 s. The 5 s bound that ends it is PostgreSQL's.
     const remove = await t.slow('reservations', buyer.userId, 6);
     try {
@@ -552,7 +558,7 @@ faultSuite('admission across application processes and process failures (real co
       expect(answer).toMatchObject({ status: 503, code: 'ADMISSION_UNAVAILABLE' });
       expect(answer.ms).toBeGreaterThanOrEqual(4900);
       expect(answer.ms).toBeLessThan(5900);
-      expect(await t.pgLog()).toContain('canceling statement due to statement timeout');
+      expect(await t.pgLog(began)).toContain('canceling statement due to statement timeout');
       expect(await resultOf(eventId, admission)).toBeUndefined();
       expect(await t.seats(eventId)).toMatchObject({ available: before.available, reservations: before.reservations });
       expect(await t.entry(eventId, admission)).toMatchObject({ state: 'admitted', phase: 'processing' });
@@ -572,21 +578,30 @@ faultSuite('admission across application processes and process failures (real co
     const buyers = [await admitted(eventId, first), await admitted(eventId, second), await admitted(eventId, first)];
     const startedAt = await Promise.all(t.apps.map((app) => t.appFaults.startedAt(app)));
     const remove = await t.slow('reservations', buyers[0].buyer.userId, 3);
+    let away = false;
     try {
       const inflight = send(buyers[0].buyer, first, buyers[0].body);
       await t.sleeping('%INSERT INTO reservations%');
-      // While PostgreSQL is away the queue still answers: status needs Redis only.
-      const [, during] = await Promise.all([
-        t.pgFaults[kind](),
-        Promise.all([buyers[1].buyer.status(eventId, second), send(buyers[1].buyer, second, buyers[1].body)]),
-      ]);
+      await (kind === 'restart' ? t.pgFaults.stop() : t.pgFaults.kill());
+      away = true;
+      // PostgreSQL is away now: the test's own connection is refused as well.
+      await expect(t.pool.query('SELECT 1')).rejects.toBeDefined();
       const answer = await inflight;
-      t.note(`T2 ${kind}`, { inflight: brief(answer), status: brief(during[0]), purchase: brief(during[1]) });
+      // While it is away the queue still answers, because the status needs Redis only, and a
+      // purchase is told to come back.
+      const [status, purchase] = await Promise.all([
+        buyers[1].buyer.status(eventId, second),
+        send(buyers[1].buyer, second, buyers[1].body),
+      ]);
+      await t.pgFaults.start();
+      away = false;
+      t.note(`T2 ${kind}`, { inflight: brief(answer), status: brief(status), purchase: brief(purchase) });
       // An outage is answered 503 and the request keeps its identity (contract §3, §5).
       expect(answer).toMatchObject({ status: 503, code: 'ADMISSION_UNAVAILABLE' });
-      expect(during[0].status).toBe(200);
-      expect([201, 503]).toContain(during[1].status);
+      expect(status.status).toBe(200);
+      expect(purchase).toMatchObject({ status: 503, code: 'ADMISSION_UNAVAILABLE' });
     } finally {
+      if (away) await t.pgFaults.start();
       await remove();
     }
     // The same requests, repeated, land exactly once each.

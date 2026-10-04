@@ -116,6 +116,29 @@ describe('replay of the admission transition log', () => {
     ).toEqual([]);
   });
 
+  it('counts a promotion from the slot it takes, also when the product recorded no window entry', () => {
+    // The instant of a promotion is the score of its slot minus the admission TTL. A product
+    // that promoted without counting must not pass because its own count is what was read.
+    const uncounted = (id: string, now: number) => promote(id, now).slice(0, 3);
+    expect(
+      rules([
+        ...publish('1', EPOCH, T0),
+        ...join('a', 1),
+        ...join('b', 2),
+        ...join('c', 3),
+        ...uncounted('a', T0 + 1000),
+        ...uncounted('b', T0 + 1010),
+        ...uncounted('c', T0 + 1999),
+      ]),
+    ).toEqual(['rate']);
+  });
+
+  it('reports an entry that takes a slot without having left the waiting line', () => {
+    expect(
+      rules([...publish('1', EPOCH, T0), lua(T0 + 1000, 'ZADD', key('active'), String(T0 + 31000), 'ghost')]),
+    ).toEqual(['fifo']);
+  });
+
   it('reports an entry that is promoted a second time', () => {
     expect(
       rules([

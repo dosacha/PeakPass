@@ -274,5 +274,13 @@ describe('final SQL of admission-v1 §8', () => {
         await seats(c, ids, 9);
       }),
     ).toEqual(['payment_checkout_record']);
+    // The checkout record keeps the key as the client sent it; the order stores it as a UUID.
+    expect(
+      await checks(async (c, ids) => {
+        const created = await order(c, ids, 1);
+        await c.query('UPDATE payment_records SET idempotency_key = upper(idempotency_key) WHERE order_id = $1', [created.id]);
+        await seats(c, ids, 9);
+      }),
+    ).toEqual([]);
   });
 });
