@@ -187,6 +187,41 @@ describe('admission actual authenticated HTTP and epoch lifecycle', () => {
     expect(BigInt(after.generation)).toBe(BigInt(before.generation) + 1n);
     expect(after.epoch).not.toBe(before.epoch);
   });
+  it('does not open a recovering generation whose namespace was written after the connection was replaced', async () => {
+    const { admissionKeys } = await import('@/infra/redis/admission');
+    const before = (await service.control(eventId))!;
+    await redis.del(admissionKeys(eventId, before.epoch).slice(0, 12));
+    // Injection: the connection on which the process was read is replaced before the write that
+    // follows the read. The recovery yields nowhere between the two, so only a test places it there.
+    const read = service as unknown as { currentProcess(): Promise<unknown> };
+    const currentProcess = read.currentProcess.bind(service);
+    let reads = 0;
+    const spy = jest.spyOn(read, 'currentProcess').mockImplementation(async () => {
+      const result = await currentProcess();
+      if (++reads === 2) {
+        const id = await redis.clientId();
+        await redis.sendCommand(['CLIENT', 'KILL', 'ID', String(id), 'SKIPME', 'no']).catch(() => undefined);
+        for (let i = 0; i < 100 && !(redis.isReady && (await redis.clientId().catch(() => id)) !== id); i++)
+          await new Promise((resolve) => setTimeout(resolve, 50));
+      }
+      return result;
+    });
+    try {
+      await expect(service.recover(eventId, null)).rejects.toMatchObject({ code: 'ADMISSION_RECOVERING' });
+      expect(reads).toBe(2);
+      const phase = await pool.query('SELECT phase FROM admission_events WHERE event_id=$1', [eventId]);
+      expect(phase.rows[0].phase).toBe('recovering');
+      expect((await service.control(eventId))?.mode).toBe('initializing');
+    } finally {
+      spy.mockRestore();
+      await service.verifyEnvironment();
+    }
+    // The same process after all: the next attempt adopts what was written and publishes it.
+    await service.maintain();
+    const after = (await service.control(eventId))!;
+    expect(after.mode).toBe('ready');
+    expect(BigInt(after.generation)).toBe(BigInt(before.generation) + 1n);
+  }, 30000);
   it('is ready again after a recovery during which the connection to the same Redis process was replaced', async () => {
     const first = await pool.connect();
     let recovery: Promise<void> | undefined;
