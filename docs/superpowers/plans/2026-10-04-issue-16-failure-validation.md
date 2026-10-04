@@ -1,0 +1,132 @@
+# P7 real failure, concurrency and invariant validation plan
+
+> **For agentic workers:** Use superpowers:executing-plans inline. Main implements; any agent investigates or reviews read-only.
+
+**Goal:** Show, at the real integration boundary, that the admission and purchase contract of P3–P6 holds under real Redis, PostgreSQL and process failures, under several application processes, and through the browser, and hand P8 an integrated SHA whose quantity and capacity invariants were checked.
+
+**Architecture:** No product change unless a defect is confirmed. The product runs as containers of the production image built from this branch, next to an owned PostgreSQL and an owned Redis on one Docker network; Jest on the host drives them over HTTP and with the `docker` CLI (`pause`, `unpause`, `stop`, `start`, `restart`, `kill`). Two checks decide every scenario: one SQL file that returns only violating rows, and a replay of the Redis `MONITOR` stream that computes capacity after every command and the promotion count of every rolling second.
+
+**Tech Stack:** TypeScript, existing Jest with ts-jest, node-postgres, node-redis, Docker CLI through `child_process`, PostgreSQL 16, Redis 7, the installed `agent-browser` CLI for the browser checks. No new dependency.
+
+**Spec:** ../../ADMISSION_CONTRACT.md (admission-v1, accepted `87959cd84dbb231caa88fee2e4ad4bcd84115246`, LF blob SHA256 `e22be4df9910811eba552f630b43170ba0cf0c8d953a54dc5a3cea34c0dcf3d1`) §4–§8; ../../ISSUE_13_VALIDATION.md, ../../ISSUE_14_VALIDATION.md and ../../ISSUE_15_VALIDATION.md ("Not verified", "Limits kept or introduced", "Successor notes"); Issue #16. The design was explained in chat on 2026-10-04 and the user answered "no objection, proceed as recommended"; the decisions below are that answer.
+
+## Decisions (user, 2026-10-04)
+
+- D1 The product runs as containers of the production image on a Docker network with an owned PostgreSQL and Redis. A host process on Windows can be killed but cannot be sent SIGTERM or be suspended, so graceful shutdown and a stalled process need Linux containers.
+- D2 The new fault suites run only when `ADMISSION_FAULT_IMAGE` names an image; without it they are skipped. CI does not change, so the default run reports more skipped tests.
+- D3 The guard of the ten fixed-port Redis-outage tests is parameterized (one shared helper) and they run on an owned Redis with an explicit host port chosen at run time. Their assertions do not change.
+- D4 The Redis transition log is a replay of the `MONITOR` stream of the owned Redis, which includes the commands Lua runs. No product change.
+- D5 Stimuli are allowed in the owned test database only: a `pg_sleep` trigger that slows one marked request, the event advisory gate held by the test session, and `track_commit_timestamp=on`. Evidence made with them is recorded as "real timer or process failure, synthetic stimulus".
+- D6 Browser scope: B1–B8 below.
+- D7 The purchase limit on `/reservations` stays as it is. P7 records how it behaves with real lost answers and what P8 must fix in advance.
+- D8 A defect is a broken invariant, an answer code that differs from the contract table, a leaked 500, or a process that ends abnormally. Lower availability, delay and a needed retry of the same request are observations and limits; that includes the frequency of exhausted serialization retries, a coordinator that stalls while holding the gate, and the missing recovery of an unknown result in steps 4 and 5 of the page.
+
+Defaults applied without objection: branch `claude/issue-16-p7-failure-validation`; plan, `docs/ISSUE_16_VALIDATION.md` and evidence under `test-results/admission-v1/` follow the P4–P6 convention; local commits per task with the trailer of the P6 branch (no model name); the review scope is reported before any push; model identifiers of reviewers go to the chat report, not into the repository; the fault topology raises the purchase limit (every buyer is another user) and the browser environment keeps 5 per minute with gaps between scenarios; the five-minute reservation sweeper is watched once in real time; a defect is reported before product code is changed; `docker-compose.flash-sale.yml` is P8's and is not touched.
+
+## Global constraints
+
+- Contract text and every file under `src/` outside `src/tests/` do not change unless a defect is confirmed, reported and its fix approved. No new dependency. No CI change. No push, PR, merge or deployment.
+- Only resources created by this task are started, stopped, paused, killed or removed. Each carries the label `peakpass.task=peakpass-p7-20261004`. `peakpass-wave3-0928-*`, the Compose containers and every other container and image stay untouched.
+- One Redis serves one PostgreSQL database. Redis runs with `--save "" --appendonly no --maxmemory-policy noeviction` on its command line, so the profile survives a restart. A fixture that publishes a namespace for an event without a protected policy never shares a Redis with a running scheduler.
+- A host port is chosen at run time by asking the operating system for a free one and is then published explicitly, so it survives stop and start. No port number is written into the source tree.
+- Protection is switched by the contract's explicit transition: exclusive event gate, real `UPDATE admission_events`. At most one event is protected per database.
+- A purchase whose outcome is unknown (no answer, 429, 5xx, 409 `ADMISSION_IN_PROGRESS`) is repeated with the same body, the same admission and the same key, and never with another identity.
+- Orderings are taken from PostgreSQL commit timestamps, PostgreSQL `clock_timestamp()` and Redis `TIME`, all inside the same Docker VM, never from the Windows host clock.
+- The sampled maximum of a counter is never evidence of a bound. Capacity and rate are checked on the full transition log, and a log counts only when its capture began on an empty admission keyspace and its replayed end state equals the keys Redis holds.
+- Every record names its evidence kind: real (container, process, TCP, timer, browser), synthetic stimulus (gate, trigger, SQL-made users, SQL activation), injected (proxy), stored earlier result.
+- No number is reported that was not measured. P7 claims no throughput, latency or polling result; counts observed in one local run are labelled as observations.
+- Passwords, tokens and secrets are generated at run time, kept in files outside the repository or in memory, and never printed or archived.
+
+## Review focus
+
+- A scenario that passes although its fault never happened: each one first shows the fault (container state, a refused or unanswered request, a terminated session) and only then asserts recovery.
+- An incomplete transition log read as a clean one: a capture that began with admission keys present, or whose end state differs from Redis, fails the scenario instead of passing it.
+- A retry that changes identity: the buyer of the fixture must not send another body, admission or key after an unknown outcome, or the suite would hide exactly the duplicate it looks for.
+- A stimulus that outlives its scenario: every trigger and every held gate is removed in `finally`, and a suite that fails still removes its containers.
+- A slot returned without a durable reason: after quiescence every admitted entry is consumed, expired or cancelled, and each `closed` or consumed ledger row has its Redis entry.
+
+## Scenario catalogue
+
+Redis: R1 pause and unpause; R2 stop and start (state lost); R3 restart; R4 `FLUSHALL`; R5 a coordinator killed at each of three reset stages held by the gate; R6 repeated loss with pauses, generation monotonic.
+Processes: M1 buyers on three applications (two schedulers, one instance with the feature off); M2 one admission used on two instances at once; K1 kill inside the transaction, retry within the deadline; K2 kill, no retry, the 15 s deadline in real time; K3 death after COMMIT and before the answer (Redis paused, application killed); K4 an application stalled across the idle timeout and the claim deadline; K5 SIGTERM with a purchase in flight.
+Database: T1 `statement_timeout` by its own timer; T2 PostgreSQL restart with purchases in flight; T3 eight admitted buyers at the same moment.
+Lifecycle and existing flows: L1 activation while purchases arrive; L2 release with writers attached; L3 event deletion with writers attached; L4 reservation expiry, order deadline against settlement with several sweepers, late settlement, failed payment and callback replay after a Redis restart, all on a protected event; L5 authentication, foreign admission and direct endpoint matrix across instances.
+Browser: B1 join to ticket; B2 Redis restart while waiting and while admitted; B3 Redis pause during a purchase; B4 application death after commit, then restart; B5 SIGTERM and restart while waiting; B6 real purchase errors 400, 409 mismatch, 409 in progress, 410 reset, 410 cancelled and sold out; B7 checkout answer lost, same tab and after a reload; B8 user A → B → A across a Redis restart.
+
+## Task 0: Baseline
+
+Outside the repository: `run/setup.mjs` (owned containers, env files), run logs.
+
+- [ ] Re-check origin/main, the contract hash and the issue gates. `npm ci`. Owned PostgreSQL (`track_commit_timestamp=on`) and Redis instances with the task label and explicit host ports; credentials in files outside the repository.
+- [ ] Record build, typecheck, lint, unit, full integration, harness and callback results at the base before any change, and compare them with the stored P6 result (unit 228, integration 346 passed / 15 skipped, harness 29).
+
+## Task 1: Harness
+
+Files: new `src/tests/helpers/admission-transition-log.ts`, new `src/tests/unit/admission-transition-log.test.ts`, new `src/tests/integration/admission-final.sql`, new `src/tests/integration/admission-fault-fixture.ts`, new `src/tests/integration/admission-fault-process.test.ts` (first scenario only).
+
+Interfaces:
+
+- `parseMonitorLine(line: string): MonitorEntry | null` with `MonitorEntry = { time: number; source: string; args: string[] }`; `source` is `lua` for a command a script ran.
+- `replayAdmissionLog(entries: MonitorEntry[], profile = { rate: 2, capacity: 8 }): Replay` with `Replay = { violations: Array<{ rule, detail, time }>, promotions: number, namespaces: Map<string, { waiting, active, claims }>, controls: Array<{ eventId, generation, epoch, mode, time }> }` and `rule` one of `capacity | rate | repromotion | fifo | claim-without-slot | generation`.
+- `admission-final.sql`: one statement, no parameter, rows `(check_name, event_id, detail)`; no row means every check holds.
+- `admission-fault-fixture.ts`: `faultSuite` (`describe` or `describe.skip` by `ADMISSION_FAULT_IMAGE`); `startTopology(options)` returning the owned network, PostgreSQL, Redis and application containers with `pool`, `redis`, `apps`, `docker()`, `event()`, `protect()`, `buyer()`, `holdGate()`, `slow()`, `violations()`, `transitions()` and `destroy()`.
+
+- [ ] Failing unit tests for the replay: nine entries in `active` is a `capacity` violation and eight is none; three promotions inside one rolling second is a `rate` violation and two is none; an entry promoted twice; a promotion that leaves a lower sequence waiting; a claim for an entry without a slot; a `ready` publication of a lower generation; `UNLINK` and `FLUSHALL` clear the state; a script body with quotes and escapes parses.
+- [ ] Implement the parser and the replay; the unit file passes.
+- [ ] The final SQL file with the checks of contract §8: bounds, the seat equation, tickets against orders, consumed results against their targets, occupations of a protected event without a result, payment records against callback keys.
+- [ ] The fixture: topology, migrations through the image, `MONITOR` capture on a raw socket that reads the admission keys and subscribes in one pipeline, buyers with the same-identity retry rule, gate and trigger stimuli, cleanup by label.
+- [ ] Build the image. M1 passes both checks; a capture that starts late fails as incomplete.
+
+## Task 2: The ten fixed-port Redis-outage tests
+
+Files: new `src/tests/integration/redis-outage-fixture.ts`; `redis-recovery.test.ts`, `order-expiration-http.test.ts`, `order-sweeper.test.ts` (guards only).
+
+Interface: `ownedRedis(): { name: string; id: string }` throws unless `WAVE3_REDIS_DESTRUCTIVE=1`, `WAVE3_REDIS_CONTAINER` and `WAVE3_REDIS_CONTAINER_ID` are set, `docker inspect` returns that id, the container carries the label `peakpass.redis-outage=owned`, and its explicit host port of `6379/tcp` on `127.0.0.1` equals `REDIS_PORT`.
+
+- [ ] Replace the four literal checks by the helper; nothing else changes in those files.
+- [ ] Run the ten cases on the owned Redis. A failure is classified (test rot or product regression) before anything is changed.
+
+## Task 3: Real Redis failures and reset stages
+
+Files: new `src/tests/integration/admission-fault-redis.test.ts`.
+
+- [ ] R1–R4 with waiting users, admitted users, one purchase in flight and committed reservations: the answers of the three path groups during the outage, before the namespace is published and after it; generation unchanged after a pause and exactly one higher after a loss; old admissions 410; the committed request replays; no old-epoch result commits after the reset.
+- [ ] R5 at the three stage boundaries and R6.
+
+## Task 4: Processes and database
+
+Files: `src/tests/integration/admission-fault-process.test.ts`.
+
+- [ ] M1, M2, K1, K2, K3, K4, K5.
+- [ ] T1, T2, T3.
+
+## Task 5: Lifecycle and existing flows
+
+Files: new `src/tests/integration/admission-fault-flows.test.ts`.
+
+- [ ] L1, L2, L3, L4, L5.
+
+## Task 6: Production image
+
+- [ ] `production-image-check.mjs` with the feature off and on, on empty databases; a restart on a database at 013 with rows applies nothing and changes no row; the five Docker lifecycle cases with `WAVE4_TEST_IMAGE`.
+
+## Task 7: Browser
+
+Outside the repository: the proxy, the filler-user script, the scenario scripts and the environment files, adapted from the P6 archive.
+
+- [ ] Two application containers that differ in the demo user, the page served cross-origin, one protected event.
+- [ ] B1–B8. For each: the page trace, the request list without headers, the application log extract and the final SQL.
+
+## Task 8: Regression, evidence and handoff
+
+Files: new `docs/ISSUE_16_VALIDATION.md`, `docs/README.md`, `test-results/admission-v1/p7-*.{json,zip}`.
+
+- [ ] Build, typecheck, lint, unit, full integration with every opt-in, harness and callback checks. The fault suites three times in a row.
+- [ ] Sensitivity: three or four product branches changed one at a time in a throwaway image, the named fault test fails each time, the source is restored.
+- [ ] Record commands, results, evidence kinds, what stays unverified, limits and the notes for P8. Re-check the consumed inputs. Commit locally; report the review scope; no push.
+
+## Execution ledger
+
+- Base `5016b8c02bb2631a468258d03a5529cbbe72f0ce` (origin/main rechecked 2026-10-04 by `git ls-remote`, no open PR among the phase branches). Contract blob `47cb6fbe4f0d84d437008a1981f16a929cc5732f`, SHA256 unchanged. P4 `4b8847e`/`51d331b`, P5 `e3fb7e2`/`9eca324` and P6 `621e937` are ancestors. Worktree `claude/issue-16-p7-failure-validation`, created with `--no-track`; the user's main checkout and every other worktree untouched.
+- Ruling: the user's "no objection, proceed as recommended" after the reviewed chat design is the execution instruction and approves the plan, `npm ci`, the owned resources and local commits per task, as in P5 and P6. The accepted contract and that design are the spec, so no separate spec or plan approval stage is added. Push, PR and independent review remain unapproved.
+- Ruling: the ledger is this section and the working files are in the run directory outside the repository, as in P5 and P6.
