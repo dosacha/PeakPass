@@ -1,6 +1,7 @@
 import { execFile } from 'child_process';
 import { promisify } from 'util';
 import { connect, createServer, Socket } from 'net';
+import { request as httpRequest } from 'http';
 import { createHmac, randomBytes, randomUUID } from 'crypto';
 import { mkdirSync, readFileSync, writeFileSync } from 'fs';
 import { join } from 'path';
@@ -314,11 +315,19 @@ export async function startTopology(
       headers?: Record<string, string>;
       timeoutMs?: number;
       user?: string;
+      /** A client that closes its connection after the answer instead of keeping it alive. */
+      closing?: boolean;
     } = {},
   ): Promise<Answer> {
     const began = performance.now();
     let status = 0;
     let body: Json | null = null;
+    if (request.closing) {
+      const answer = await closingRequest(app, method, path, request);
+      requests.push({ at: Date.now() - started, user: request.user ?? null, app: answer.app, method,
+        path, status: answer.status, code: answer.code, ms: answer.ms, closing: true });
+      return answer;
+    }
     try {
       const response = await fetch(app.url + path, {
         method,
@@ -351,6 +360,50 @@ export async function startTopology(
     requests.push({ at: Date.now() - started, user: request.user ?? null, app: answer.app, method,
       path, status, code: answer.code, ms: answer.ms });
     return answer;
+  }
+
+  /** One request on a connection of its own that is closed after the answer (`Connection: close`). */
+  function closingRequest(
+    app: AppBox,
+    method: string,
+    path: string,
+    request: { token?: string; body?: unknown; key?: string; timeoutMs?: number },
+  ): Promise<Answer> {
+    const began = performance.now();
+    return new Promise((resolve) => {
+      const done = (status: number, text = '') => {
+        let body: Json | null = null;
+        try {
+          body = text ? JSON.parse(text) : null;
+        } catch {
+          body = { raw: text.slice(0, 200) };
+        }
+        resolve({ status, code: body?.error?.code ?? null, body, app: app.index + 1, ms: Math.round(performance.now() - began) });
+      };
+      const outgoing = httpRequest(
+        app.url + path,
+        {
+          method,
+          agent: false,
+          timeout: request.timeoutMs ?? 10000,
+          headers: {
+            connection: 'close',
+            ...(request.body === undefined ? {} : { 'content-type': 'application/json' }),
+            ...(request.token ? { authorization: `Bearer ${request.token}` } : {}),
+            ...(request.key ? { 'idempotency-key': request.key } : {}),
+          },
+        },
+        (incoming) => {
+          let text = '';
+          incoming.setEncoding('utf8');
+          incoming.on('data', (chunk) => (text += chunk));
+          incoming.on('end', () => done(incoming.statusCode ?? 0, text));
+        },
+      );
+      outgoing.on('timeout', () => outgoing.destroy());
+      outgoing.on('error', () => done(0));
+      outgoing.end(request.body === undefined ? undefined : JSON.stringify(request.body));
+    });
   }
 
   /** One logical request, repeated with the same identity while its outcome is unknown. */
