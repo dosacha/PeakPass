@@ -17,15 +17,66 @@ import { createClient } from 'redis';
 import { analyzeRun } from './flash-sale-analysis.mjs';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
-export const REVISION = 'flash-sale-v2.6';
-const defaults = { users: 12, rate: 2, 'think-ms': 20, retries: 1, 'retry-delay-ms': 100, 'replay-every': 3, quantity: 2, 'pre-vus': 10, 'max-vus': 20, 'pool-max': 10, 'sample-ms': 250, 'warmup-seconds': 0, 'drain-seconds': 30, 'limiter-max': 1000000 };
+export const REVISION = 'flash-sale-v3.0';
+const defaults = { users: 12, rate: 2, 'think-ms': 20, retries: 1, 'retry-delay-ms': 100, 'replay-every': 3, quantity: 2, 'pre-vus': 10, 'max-vus': 20, 'pool-max': 10, 'sample-ms': 250, 'warmup-seconds': 0, 'drain-seconds': 30, 'limiter-max': 1000000, 'hidden-share': 0 };
+// The longest request of a journey is 10 s. A buyer starts nothing new this long before k6's drain ends.
+const CUTOFF_MARGIN_SECONDS = 15;
+
+// The transition of admission-v1 §6 with the statements of readAdmissionPolicy(client, eventId, 'exclusive')
+// in src/infra/postgres/admission-policy.ts. The product has no activation entry point; a check pins this copy.
+export const ACTIVATION = Object.freeze({
+  gate: 1347436869,
+  lock: 'SELECT pg_advisory_xact_lock($1::int,hashtext($2))',
+  exists: 'SELECT id FROM events WHERE id=$1',
+  ensure: `INSERT INTO admission_events(event_id,redis_namespace)
+    VALUES($1::uuid,'peakpass:admission:' || $1::uuid::text || ':') ON CONFLICT DO NOTHING`,
+  read: 'SELECT protected FROM admission_events WHERE event_id=$1 FOR UPDATE',
+  protect: 'UPDATE admission_events SET protected=true WHERE event_id=$1',
+});
+
+// admission_results references users, events, reservations and orders without cascade.
+export const CLEANUP = Object.freeze([
+  'DELETE FROM admission_results WHERE event_id=$1',
+  'DELETE FROM tickets WHERE event_id=$1',
+  'DELETE FROM payment_records WHERE order_id IN (SELECT id FROM orders WHERE event_id=$1)',
+  'DELETE FROM orders WHERE event_id=$1',
+  'DELETE FROM reservations WHERE event_id=$1',
+  'DELETE FROM events WHERE id=$1',
+]);
+
+// The rule of src/tests/helpers/admission-ledger.ts (canonical LF SHA256 below), ported because that
+// helper is TypeScript: the ledger rows of one epoch against its Redis entries. An entry whose claim is
+// still open (admitted and not idle) is not final and is skipped.
+export const LEDGER_RULE_SOURCE = '4b285ed2106a182ff53f87e607ffb4b31980171eb3886e3e249c25ba7f8c658d';
+export function ledgerMismatches(rows, entries) {
+  const problems = [];
+  const entryOf = new Map(entries.map(entry => [entry.admissionId, entry]));
+  const rowOf = new Map(rows.map(row => [row.admissionId, row]));
+  const open = entry => entry.state === 'admitted' && entry.phase !== 'idle';
+  for (const row of rows) {
+    const entry = entryOf.get(row.admissionId);
+    if (!entry) { problems.push(`ledger row ${row.admissionId} (${row.outcome}) has no Redis entry`); continue; }
+    if (open(entry)) continue;
+    const fits = row.outcome === 'closed' ? entry.state === 'expired' && (entry.reason ?? null) === row.errorCode
+      : entry.state === 'consumed' && (row.outcome === 'rejected' ? entry.outcome?.kind === 'rejected' && entry.outcome.code === row.errorCode
+        : entry.outcome?.kind === row.operation && entry.outcome.resourceId === row.targetId);
+    if (!fits) problems.push(`ledger row ${row.admissionId} (${row.outcome}) does not match its entry: ${entry.state}`);
+  }
+  for (const entry of entries) {
+    if (rowOf.has(entry.admissionId) || open(entry)) continue;
+    if (entry.state === 'consumed') problems.push(`entry ${entry.admissionId} is consumed without a ledger row`);
+    else if (entry.state === 'expired' && entry.fingerprint) problems.push(`entry ${entry.admissionId} was claimed and expired without a closed row`);
+    else if (entry.fingerprint) problems.push(`entry ${entry.admissionId} was claimed and is ${entry.state} without a ledger row`);
+  }
+  return problems;
+}
 
 export function parseOptions(args) {
-  const { values } = parseArgs({ args, options: Object.fromEntries([...Object.keys(defaults), 'stock', 'seats', 'run-id'].map(k => [k, { type: 'string' }])) });
+  const { values } = parseArgs({ args, options: { ...Object.fromEntries([...Object.keys(defaults), 'stock', 'seats', 'run-id', 'arm'].map(k => [k, { type: 'string' }])), monitor: { type: 'boolean' } } });
   const s = {};
   for (const [key, fallback] of Object.entries(defaults)) {
     const value = values[key] === undefined ? fallback : Number(values[key]);
-    const min = ['think-ms', 'retries', 'retry-delay-ms', 'replay-every', 'warmup-seconds'].includes(key) ? 0 : 1;
+    const min = ['think-ms', 'retries', 'retry-delay-ms', 'replay-every', 'warmup-seconds', 'hidden-share'].includes(key) ? 0 : 1;
     assert.ok(Number.isSafeInteger(value) && value >= min && value <= 1_000_000, `Invalid --${key}`);
     s[key.replace(/-([a-z])/g, (_, c) => c.toUpperCase())] = value;
   }
@@ -35,7 +86,7 @@ export function parseOptions(args) {
   assert.ok(s.quantity <= 100 && s.preVus <= s.maxVus && s.poolMax >= 2, 'Invalid quantity/VU/pool bounds');
   s.durationSeconds = s.users / s.rate;
   s.measurementSeconds = s.durationSeconds - s.warmupSeconds;
-  assert.ok(s.measurementSeconds >= 2 && s.sampleMs <= 250 && s.drainSeconds <= 240, 'Invalid measurement/sampling/drain window');
+  assert.ok(s.measurementSeconds >= 2 && s.sampleMs <= 250 && s.drainSeconds <= 900, 'Invalid measurement/sampling/drain window');
   assert.ok(s.durationSeconds >= 2 && s.durationSeconds <= 3600 && s.thinkMs <= 10000 && s.retries <= 5 && s.retryDelayMs <= 10000, 'Run must last 2–3600 scheduled seconds; think/retry bounds exceeded');
   s.stock = values.stock ?? 'ample';
   assert.ok(['ample', 'limited'].includes(s.stock), '--stock must be ample or limited');
@@ -44,6 +95,15 @@ export function parseOptions(args) {
   assert.ok(s.stock === 'ample' ? s.seats >= s.users * s.quantity : s.seats < s.users * s.quantity, 'Stock mode disagrees with offered quantity');
   s.runId = values['run-id'] ?? `${new Date().toISOString().replace(/[-:.TZ]/g, '')}-${randomBytes(4).toString('hex')}`;
   assert.match(s.runId, /^[a-z0-9][a-z0-9-]{2,40}$/, 'Unsafe --run-id');
+  // The arm: a leaves the event unprotected; b and c protect it and differ in the polling mode only.
+  s.arm = values.arm ?? 'a';
+  assert.ok(['a', 'b', 'c'].includes(s.arm), '--arm must be a, b or c');
+  s.pollMode = { a: null, b: 'fixed', c: 'adaptive' }[s.arm];
+  s.monitor = values.monitor === true;
+  s.cutoffSeconds = s.durationSeconds + s.drainSeconds - CUTOFF_MARGIN_SECONDS;
+  assert.ok(s.hiddenShare <= 100 && (s.arm !== 'a' || s.hiddenShare === 0), '--hidden-share is 0–100 and needs a queue arm');
+  // A waiting buyer keeps its VU, so a queue arm needs one per buyer and a drain longer than the cutoff margin.
+  assert.ok(s.arm === 'a' || (s.preVus >= s.users && s.drainSeconds > CUTOFF_MARGIN_SECONDS), 'A queue arm needs --pre-vus >= --users and --drain-seconds > 15');
   return s;
 }
 
@@ -85,7 +145,7 @@ export async function summarizeRaw(path, durationSeconds) {
   return { started, startedPerScheduledSecond: started / durationSeconds, first, last, arrivalsByUTCSecond: arrivals, maxObservedVUs, maxAllocatedVUs, responseKey: 'stage/kind/flow/status/error_code', responses };
 }
 
-export function verifySnapshot(data, users, settings, metrics, exitCode) {
+export function verifySnapshot(data, users, settings, metrics, exitCode, admission) {
     const count = name => metrics[name]?.count ?? 0;
     const e = data.events[0];
     const activeHolds = data.reservations.filter(r => r.status === 'active').reduce((n, r) => n + r.quantity, 0);
@@ -125,8 +185,12 @@ export function verifySnapshot(data, users, settings, metrics, exitCode) {
       expectedPurchases: count('buyers_completed') === (settings.stock === 'ample' ? settings.users : Math.floor(settings.seats / settings.quantity)),
       noUnexpectedFailures: count('unexpected_failures') === 0 && count('replay_failures') === 0 && exitCode === 0,
     };
+    // v3: admission-final.sql returned no row and the ledger agrees with Redis. Unread evidence is not a pass.
+    if (admission) Object.assign(checks, { admissionFinalSql: Array.isArray(admission.finalRows) && admission.finalRows.length === 0,
+      admissionLedger: Array.isArray(admission.ledger) && admission.ledger.length === 0 });
     const integrityNames = ['inventory', 'singleOrderPerBuyer', 'singleReservationPerBuyer', 'orderIdentity', 'reservationIdentity',
-      'reservationConversion', 'ticketOwnership', 'ticketQuantity', 'checkoutPaymentIdentity', 'settlementIdentity', 'noExtraSettlementFacts', 'callbackIdentity'];
+      'reservationConversion', 'ticketOwnership', 'ticketQuantity', 'checkoutPaymentIdentity', 'settlementIdentity', 'noExtraSettlementFacts', 'callbackIdentity',
+      ...(admission ? ['admissionFinalSql', 'admissionLedger'] : [])];
     const ordersByStatus = {};
     for (const order of data.orders) ordersByStatus[order.status] = (ordersByStatus[order.status] ?? 0) + 1;
     return { checks, integrityPassed: integrityNames.every(k => checks[k]), integrityNames,
