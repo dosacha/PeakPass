@@ -1132,3 +1132,11 @@ test('a v2.6 run keeps the v2.6 analysis and its output shape', async () => {
     assert.ok((await analyzeRun(directory, { ...manifest, revision: 'flash-sale-v2.5' })).invalidReasons.includes('checkoutProtocol'));
   });
 });
+test('a promotion after the buyers cutoff is outside the recognition denominator', async () => {
+  await queueRun(async ({ dump, start, analyze }) => {
+    dump.entries[2].admittedAt = start + 17500; // 0.5 s after the cutoff of 17 s: nobody was left to see it
+    const r = await analyze();
+    assert.deepEqual([r.admission.promoted, r.admission.promotedAfterCutoff, r.admission.unrecognized, r.recognition.promoted], [3, 1, 0, 3]);
+    assert.equal(r.classification, 'valid-queue');
+  });
+});
