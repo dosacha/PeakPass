@@ -85,8 +85,8 @@ Steps:
 
 ## Task 2 (S2): Preflight
 
-- [ ] `p8-pre-a-01`, `p8-pre-b-01`, `p8-pre-c-01`: 24 buyers, 2/s, seed profile, through the run script with the start gate.
-- [ ] Done when all three are valid, the final SQL returns no row, every buyer of B and C is paid, no trace is missing and the resources are gone.
+- [x] `p8-pre-a-01`, `p8-pre-b-01`, `p8-pre-c-01`: 24 buyers, 2/s, seed profile, through the run script with the start gate.
+- [x] Done when all three are valid, the final SQL returns no row, every buyer of B and C is paid, no trace is missing and the resources are gone.
 
 ## Task 3 (S3): Pilots
 
@@ -133,3 +133,6 @@ Steps:
   - Ruling: the application is stopped with `compose stop -t 90` instead of the default 10 s, so that a slow exit (F2) is measured instead of killed; duration and exit code go into the manifest. This is after every window.
   - Development smoke `p8-dev-b-01` (arm B, 12 buyers, 2/s, seed profile, commit `20eb728`, clean tree), outside the run catalogue: `valid-queue`, 12/12 paid, 36 status requests (12 `recover`, 12 `timer`, 12 `refresh`), controller recognition upper bound p95 793 ms, at most 2 promotions in a rolling second, final SQL 0 rows, ledger equal, wait for free slots 1 ms, application exit 0 after 0.5 s. Its image `peakpass:fs-p8-dev-b-01` is kept until close-out.
   - Sensitivity, `d2b51b0`: six behaviours were changed one at a time in the working tree and restored: the join key not kept, the controller not stopped at an outcome, admission fields on the reservation's checkout, polling counted as purchase, promotions after the cutoff counted, the activation without the gate. Five failed an existing check. The fifth passed, so a check for it was added and seen failing under the change (now 50 checks, 50/50 on Node 24.15.0 and on Node 18.20.8).
+- Task 2 (S2), run in this session at `2e48a78` through `run/run.mjs` (gate passed at the first attempt each time, free memory 5.8–6.0 GiB, host CPU 0.9–7.7%): `p8-pre-a-01` valid-stable 24/24, `p8-pre-b-01` valid-queue 24/24, `p8-pre-c-01` valid-queue 24/24; fixture exit 0 and strict smoke passed in all three; final SQL 0 rows, ledger equal, traces complete, wait for free slots 1 ms, application exit 0 after 0.5–0.6 s; no container, network or volume of the three projects is left. Their images `peakpass:fs-p8-pre-*` are kept until close-out.
+  - Observation: one recognition of `p8-pre-b-01` (buyer 0) carries the layer `reconnect` because the earliest possible instant of its promotion precedes the controller's start by about 2 ms (promotion 11 ms after the join, answer after 37 ms). This is the rule of the P6 controller, not a property of the harness; reports list every layer.
+  - Observation: promotion achievement above 100% over a backlog of 3.1 s (7 promotions at R 2/s), an edge effect of short backlogs.

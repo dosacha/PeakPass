@@ -118,7 +118,22 @@ To be completed with each stage. So far (2026-10-05, run in this session unless 
 
 ## Results
 
-Not yet run.
+Raw runs are in `load-test/results/flash-sale/<run-id>/` of the work tree (not committed). Each line below is one run of this session.
+
+### Preflight (2026-10-05, commit `2e48a78`, seed profile, 24 buyers at 2/s, 24 VUs, drain 30 s)
+
+| Run | Arm | Verdict | Paid | Purchase write failures | Final SQL rows / ledger mismatches | Status requests | Controller recognition, foreground upper bound p50 / p95 |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| `p8-pre-a-01` | A | valid-stable | 24/24 | 0 of 60 | 0 / 0 | – | – |
+| `p8-pre-b-01` | B | valid-queue | 24/24 | 0 of 60 | 0 / 0 | 72 (24 `recover`, 24 `timer`, 24 `refresh`) | 758 / 927 ms (23 buyers) |
+| `p8-pre-c-01` | C | valid-queue | 24/24 | 0 of 60 | 0 / 0 | 72 (24 `recover`, 24 `timer`, 24 `refresh`) | 787 / 1,048 ms (24 buyers) |
+
+All three passed the strict smoke as well (k6 exit 0), every trace was complete, no slot was in use when k6 ended, the application left with exit 0 within 0.6 s, and every Compose project was removed. The arrival rate equals the seed R here, so nobody waited for long (server-side queue wait at most 488 ms) and the two polling modes sent the same number of requests; the preflight shows that the harness works, not how the arms differ.
+
+Two things the preflight showed about the figures:
+
+- In `p8-pre-b-01` the recognition of buyer 0 is filed under `reconnect`, not `foreground`. Its entry was promoted about 11 ms after its join and the answer that showed it took 37 ms, so the earliest instant the promotion can have happened lies before the controller's own start, and the controller's rule files such a sample under `reconnect` (ISSUE_15, "Trace for P8"). It can only happen to a buyer who is promoted within one round trip of arriving. All layers are reported.
+- The promotion achievement can exceed 100% over a short backlog (`p8-pre-b-01`: 7 promotions in 3.1 s at R 2/s). The rate bound holds per rolling second, and a backlog that begins and ends inside such seconds collects up to R promotions more than R times its length. Over the backlogs of the pilots, tens of seconds long, this is at most R promotions.
 
 ## Commands
 
