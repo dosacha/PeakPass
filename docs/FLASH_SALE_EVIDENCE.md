@@ -1,4 +1,45 @@
-# 실제 쓰기 부하 측정 계약 — P2 / flash-sale-v2.6
+# 실제 쓰기 부하 측정 계약 — P2 flash-sale-v2.6 / P8 flash-sale-v3.0
+
+## v3 측정 계약 — P8 A/B/C / flash-sale-v3.0
+
+P8([Issue #17](https://github.com/dosacha/PeakPass/issues/17))의 동일 조건 A/B/C 비교를 위한 revision이다. 실행 전 프로토콜·pilot 계획·결과는 [ISSUE_17_VALIDATION.md](ISSUE_17_VALIDATION.md)에 있다. 아래 v2.x 절과 P1 설명에서 v3가 바꾼 사항은 이 절이 우선한다. v2.6 원본과 판정은 수정하지 않는다. 분석기 `flash-sale-analysis-v3.0`은 v2.6 manifest를 기존 v2.6 규칙 그대로 분석한다.
+
+- **환경.** `docker-compose.flash-sale.yml`의 변경은 두 곳이다: Redis `redis-server --save "" --appendonly no --maxmemory-policy noeviction`, 앱 `ENABLE_ADMISSION: "true"`. 모든 arm이 같은 파일과 같은 image를 쓴다. 자원 제한·pool·로그 수준·표본 주기는 v2.6과 같다.
+- **arm.** `--arm a|b|c`(기본 a). 모든 arm에서 이벤트의 policy 행을 SQL로 ensure한다. a는 그 행을 unprotected로 둔다. b·c는 앱 시작 전에 계약 §6 전이(배타 event gate → 행 `FOR UPDATE` → `UPDATE protected=true`)를 실행하고, 시작한 인스턴스가 namespace를 공개해 control `mode=ready`, PG `phase='open'`, generation·epoch 일치가 될 때까지 기다린다. 전이 SQL은 `src/infra/postgres/admission-policy.ts`의 문장을 옮긴 것이고 check가 소스와 대조한다. b·c는 인증 negative 3건에 더해 admission 필드 없는 구매가 400 `ADMISSION_INVALID_INPUT`으로 거절되는지 확인한다.
+- **여정.** a는 v2.6 여정 그대로다(코드 불변). b·c는 iteration 하나가 구매자 한 명·탭 하나이며, 페이지의 `frontend/admission-polling.js` controller 하나를 수정 없이 실행한다: 첫 상태 조회 → epoch 확인 뒤 등록 → 모드별 polling(b fixed, c adaptive) → 인지 후 think 시간 뒤 admission을 소비하는 구매(짝수 index는 예약, 홀수는 직접 checkout, 둘 다 admission 필드 포함) → 이후 checkout·정산·replay는 a와 같은 요청과 재시도 규칙. transport(`http.asyncRequest`), 시계, timer, visibility, `AbortController` 대체물을 주입한다. k6는 요청을 취소하지 못하므로 요청은 timeout(조회·등록 5초, 구매 10초)으로 끝난다. admission을 소비하는 요청은 controller 규칙대로 결과 미확정(무응답·429·5xx·409 `ADMISSION_IN_PROGRESS`)인 동안 같은 identity로 최대 4회 자동 반복한다.
+- **cutoff.** 구매자는 절대 마감(scenario start + 도착 시간 + drain − 15초) 뒤에 새 요청을 시작하지 않고 outcome을 기록한다. 그때 나가 있던 요청의 응답은 받는다. queue arm은 구매자 수 이상의 VU(`--pre-vus >= --users`)와 15초보다 긴 `--drain-seconds`(상한 900)가 필요하다. k6가 drain 끝에서 iteration을 중단하면 그 run은 invalid다.
+- **outcome.** `paid`, `not_joined`, `queue_waiting`, `admission_expired`, `admitted_unpurchased`, `cancelled`, `reset`, `unknown_outcome`, `stock_rejected`, `http_<status>`, `incomplete_checkout`, `incomplete_settlement`. 어느 것도 분모에서 빠지지 않는다.
+- **hidden.** `--hidden-share <0–100>`(기본 0, queue arm 전용)은 `(index*37)%100 < share`인 구매자의 탭을 여정 내내 hidden으로 둔다. 층 관측용이며 정식 통계에 넣지 않는다.
+- **계측.** 조회·등록 요청은 `api_responses`/`api_duration`에 `stage=status|join`으로 기록한다. controller의 trace 이벤트는 `admission_trace` point(태그 `type`, 이벤트 본문은 point metadata `e`의 JSON), 구매자별 요약은 `admission_journey` point다. 관측 loop는 250ms마다 모든 arm에서 같은 명령(Redis `TIME`, control, waiting·active·claims·window의 `ZCARD`)을 실행해 `observations.jsonl`의 `queue`에 남긴다.
+- **종료 순서.** k6 종료 → active·claims가 0이 될 때까지 대기(상한은 TTL + claim 기한 + 15초, 실제 시간과 남은 수를 manifest `quiesce`에 기록) → Redis 상태 dump(`redis-admission.json`) → 앱 정지(`stop -t 90`, 소요 시간과 exit code를 `applicationStop`에 기록) → SQL snapshot → `admission-final.sql`(행 0이어야 함)과 원장–Redis 대조(`admission-final.json`) → cleanup(`admission_results` 먼저).
+- **manifest.** `arm`, `pollMode`, `behaviour`, 실행 중인 image에서 읽은 `profile`, 비밀값을 뺀 `applicationEnvironment`, Redis `CONFIG` 3개 값과 run id의 전·후(`redis`), policy 행과 control의 전·후가 추가된다. `sourceHashes`에 `frontend/admission-polling.js`와 admission 소스 5개가 추가된다.
+- **검증 run.** `--monitor`는 활성화와 앱 시작 전에 Redis `MONITOR`를 붙여 admission 쓰기를 `redis-monitor.txt`에 남긴다. `MONITOR`는 Redis를 느리게 하므로 측정 run에는 쓰지 않으며 이 run의 분류는 `valid-verification`이다.
+
+분석 `flash-sale-analysis-v3.0`이 v3 run에 적용하는 규칙:
+
+- 완료율·throughput·paid 여정의 정의는 v2.6과 같다. 구매 write 지표는 `reservation`·`checkout`·`settlement` 단계만 센다. 조회·등록은 어떤 구매 오류율에도 들어가지 않고 `polling`에 따로 집계한다.
+- 창은 두 가지다: 도착 창(`window`)과 전체 horizon(`horizon`, 도착 창 + drain 예산). 관측·pool·자원·발생기 표본은 측정 시작부터 부하 종료(k6 종료와 horizon 끝 중 이른 쪽)까지 요구한다.
+- `purchase`: 창별·cohort별 non-replay 구매 시도의 실패(무응답·429·5xx) 비율, 500 `INTERNAL_ERROR`·503·무응답 수, 409의 code별 수, 첫 요청(예약 또는 직접 checkout)의 첫 시도 실패율과 반복 수.
+- `admission`·`recognition`(queue arm): Redis dump의 entry 전수와 구매자별 요약으로 계산한다. 승격자 분모는 구매자 cutoff(Redis 시계로 환산) 이전에 승격된 entry 전체이며 인지·미인지 만료·미인지 수를 함께 낸다. 인지는 controller가 기록한 `lowerMs`~`upperMs`로, 발생기 안에서 잰 값이다. 브라우저의 인지가 아니다.
+- `queue`: 표본 통계, dump의 모든 `admittedAt`에 대한 rolling 1초 `(t-1000, t]` 승격 수 ≤ R 검사, 대기자가 있던 구간의 승격 달성률. 표본의 최댓값은 상한의 증명이 아니다.
+- invalid: v2.6 목록에 더해 policy·epoch·generation·control의 변화나 arm과 다른 보호 상태(`policy`), Redis run id 변화(`redis-restart`), Redis 설정 불일치(`redis-config`), admission 429·`ADMISSION_QUEUE_FULL`(`admission-limiter`), 구매자별 trace·요청 수·join identity 불일치(`trace`), 대기열 표본 누락(`queue-observer`), 최종 SQL·원장 증거 미확보(`admission-evidence`).
+- integrity-defect: v2.6의 SQL 검사 실패, `admission-final.sql`의 행, 원장–Redis 불일치, SQL에 없는 HTTP paid, rolling 1초 승격 수 > R.
+- 분류: a는 v2.6과 같다(`valid-stable`/`valid-overload`/`valid-limited`). b·c는 `valid-queue`이며 기준에 쓰는 값은 `criteria`에 수치로만 낸다(임계는 실행 전에 ISSUE_17 문서에 고정한다). 슬롯이 남은 채 상한에 걸린 대기와 느린 앱 종료는 invalid가 아니며 `disclosures`로 공개한다.
+
+| 추가 입력 | 기본값 | 의미 |
+| --- | --- | --- |
+| `--arm` | a | a: 대기열 없음(이벤트 unprotected). b: 대기열 + fixed polling. c: 같은 대기열 + adaptive polling |
+| `--hidden-share` | 0 | hidden 탭 비율(%). queue arm 전용 |
+| `--monitor` | 꺼짐 | 검증 run 전용 Redis `MONITOR` 캡처 |
+| `--drain-seconds` | 30 | 상한이 900으로 늘었다. queue arm은 15보다 커야 한다 |
+
+| 추가 파일 | 의미 |
+| --- | --- |
+| `redis-admission.json` | 부하 뒤 Redis의 control, entry 전수(claim token 제외), join 매핑, waiting·active·claims·window 구성원 |
+| `admission-final.json` | `admission-final.sql`이 반환한 행과 원장–Redis 불일치 목록. 둘 다 비어 있어야 한다 |
+| `redis-monitor.txt` | `--monitor` run의 admission 쓰기(`ZADD`/`ZREM`/`UNLINK`/`DEL`, control `HSET`, `FLUSH*`) |
+
+## v2.4–v2.6 변경 기록 (P2)
 
 v2.4는 PR20 오토리뷰를 반영한다. 전체 started buyer와 terminal journey를 buyer별로 대조하고 terminal 수=완료 iterations를 함께 요구해 drain 중단을 배제한다. 각 주문의 null-provider pending payment audit는 해당 buyer checkout key로 정확히1개여야 한다. checkout 응답은 pending일 때 빈 tickets 배열, 정산 후 replay일 때 paid와 최초 정산의 동일한 유효 티켓 ID 집합을 요구한다. 이미 paid인 replay에 expired 응답 예외는 허용하지 않는다.
 

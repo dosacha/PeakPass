@@ -7,6 +7,7 @@
 
 2026-10-03 기준으로 P1~P6가 main에 병합됐고 다음 단계는 P7([#16](https://github.com/dosacha/PeakPass/issues/16), 실제 장애·동시성·수량 불변식 검증)이다. 단계별 수용 상태와 SHA의 단일 기준은 총괄 [#9](https://github.com/dosacha/PeakPass/issues/9)의 상태표이고, 각 단계가 고치지 않고 남긴 한계는 #25(P4)·#27(P5)·#29(P6)에 있다.
 
+- [P8 / Issue #17 동일 조건 A/B/C 비교: 프로토콜·pilot·결과](ISSUE_17_VALIDATION.md) — 같은 commit·같은 Compose에서 이벤트의 policy 행과 발생기 여정만 다른 세 arm, 페이지의 polling controller를 k6 안에서 그대로 실행하는 발생기, 분모·유효성·정합성 규칙과 pilot 계획. 결과는 run이 끝나는 대로 채운다
 - [P7 / Issue #16 실제 장애·동시성 검증과 P8 인계](ISSUE_16_VALIDATION.md) — 제품 이미지 컨테이너 여러 개에 가한 실제 Redis·PostgreSQL·프로세스 장애, Redis 전이 로그 재생과 최종 SQL·원장 대조, 실제 브라우저의 장애 시나리오, 발견한 결함 F1(Redis 재시작 1회에 세대 2개 소모)의 수정, 남긴 한계 F2와 관찰·미검증 항목. 제품 코드 변경은 F1 수정 하나다. 수용 상태는 총괄 #9를 따른다.
 - [P6 / Issue #15 구현 검증과 P7·P8 인계](ISSUE_15_VALIDATION.md) — 대기 카드, 고정·적응형 폴링과 jitter, 요청 직렬화와 늦은 응답 폐기, 구매 연결과 결과 미확인 구매의 복구, 입장 인지 계측, 실제 브라우저 검증 범위와 미검증 항목. PR #28로 병합됨(main `2ba3a5c`). 수용 상태는 총괄 #9를 따른다.
 - [P5 / Issue #14 구현 검증과 P6·P7·P8 인계](ISSUE_14_VALIDATION.md) — 예약·직접 checkout의 admission 소비 원장, 재시도·회수, 구매 요청 인터페이스, 검증 범위와 미검증 항목. PR #26으로 병합됨(main `2d67cc3`). 수용 상태는 총괄 #9를 따른다.
