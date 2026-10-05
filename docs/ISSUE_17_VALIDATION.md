@@ -138,3 +138,25 @@ Two things the preflight showed about the figures:
 ## Commands
 
 `npm run build`; `npm run test:flash-sale`; one run: `node load-test/flash-sale-fixture.mjs --run-id <id> --arm a|b|c --users <n> --rate <r> --pre-vus <n> --max-vus <n> --warmup-seconds <s> --drain-seconds <s>`; re-analysis of a kept run: `node load-test/flash-sale-analysis.mjs load-test/results/flash-sale/<id>`. Docker Compose v2 and k6 are needed for a run, nothing but Node for the checks.
+
+### Generator pilot (2026-10-05, commit `a557fbc`, seed profile)
+
+`p8-gen-b-01`, arm B, 1,000 buyers at 25/s for 40 s, 1,000 VUs, buyers' cutoff 55 s after the start: `valid-queue`. The generator carried the load: no dropped iteration, arrival lag p99 2 ms and maximum 30 ms, k6 working set at most 793 MB, k6 CPU 6.9 s, host CPU median 7.9% and maximum 22.6%, at least 4.8 GiB of host memory free. The raw k6 output is 87.1 MB and the application log 15.8 MB.
+
+What the run showed, as an observation of one run with the seed profile and not as a result: 72 entries were promoted before the cutoff and 70 buyers paid, all of the warmup cohort; the 750 buyers of the measurement cohort ended as `queue_waiting`, as expected with R 2/s. 20,072 status requests were sent, up to 938 in one second, and the application container used a median of 62% and a maximum of 99% of its one CPU. The promotions while somebody waited reached 64% of R (72 in 55.9 s), with at most 5 of the 8 slots seen in use, and the controller recognition of the 70 buyers had an upper bound p95 of 3,224 ms. So with about 900 buyers polling once a second the single instance was close to its CPU limit, and its scheduler promoted fewer entries than R allows. 910 buyers were still waiting when k6 ended; the scheduler went on promoting them, so the bounded wait for free slots ran its full 60 s with 8 slots in use, which is published and not invalid. Final SQL 0 rows, ledger equal, trace complete.
+
+### A ladder (2026-10-05, commit `a557fbc`, arm A, 1,000 VUs, drain 30 s)
+
+| Run | Arrival | Verdict | Completion of the measurement cohort | Write failure share, cohort / arrival window | 500 `INTERNAL_ERROR` (all attempts) | Paid journey p50 / p95 / p99 | Paid per second in the window | Stable by the P2 criteria |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| `p8-pilot-a-r10-01` | 10/s × 40 s, 400 buyers | valid-stable | 300/300 | 0 of 750 / 0% | 0 | 67 / 84 / 146 ms | 10.00 | yes |
+| `p8-pilot-a-r25-01` | 25/s × 40 s, 1,000 buyers | valid-stable | 749/750 (99.87%) | 17 of 1,890 (0.90%) / 0.90% | 74 | 65 / 159 / 417 ms | 24.97 | yes |
+| `p8-pilot-a-r50-01` | 50/s × 20 s, 1,000 buyers | valid-overload | 140/750 (18.67%) | 1,444 of 2,352 (61.39%) / 64.41% | 1,965 | 2,444 / 4,314 / 5,028 ms | 4.00 | no |
+
+In the 50/s run the application container was at its CPU limit (median 95%), PostgreSQL at a median of 81%, up to 159 requests waited for a pool connection and 3,610 serialization retries were scheduled; 610 buyers of the cohort ended with 500. These are pilot observations that choose the condition.
+
+The rules of the pilot plan applied:
+
+- The lowest step at which A is not stable is 50/s × 20 s. Its unfinished share (81.33%) and its write failure share (61.39%) are not below 5%, so the **formal arrival condition is 50/s × 20 s**: 1,000 buyers, warmup 5 s (the first 250 buyers), 1,000 VUs.
+- The highest step at which A was stable is 25/s, so the R candidates are R1 = min(25, 20) = **20** (batch 5, C 60) and R2 = **10** (batch 3, C 30).
+- Drain budgets by the fixed formula: 90 s for R 20 (buyers' cutoff 95 s after the start) and 150 s for R 10 (cutoff 155 s).
