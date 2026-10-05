@@ -160,3 +160,28 @@ The rules of the pilot plan applied:
 - The lowest step at which A is not stable is 50/s × 20 s. Its unfinished share (81.33%) and its write failure share (61.39%) are not below 5%, so the **formal arrival condition is 50/s × 20 s**: 1,000 buyers, warmup 5 s (the first 250 buyers), 1,000 VUs.
 - The highest step at which A was stable is 25/s, so the R candidates are R1 = min(25, 20) = **20** (batch 5, C 60) and R2 = **10** (batch 3, C 30).
 - Drain budgets by the fixed formula: 90 s for R 20 (buyers' cutoff 95 s after the start) and 150 s for R 10 (cutoff 155 s).
+
+### R pilot (2026-10-05) — stopped, no candidate qualified
+
+Arm B, the formal arrival condition (50/s × 20 s, 1,000 buyers, warmup 5 s, 1,000 VUs), C = 3R, batch = ⌈R/4⌉, each candidate a commit of the local pilot branch on top of `03af946` (the polling boundary as `5 * admissionProfile.rate`). The criteria were: a valid run, write failure share of the measurement cohort ≤ 1%, recognition → paid p99 of the cohort ≤ 2,000 ms, no row of the final SQL.
+
+| Run | Candidate commit, profile | Verdict | Completion of the cohort | Write failure share of the cohort | Recognition → paid p99 | Promotion achievement in the backlog | First purchase request: failed first attempts | 503 / 500 answers | Final SQL rows |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| `p8-pilot-b-r20-01` | `1946715`, R 20 / batch 5 / C 60 | invalid (`pool`: a gap of 1,059 ms in the application's pool samples) | 535/750 | 757 of 2,146 (35.27%) | 9,555 ms | 44.98% | 540 of 839 | 1,178 / 69 | 0 |
+| `p8-pilot-b-r20-01r` | the same | valid-queue | 340/750 | 685 of 1,620 (42.28%) | 10,109 ms | 36.63% | 470 of 687 | 1,111 / 55 | 0 |
+| `p8-pilot-b-r10-01` | `50c81a3`, R 10 / batch 3 / C 30 | invalid (host pressure: free host memory fell to 0.1 GiB while another project's containers ran; observer, pool, resource and generator samples have gaps) | 320/750 | 379 of 1,238 (30.61%) | 10,564 ms | 40.03% | 341 of 608 | 661 / 31 | 0 |
+| `p8-pilot-b-r10-01r` | the same | valid-queue | 470/750 | 539 of 1,746 (30.87%) | 9,048 ms | 49.16% | 439 of 754 | 846 / 46 | 0 |
+| `p8-pilot-b-r5-01` | `0f4df67`, R 5 / batch 2 / C 15 | invalid (`pool`: a gap of 1,593 ms) | 529/750 | 204 of 1,531 (13.32%) | 5,483 ms | 56.20% | 255 of 785 | 384 / 11 | 0 |
+| `p8-pilot-b-r5-01r` | the same | invalid (`pool`: a gap of 1,001 ms, the bound is 1,000 ms) | 657/750 | 132 of 1,774 (7.44%) | 3,807 ms | 64.92% | 202 of 907 | 272 / 17 | 0 |
+
+Neither R 20 nor R 10 qualified, so R 5 was run as the plan provides. It did not qualify either, and both of its runs are invalid by the pool-sample rule. Two stop conditions of the pilot plan are met (no candidate after one more halving; two invalid runs in a row for one slot), so the C pilot, the confirmation run and the verification run were not started and the calibration is not decided. The figures of the invalid runs are shown as they were recorded and choose nothing.
+
+What the six runs have in common, as observations of pilots:
+
+- Integrity held in every run: no row of the final SQL, the ledger equal to Redis, at most R promotions in any rolling second, every trace complete, and no 401, 403, 429 or `ADMISSION_QUEUE_FULL`.
+- The 503 answers are on the requests that consume the admission (`ADMISSION_UNAVAILABLE`, the reservation and above all the direct checkout); only the run of the host incident has two 503 answers on other purchase requests. In the application logs of `p8-pilot-b-r5-01r` and `p8-pilot-b-r20-01r` each of them is a PostgreSQL serialization failure (40001) that used up its retries, except one lock timeout: 272 of 272 and 1,110 of 1,111. Their share falls with the capacity: about 42% of the cohort's purchase attempts at C 60, 31% at C 30, 7–13% at C 15, and one failed first attempt of 70 in the generator pilot at the seed C 8. A purchase with admission fields runs SERIALIZABLE (ISSUE_14, "Limits kept or introduced"); its frequency of failures had not been measured before.
+- The 500 answers are on the existing requests only (the checkout of a reservation and the settlement), never on a request with admission fields.
+- The single instance was near its CPU limit while about 900 buyers polled once a second: application CPU median 52–91% of its one CPU. The scheduler promoted 37–65% of R while somebody waited, the controller recognition had a foreground upper bound p95 of 2.7–3.2 s in every run (above the 2 s goal), and the application's own 250 ms pool sampler stalled for more than a second in four runs, which alone made three of them invalid.
+- Admitted buyers of the foreground expired in every run (3 to 96 entries): the admission ran out while the purchase was repeated.
+- The wait for free slots after the load ran to its bound of 60 s in every run, because buyers were still waiting and the scheduler kept promoting them.
+- Another project's containers started on the host twice during these runs; one run was invalid for it.
