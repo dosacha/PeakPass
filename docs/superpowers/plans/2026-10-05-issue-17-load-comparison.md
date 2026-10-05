@@ -57,12 +57,12 @@ Preflight `p8-pre-a-01`, `p8-pre-b-01`, `p8-pre-c-01` (24 buyers, 2/s, seed prof
 
 Outside the repository only: `run/s0/` (probe scripts, a copy of the Compose file with the two changes, logs). Nothing is committed.
 
-- [ ] The file loads in k6 and `PeakPassAdmission` is usable (import for its side effect, default import, or `open` and evaluation).
-- [ ] An async iteration keeps its VU until the journey ends; `iterations` and `dropped_iterations` are right.
-- [ ] Timer delays come out as planned; `http.asyncRequest` carries tags and the timeout.
-- [ ] A metric emitted from an async callback is in the raw output.
-- [ ] About ten buyers go from join to admission to paid on the seed profile against the real application.
-- [ ] The answers and their evidence are in the ledger; the owned resources are removed. If the controller does not run, continue with the fallback of D1 and say so.
+- [x] The file loads in k6 and `PeakPassAdmission` is usable (import for its side effect, default import, or `open` and evaluation).
+- [x] An async iteration keeps its VU until the journey ends; `iterations` and `dropped_iterations` are right.
+- [x] Timer delays come out as planned; `http.asyncRequest` carries tags and the timeout.
+- [x] A metric emitted from an async callback is in the raw output.
+- [x] About ten buyers go from join to admission to paid on the seed profile against the real application.
+- [x] The answers and their evidence are in the ledger; the owned resources are removed. If the controller does not run, continue with the fallback of D1 and say so.
 
 ## Task 1 (S1): Harness
 
@@ -115,3 +115,11 @@ Steps:
 - Facts of the session prompt re-read in the code at `1bb2796`: the polling boundary literal `entry.position! <= 10` (`src/core/services/admission.service.ts:202`); the tick's `min(batch, rate − window, capacity − active)` and the `maxWaiting` refusal, with the endpoint limits 120/10/10 per 60 s, in the Lua of `src/infra/redis/admission.ts`; `readAdmissionPolicy` (gate `1347436869`, event check, ensure, locking read); `admission_events` cascades from `events` and `admission_results` references users, events, reservations and orders without cascade; the fixture's `REVISION`, drain bound 240, nine hashed sources, one build per run; the analyzer's `checkoutProtocol` and `auth-or-limiter`; the Compose file without Redis flags and without `ENABLE_ADMISSION`; the controller's `POLICY` and injected options. A join is refused when `ZCARD(waiting) − 1 ≥ maxWaiting` before the new entry is added, so 1,000 buyers cannot reach the bound.
 - Ruling: the session prompt is the execution instruction (plan, `npm ci`, owned resources, local commits on the work branch and the local pilot branch, load runs through S3). The plan is not submitted for a separate approval; the work goes on to Task 0.
 - Ruling: plan and validation document are written in English like those of P4–P7; `docs/FLASH_SALE_EVIDENCE.md` keeps its language.
+- Task 0 (S0), run in this session with throwaway scripts in `run/s0/` (nothing committed; logs in `run/s0/out/`). The controller is reused as it is; the fallback loop of D1 is not needed.
+  - Loading: `import admission from '../frontend/admission-polling.js'` works. k6 treats the file as CommonJS, so the default import is `module.exports` and is the same object as `globalThis.PeakPassAdmission`; an import for the side effect alone works too. `open()` followed by evaluation fails inside an ES module script, because `module` is a guarded identifier there.
+  - Runtime of k6 1.7.1: `setTimeout` and `clearTimeout` are global; `performance` and `AbortController` are undefined, so the clock is injected as `Date.now` and `AbortController` as a stand-in whose `abort()` only sets a flag. A request ends by its timeout (`http.asyncRequest` with `timeout: 1000` against an endpoint that answers after 8 s: status 0, `error_code` 1050, after 1,015 ms).
+  - Iterations: an async iteration keeps its VU (10 VUs for 10 buyers, 1,000 for 1,000); `iterations` equals the buyers and `dropped_iterations` is 0. A timer that is still pending keeps the iteration and its VU until it fires, also after the function's promise has resolved (ten iterations of 20.0 s behind one uncleared 20 s timer): every timer is cleared when a journey ends.
+  - Timers: awaited timers of 20, 250 and 1,000 ms were 0–1 ms late; the controller's timer polls were 0–2 ms later than planned, against the stub (30 polls) and against the real application (16 polls).
+  - Metrics: points added from async callbacks and from the controller's trace callback are in the raw output, and tags given to `http.asyncRequest` are on the built-in HTTP metrics. A value set on `exec.vu.metrics.metadata` for one `add` appears under `data.metadata` of that point only (56,000 trace points, none on another metric). Trace events are therefore recorded as metadata, not as a tag with 56,000 values.
+  - 1,000 VUs against a stub that never admits (synthetic, no application): 56,000 status requests in 95 s, 0 dropped, k6 peak working set about 718 MB with the event as a tag and 608 MiB with the event as metadata, k6 CPU 14.5 s, raw output 182 MB (about 3.2 kB per request with k6's nine built-in points).
+  - Real application, owned Compose project `peakpass-fs-p8-s0` with the two Compose changes, image built from `0c40679`, seed profile read from the image (`admission-v1-seed`, R 2, C 8, batch 2): the transition by SQL before the application start led to control `ready`, phase `open`, generation 0 and equal epochs within 8 s of the start; a reservation without admission fields on the protected event was answered 400 `ADMISSION_INVALID_INPUT`; ten buyers at 2/s in fixed mode all ended paid (10 paid orders, 20 tickets, 10 consumed results, `admission-final.sql` 0 rows, every Redis entry consumed, waiting, active and claims empty, at most 2 promotions in a rolling second). The project, its volumes and network and the image `peakpass:p8-s0-probe` were removed and nothing of it is left.
