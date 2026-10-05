@@ -893,3 +893,242 @@ test('a queue iteration beyond the prepared buyers fails the run instead of pass
   assert.ok(run.metrics.some(m => m.name === 'unexpected_failures' && m.value === 1) && run.metrics.some(m => m.name === 'script_failures' && m.value === 1));
   assert.deepEqual(run.outcome, []);
 });
+test('what the fixture reads from Redis and from the logs is named as the product names it', async () => {
+  const source = async path => (await readFile(new URL(`../${path}`, import.meta.url), 'utf8')).replace(/\s+/g, ' ');
+  const redisSource = await source('src/infra/redis/admission.ts');
+  const keys = harness.admissionKeys('event', 'epoch');
+  assert.equal(keys.control, 'peakpass:admission:event:control');
+  assert.ok(redisSource.includes("const prefix = `peakpass:admission:${eventId}:`;") && redisSource.includes("prefix + 'control'"));
+  const names = [...redisSource.matchAll(/ e \+ '(\w+)',/g)].map(match => match[1]);
+  assert.deepEqual(names, ['meta', 'entries', 'joins', 'latest', 'users', 'waiting', 'leases', 'active', 'claims', 'window', 'sequence']);
+  for (const name of names) assert.equal(keys[name], `peakpass:admission:event:epoch:${name}`);
+  // The Redis profile an instance with the feature on accepts.
+  const service = await source('src/core/services/admission.service.ts');
+  assert.deepEqual(harness.REDIS_PROFILE, { appendonly: 'no', save: '', 'maxmemory-policy': 'noeviction' });
+  for (const [key, value] of Object.entries(harness.REDIS_PROFILE)) assert.ok(service.includes(`!== '${value}'`) && service.includes(key), key);
+  // The warnings that are counted per run.
+  const logs = (await source('src/core/services/admission-consumption.ts')) + (await source('src/infra/cron/admission-scheduler.ts'));
+  assert.deepEqual(Object.values(harness.ADMISSION_LOGS).sort(), ['finalizationLeft', 'iterationFailed', 'notReclaimed', 'transientPurchase']);
+  for (const message of Object.keys(harness.ADMISSION_LOGS)) assert.ok(logs.includes(`'${message}'`), message);
+  // The seed profile is read from the running image; its module path is the compiled model.
+  assert.ok((await source('src/core/models/admission.ts')).includes('export const admissionProfile = Object.freeze({'));
+});
+
+test('a manifest hashes the polling controller and the admission sources', () => {
+  for (const file of ['load-test/flash-sale.js', 'docker-compose.flash-sale.yml', 'frontend/admission-polling.js', 'src/core/models/admission.ts',
+    'src/core/services/admission.service.ts', 'src/core/services/admission-consumption.ts', 'src/infra/redis/admission.ts', 'src/tests/integration/admission-final.sql']) {
+    assert.ok(harness.HASHED_SOURCES.includes(file), file);
+  }
+  assert.equal(new Set(harness.HASHED_SOURCES).size, 15);
+});
+
+test('the monitor capture of a verification run keeps the admission writes only', () => {
+  const line = text => `1791160866.309123 [0 lua] ${text}`;
+  const namespace = 'peakpass:admission:5a09d5c2-c340-4e40-8404-c6cc1a542174';
+  for (const kept of [line(`"ZADD" "${namespace}:11111111-1111-4111-8111-111111111111:active" "1791160896309" "a"`), line(`"ZREM" "${namespace}:11111111-1111-4111-8111-111111111111:waiting" "a"`),
+    line(`"HSET" "${namespace}:control" "mode" "ready"`), `1791160866.3 [0 172.18.0.4:5000] "UNLINK" "${namespace}:control"`, line('"FLUSHALL"'), line(`"del" "${namespace}:x:claims"`)]) {
+    assert.equal(harness.monitorKeeps(kept), true, kept);
+  }
+  for (const dropped of [line(`"ZADD" "${namespace}:limit:user:status" "1" "r"`), line(`"HSET" "${namespace}:11111111-1111-4111-8111-111111111111:entries" "a" "{}"`),
+    line('"PING"'), line('"ZADD" "ratelimit:user" "1" "r"'), line(`"EVAL" "local x='ZADD ${namespace}:control'" "13"`), 'OK', '']) {
+    assert.equal(harness.monitorKeeps(dropped), false, dropped);
+  }
+});
+// ---- flash-sale-analysis-v3.0: a synthetic run directory of four buyers ----
+// Buyer 0 pays through a reservation, buyer 1 through a direct checkout whose first answer is 503,
+// buyer 2 is promoted just before the cutoff and never sees it, buyer 3 is promoted and expires unseen.
+async function queueRun(check, { arm = 'b' } = {}) {
+  const directory = await mkdtemp(join(tmpdir(), 'peakpass-v3-check-'));
+  const start = Date.parse('2026-10-05T00:00:00Z'), queue = arm !== 'a', offset = 3; // Redis clock = host clock + 3 ms
+  const settings = parseOptions(['--users', '4', '--rate', '2', '--arm', arm, '--pre-vus', '4', '--max-vus', '4']); // 2 s of arrival, cutoff at 17 s
+  const iso = ms => new Date(start + ms).toISOString();
+  const points = [{ type: 'Point', metric: 'scenario_start_ms', data: { time: iso(0), value: start, tags: {} } }];
+  const point = (metric, buyer, ms, value = 1, tags = {}, e) => points.push({ type: 'Point', metric, data: { time: iso(ms), value,
+    tags: { buyer: String(buyer), cohort: 'measurement', flow: buyer % 2 ? 'direct' : 'reservation', ...tags }, ...(e ? { metadata: { e: JSON.stringify(e) } } : {}) } });
+  const counts = Array.from({ length: 4 }, () => ({ status: 0, join: 0, cancel: 0, events: 0 }));
+  const call = (buyer, ms, stage, status, kind = 'normal', code = 'none') => {
+    const tags = { stage, kind, status: String(status), error_code: '0', code, business: status >= 200 && status < 300 ? 'success' : 'failure' };
+    point('api_responses', buyer, ms, 1, tags); point('api_duration', buyer, ms, 5, tags);
+    if (counts[buyer][stage] !== undefined) counts[buyer][stage]++;
+  };
+  const trace = (buyer, ms, event) => { counts[buyer].events++; point('admission_trace', buyer, ms, 1, { type: event.type }, { t: start + ms, ...event }); };
+  const poll = (buyer, ms, reason, state, status = 200) => { call(buyer, ms, 'status', status);
+    trace(buyer, ms, { type: 'poll', reason, mode: 'fixed', hidden: false, status, state, timedOut: false, baseMs: reason === 'timer' ? 5000 : null, u: reason === 'timer' ? 0 : null,
+      plannedDelayMs: reason === 'timer' ? 1000 : null, actualDelayMs: reason === 'timer' ? 1002 : null }); };
+  const finish = (buyer, ms, outcome, journey) => {
+    point('journey_outcomes', buyer, ms, 1, { outcome }); point('journey_duration', buyer, ms, ms - buyer * 500, { outcome });
+    if (outcome === 'paid') point('buyers_completed', buyer, ms, 1, { order_id: `o${buyer}`, ticket_ids: JSON.stringify([`t${buyer}`]) });
+    if (queue) point('admission_journey', buyer, ms, 1, { outcome }, { outcome, mode: 'fixed', hidden: false, startedAt: start + buyer * 500, endedAt: start + ms, joinKey: `j${buyer}`,
+      admissionId: `a${buyer}`, epoch: 'epoch', requests: { status: counts[buyer].status, join: counts[buyer].join, cancel: 0 }, traceEvents: counts[buyer].events,
+      recognition: null, missed: null, purchase: null, purchaseAttempts: 0, phase: 'waiting', ...journey });
+  };
+  for (let buyer = 0; buyer < 4; buyer++) {
+    const arrival = buyer * 500;
+    point('buyers_started', buyer, arrival); point('active_vus_at_arrival', buyer, arrival); point('arrival_lag_ms', buyer, arrival, 0);
+    if (queue) { poll(buyer, arrival + 5, 'recover', null); call(buyer, arrival + 10, 'join', 201); trace(buyer, arrival + 10, { type: 'join', status: 201 }); }
+  }
+  const recognize = (buyer, ms, upperMs) => trace(buyer, ms, { type: 'recognition', lowerMs: upperMs - 20, upperMs, layer: 'foreground', tApply: start + ms });
+  const purchase = (buyer, ms, attempt, status) => trace(buyer, ms, { type: 'purchase', attempt, tSend: start + ms - 20, tRecv: start + ms, status });
+  // Buyer 0: promoted at 1,000 ms, recognized 500 ms later, paid at 1,700 ms.
+  if (queue) { poll(0, 1010, 'timer', 'waiting'); poll(0, 1500, 'timer', 'admitted'); recognize(0, 1500, 500); }
+  call(0, 1540, 'reservation', 201); if (queue) { purchase(0, 1540, 1, 201); poll(0, 1560, 'refresh', 'consumed'); }
+  call(0, 1600, 'checkout', 201); call(0, 1700, 'settlement', 200);
+  finish(0, 1700, 'paid', { recognition: { lowerMs: 480, upperMs: 500, layer: 'foreground', at: start + 1500 }, purchaseAttempts: 1, phase: 'consumed',
+    purchase: { attempts: 1, firstSendAt: start + 1520, lastRecvAt: start + 1540, status: 201 } });
+  call(0, 1750, 'checkout', 201, 'replay'); call(0, 1800, 'settlement', 200, 'replay');
+  // Buyer 1: promoted at 1,500 ms, recognized 1,100 ms later; the first purchase answer is 503.
+  if (queue) { poll(1, 1520, 'timer', 'waiting'); poll(1, 2600, 'timer', 'admitted'); recognize(1, 2600, 1100); }
+  call(1, 2650, 'checkout', queue ? 503 : 201, 'normal', queue ? 'ADMISSION_UNAVAILABLE' : 'none');
+  if (queue) { purchase(1, 2650, 1, 503); call(1, 3000, 'checkout', 201, 'retry'); purchase(1, 3000, 2, 201); poll(1, 3020, 'refresh', 'consumed'); }
+  call(1, 3200, 'settlement', 200);
+  finish(1, 3200, 'paid', { recognition: { lowerMs: 1080, upperMs: 1100, layer: 'foreground', at: start + 2600 }, purchaseAttempts: 2, phase: 'consumed',
+    purchase: { attempts: 2, firstSendAt: start + 2630, lastRecvAt: start + 3000, status: 201 } });
+  // Buyers 2 and 3 do not buy in the queue arms; in arm a everybody pays.
+  if (queue) {
+    poll(2, 2010, 'timer', 'waiting'); poll(2, 9000, 'timer', 'waiting'); poll(2, 16500, 'timer', 'waiting'); finish(2, 17000, 'queue_waiting', {});
+    poll(3, 2510, 'timer', 'waiting'); poll(3, 9000, 'timer', 'waiting'); poll(3, 16000, 'timer', 'expired');
+    trace(3, 16000, { type: 'recognition-missed', state: 'expired' }); finish(3, 17000, 'admission_expired', { missed: 'expired', phase: 'expired' });
+  } else for (const buyer of [2, 3]) {
+    if (buyer === 2) call(2, 1020, 'reservation', 201);
+    call(buyer, 1100 + buyer * 100, 'checkout', 201); call(buyer, 1200 + buyer * 100, 'settlement', 200); finish(buyer, 1200 + buyer * 100, 'paid', {});
+  }
+  const paid = queue ? [0, 1] : [0, 1, 2, 3], loadEnd = queue ? 18000 : 4000;
+  const control = queue ? { generation: '0', epoch: 'epoch', mode: 'ready', runId: 'redis-run' } : null;
+  const policy = queue ? { protected: true, generation: '0', epoch: 'epoch', phase: 'open' } : { protected: false, generation: '0', epoch: 'epoch', phase: 'recovering' };
+  const manifest = { revision: 'flash-sale-v3.0', runId: 'synthetic-v3', arm, pollMode: settings.pollMode, workingTree: '', passed: false, smokePassed: false, settings, k6ExitCode: queue ? 99 : 0,
+    fixture: { userIds: [0, 1, 2, 3].map(i => `u${i}`), joinKeys: [0, 1, 2, 3].map(i => `j${i}`) }, loadEndedAt: iso(loadEnd), clockChecks: [0, 1].map(() => ({ offsetMs: 0, roundTripMs: 0 })),
+    profile: { revision: 'admission-v1-seed', rate: 2, capacity: 8, ttlMs: 30000, claimMs: 15000 }, applicationEnvironment: { ENABLE_ADMISSION: 'true' },
+    redis: { before: { config: { ...harness.REDIS_PROFILE }, runId: 'redis-run' }, after: { config: { ...harness.REDIS_PROFILE }, runId: 'redis-run' } },
+    policy: { before: { ...policy }, after: { ...policy } }, control: { before: control && { ...control }, after: control && { ...control } },
+    quiesce: { limitMs: 60000, elapsedMs: 0, reached: true, remaining: { waiting: 0, active: 0, claims: 0 } }, applicationStop: { seconds: 1, exitCode: 0, graceSeconds: 90 } };
+  const samples = Array.from({ length: loadEnd / 1000 + 1 }, (_, i) => ({ at: iso(i * 1000), endedAt: iso(i * 1000 + 100), waiting: 0, checkedOut: 1, hostCpuPercent: 1, hostFreeBytes: 4 * 1073741824,
+    generator: { cpuSeconds: 1, processes: [{ path: 'k6', isShim: false, cpuSeconds: 1, memoryBytes: 1 }] }, containers: ['app', 'postgres', 'redis'].map(service => ({ service, cpuPercent: 1, memoryPercent: 1 })),
+    // Somebody waits from 1 s to 16 s. Counts include the sentinel of each set.
+    queue: { hostMidMs: start + i * 1000, redisTimeMs: start + i * 1000 + offset, control: control && { ...control }, waiting: queue && i >= 1 && i <= 16 ? 3 : 1, active: queue && i >= 1 && i <= 3 ? 2 : 1, claims: 1, window: 1 } }));
+  const entry = (i, joined, admitted, state, extra = {}) => ({ admissionId: `a${i}`, userId: `u${i}`, epoch: 'epoch', sequence: String(i + 1), state, phase: 'idle', joinedAt: start + joined + offset,
+    admittedAt: admitted === null ? null : start + admitted + offset, ...extra });
+  const dump = { eventId: 'event', epoch: 'epoch', control, entries: queue ? [entry(0, 10, 1000, 'consumed'), entry(1, 510, 1500, 'consumed'), entry(2, 1010, 16900, 'expired'), entry(3, 1510, 2000, 'expired')] : [],
+    joins: queue ? { j0: 'a0', j1: 'a1', j2: 'a2', j3: 'a3' } : {}, waiting: [], active: [], claims: [], window: [] };
+  const files = { 'sql-snapshot.json': { orders: paid.map(i => ({ id: `o${i}`, user_id: `u${i}`, status: 'paid' })), tickets: paid.map(i => ({ id: `t${i}`, order_id: `o${i}` })) },
+    'verification.json': { integrityPassed: true, integrityNames: ['checkoutPaymentIdentity', 'admissionFinalSql', 'admissionLedger'], counts: {}, checks: { checkoutPaymentIdentity: true, admissionFinalSql: true, admissionLedger: true } },
+    'app-metrics.json': { poolSamples: samples, retrySamples: [], admissionLogs: queue ? [{ time: iso(2650), kind: 'transientPurchase' }] : [] }, 'cleanup.json': { passed: true },
+    'negative-checks.json': { dataUnchanged: true, checks: [...[0, 1, 2].map(() => ({ status: 401, expected: 401 })), ...(queue ? [{ name: 'purchase-without-admission', status: 400, expected: 400, code: 'ADMISSION_INVALID_INPUT', expectedCode: 'ADMISSION_INVALID_INPUT' }] : [])] },
+    'redis-admission.json': dump, 'admission-final.json': { rows: [], ledger: [] } };
+  const write = async () => {
+    const sum = metric => points.filter(p => p.metric === metric).reduce((n, p) => n + p.data.value, 0);
+    await writeFile(join(directory, 'k6-raw.jsonl'), points.map(JSON.stringify).join('\n'));
+    for (const file of ['observations.jsonl', 'resources.jsonl']) await writeFile(join(directory, file), samples.map(JSON.stringify).join('\n'));
+    for (const [name, value] of Object.entries(files)) await writeFile(join(directory, name), JSON.stringify(value));
+    await writeFile(join(directory, 'k6-summary.json'), JSON.stringify({ metrics: { buyers_started: { count: 4 }, buyers_completed: { count: paid.length }, iterations: { count: 4 }, http_reqs: { count: sum('api_responses') } } }));
+  };
+  try { await check({ directory, manifest, points, samples, files, dump, call, point, start, write, analyze: async () => { await write(); return (await import('./flash-sale-analysis.mjs')).analyzeRun(directory, manifest); } }); }
+  finally { await rm(directory, { recursive: true, force: true }); }
+}
+
+test('a rolling second is (t - 1000, t]', async () => {
+  const { rollingMax } = await import('./flash-sale-analysis.mjs');
+  assert.equal(rollingMax([]), 0);
+  assert.equal(rollingMax([0, 500, 999]), 3);
+  assert.equal(rollingMax([0, 1000]), 1, 'the left edge is outside');
+  assert.equal(rollingMax([1001, 2, 0, 1]), 3, 'order of the input is irrelevant');
+  assert.equal(rollingMax([0, 0, 0, 5000]), 3, 'equal instants are separate promotions');
+});
+
+test('a queue run keeps every scheduled buyer and keeps polling out of the purchase error share', async () => {
+  await queueRun(async ({ analyze }) => {
+    const r = await analyze();
+    assert.deepEqual([r.analysisRevision, r.arm, r.classification, r.invalidReasons], ['flash-sale-analysis-v3.0', 'b', 'valid-queue', []]);
+    // Completion: paid with matching SQL identity over the whole scheduled cohort.
+    assert.deepEqual([r.cohort.offered, r.cohort.confirmedPaid, r.cohort.completionFraction, r.cohort.unfinished], [4, 2, .5, 2]);
+    assert.deepEqual(r.cohort.outcomes, { paid: 2, queue_waiting: 1, admission_expired: 1 });
+    // Purchase writes: reservation, checkout and settlement that are no replay. 16 status and 4 join requests are not in it.
+    assert.deepEqual(r.purchase.all, { attempts: 6, failures: 1, fraction: 1 / 6 });
+    assert.deepEqual(r.purchase.arrivalWindow, { attempts: 3, failures: 0, fraction: 0 });
+    assert.deepEqual([r.window.nonReplayAttempts, r.window.failureFraction], [3, 0], 'the P2 window counts purchases only');
+    assert.deepEqual(r.purchase.horizon, { attempts: 6, failures: 1, fraction: 1 / 6 });
+    assert.deepEqual(r.purchase.measuredCohort, { attempts: 6, failures: 1, fraction: 1 / 6 });
+    assert.deepEqual([r.purchase.http503, r.purchase.http500InternalError, r.purchase.unanswered, r.purchase.conflicts], [1, 0, 0, {}]);
+    assert.deepEqual(r.purchase.firstRequest, { firstAttempts: 2, firstAttemptFailures: 1, firstAttemptFailureFraction: .5, repeats: 1 });
+    // Throughput in both windows: the arrival window of 2 s and the horizon of 2 s + 30 s.
+    assert.deepEqual([r.window.confirmedPaid, r.window.paidPerSecond], [1, .5]);
+    assert.deepEqual([r.horizon.seconds, r.horizon.confirmedPaid, r.horizon.paidPerSecond], [32, 2, 2 / 32]);
+    // Polling.
+    assert.deepEqual([r.polling.statusRequests, r.polling.joinRequests, r.polling.registeredUsers], [16, 4, 4]);
+    assert.deepEqual([r.polling.perRegisteredUser.min, r.polling.perRegisteredUser.max], [4, 4]);
+    assert.deepEqual(r.polling.byReason, { recover: 4, timer: 10, refresh: 2 });
+    assert.deepEqual([r.polling.outsideCadence, r.polling.perSecond.max, r.polling.lateMs.max, r.polling.plannedDelayMs.max], [6, 6, 2, 1000]);
+    // Recognition: everybody promoted before the cutoff is in the denominator.
+    assert.deepEqual([r.admission.registered, r.admission.promoted, r.admission.promotedAfterCutoff, r.admission.recognized, r.admission.missed, r.admission.unrecognized], [4, 4, 0, 2, 1, 1]);
+    assert.deepEqual([r.recognition.foreground.count, r.recognition.foreground.upperMs.p95, r.recognition.foreground.lowerMs.max, r.recognition.withinTwoSeconds], [2, 1070, 1080, true]);
+    // Waits and the time after admission.
+    assert.deepEqual([r.admission.queueWaitMs.count, r.admission.queueWaitMs.min, r.admission.queueWaitMs.max], [4, 490, 15890]);
+    assert.deepEqual([r.admission.recognitionToPaidMs.count, r.admission.recognitionToPaidMs.min, r.admission.recognitionToPaidMs.max], [2, 200, 600]);
+    assert.deepEqual([r.admission.admittedToPurchaseAnswerMs.min, r.admission.admittedToPurchaseAnswerMs.max, r.admission.slotOccupationSeconds], [540, 1500, 1.02]);
+    assert.equal(r.cohort.paidJourneyMs.max, 2700, 'the whole wait is arrival to paid');
+    // The queue: every admittedAt against R, and the promotions while somebody waited.
+    assert.deepEqual([r.queue.rate, r.queue.maxPromotionsPerRollingSecond, r.queue.rateHeld, r.queue.redisClockOffsetMs], [2, 2, true, 3]);
+    assert.deepEqual([r.queue.samples.waiting.max, r.queue.samples.active.max, r.queue.backlogSeconds, r.queue.promotionsInBacklog, r.queue.promotionAchievement], [2, 1, 15, 3, 3 / 30]);
+    assert.deepEqual(r.applicationLogs, { transientPurchase: 1, finalizationLeft: 0, notReclaimed: 0, iterationFailed: 0 });
+    assert.deepEqual([r.trace.complete, r.validity], [true, { policy: true, redisProcess: true, redisConfig: true, environment: true }]);
+  });
+});
+
+test('a queue run is invalid when its arm, its Redis or its trace is not what it claims', async () => {
+  const reasons = async (mutate, options) => { let result; await queueRun(async run => { await mutate(run); result = await run.analyze(); }, options); return result; };
+  const invalid = async (reason, mutate, options) => {
+    const r = await reasons(mutate, options);
+    assert.equal(r.classification, 'invalid-measurement', reason); assert.ok(r.invalidReasons.includes(reason), `${reason}: ${r.invalidReasons}`);
+  };
+  await invalid('policy', ({ manifest }) => { manifest.policy.after.epoch = 'another'; });
+  await invalid('policy', ({ manifest }) => { manifest.control.after.generation = '1'; });
+  await invalid('policy', ({ manifest }) => { manifest.policy.before.protected = false; });
+  await invalid('policy', ({ samples }) => { samples[5].queue.control = null; });
+  await invalid('policy', ({ manifest }) => { manifest.applicationEnvironment.ENABLE_ADMISSION = 'false'; });
+  await invalid('redis-restart', ({ manifest }) => { manifest.redis.after.runId = 'restarted'; });
+  await invalid('redis-restart', ({ samples }) => { samples[5].queue.control.runId = 'restarted'; });
+  await invalid('redis-config', ({ manifest }) => { manifest.redis.before.config.appendonly = 'yes'; });
+  await invalid('admission-limiter', ({ call }) => call(2, 3000, 'status', 429, 'normal', 'ADMISSION_RATE_LIMITED'));
+  await invalid('admission-limiter', ({ call }) => call(2, 3000, 'join', 429, 'normal', 'ADMISSION_QUEUE_FULL'));
+  await invalid('auth-or-limiter', ({ call }) => call(1, 3100, 'checkout', 429, 'retry'));
+  await invalid('auth-or-limiter', ({ call }) => call(2, 3000, 'status', 401));
+  await invalid('trace', ({ points }) => { points.splice(points.findIndex(p => p.metric === 'admission_trace' && p.data.tags.buyer === '2'), 1); });
+  await invalid('trace', ({ points }) => { const p = points.find(p => p.metric === 'admission_journey' && p.data.tags.buyer === '1'); p.data.metadata.e = p.data.metadata.e.replace('"joinKey":"j1"', '"joinKey":"other"'); });
+  await invalid('trace', ({ dump }) => { dump.joins.j3 = 'a0'; });
+  await invalid('admission-evidence', ({ files }) => { files['admission-final.json'].ledger = null; });
+  await invalid('queue-observer', ({ samples }) => { for (const sample of samples.slice(5, 9)) delete sample.queue; });
+  await invalid('auth', ({ files }) => { files['negative-checks.json'].checks.pop(); });
+  // Arm a must stay unprotected and has no control.
+  await invalid('policy', ({ manifest }) => { manifest.policy.after.protected = true; }, { arm: 'a' });
+  await invalid('policy', ({ samples }) => { samples[2].queue.control = { mode: 'ready' }; }, { arm: 'a' });
+  // Integrity: a row of the final SQL, a ledger mismatch, or more promotions in a second than R.
+  const defect = async mutate => assert.equal((await reasons(mutate)).classification, 'integrity-defect');
+  await defect(({ files }) => { files['admission-final.json'].rows = [{ check_name: 'seat_equation' }]; });
+  await defect(({ files }) => { files['admission-final.json'].ledger = ['entry a0 is consumed without a ledger row']; });
+  await defect(({ dump, start }) => { dump.entries[3].admittedAt = start + 1600; });
+  await defect(({ files }) => { files['sql-snapshot.json'].orders.pop(); });
+  // A late reclamation and a slow exit are published, not invalid; a verification run is not a measurement.
+  const late = await reasons(({ manifest }) => { manifest.quiesce = { limitMs: 60000, elapsedMs: 60010, reached: false, remaining: { waiting: 0, active: 1, claims: 1 } }; manifest.applicationStop.seconds = 73.4; });
+  assert.deepEqual([late.classification, late.disclosures.quiesce.reached, late.disclosures.applicationStop.seconds], ['valid-queue', false, 73.4]);
+  assert.equal((await reasons(({ manifest }) => { manifest.settings = { ...manifest.settings, monitor: true }; })).classification, 'valid-verification');
+});
+
+test('arm a of a v3 run is judged by the P2 rules and has no queue figures', async () => {
+  await queueRun(async ({ analyze }) => {
+    const r = await analyze();
+    assert.deepEqual([r.arm, r.invalidReasons, r.admission, r.polling, r.recognition], ['a', [], null, null, null]);
+    assert.match(r.classification, /^valid-(stable|overload)$/);
+    assert.deepEqual([r.cohort.completionFraction, r.purchase.all.attempts, r.purchase.all.failures, r.evidence.auth], [1, 10, 0, true]);
+    assert.deepEqual([r.queue.samples.waiting.max, r.queue.maxPromotionsPerRollingSecond, r.queue.rateHeld], [0, 0, true]);
+  }, { arm: 'a' });
+});
+
+test('a v2.6 run keeps the v2.6 analysis and its output shape', async () => {
+  const { analyzeRun } = await import('./flash-sale-analysis.mjs');
+  await analysisFixture(async ({ directory, manifest }) => {
+    const r = await analyzeRun(directory, manifest);
+    assert.deepEqual(Object.keys(r), ['revision', 'analysisRevision', 'runId', 'classification', 'smokePassed', 'k6ExitCode', 'invalidReasons', 'evidence', 'window', 'cohort', 'all', 'diagnostics', 'sqlCounts', 'failedSmokeChecks']);
+    assert.deepEqual([r.revision, r.classification], ['flash-sale-v2.6', 'valid-stable']);
+    // A manifest of an unknown revision is not measured by either rule set.
+    assert.ok((await analyzeRun(directory, { ...manifest, revision: 'flash-sale-v2.5' })).invalidReasons.includes('checkoutProtocol'));
+  });
+});
