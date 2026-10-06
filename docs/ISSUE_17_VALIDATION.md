@@ -78,13 +78,15 @@ Recognition is what the controller records in the generator: the interval `lower
 
 Invalid measurement: dropped iterations, started ≠ offered, an arrival lag above 250 ms, a script exception, a malformed success answer, missing observation, queue sample, pool, resource or generator evidence between the measurement start and the end of the load, host pressure (host CPU ≥ 90% or less than 1 GiB free in three resource samples in a row), a failed cleanup, a dirty tree; a policy, epoch, generation or control that changed or does not fit the arm; another Redis run id; a Redis setting that differs; a 401 or 403, a 429 on a purchase path, an admission 429 or `ADMISSION_QUEUE_FULL`; a buyer without a summary or whose trace or request counts do not add up; unread final evidence.
 
+Bounds of a gap between samples (rule of 2026-10-06, analyzer `flash-sale-analysis-v3.1`): 1,000 ms for the observation loop and the queue samples, 6,000 ms for the resource samples, and 2,000 ms for the application's pool samples of a v3 run. Until v3.0 the pool bound was 1,000 ms; the application's 250 ms sampler stalled for 1,001–1,593 ms on the instance near its CPU limit, which alone made three pilot runs invalid. The largest pool gap of a run is published in `disclosures.poolMaxGapMs`. A verdict given by v3.0 is not rewritten; the v3.1 verdict of a kept run is listed next to it.
+
 Integrity defect: a failed P2 SQL check, any row of `admission-final.sql`, a mismatch between the ledger and Redis, an HTTP paid that SQL does not have, more promotions in a rolling second than R. The series stops, the raw run is kept, nothing is analysed again with the survivors only, and it is reported before any product code changes.
 
 Published, not invalid: slots still in use when the bounded wait after the load ends (a late reclamation is product behaviour), and a slow application exit (F2), with duration and exit code. A Redis restart or reset makes a run invalid; the raw run is kept and the slot is repeated once under a new id with the suffix `r`.
 
 ### Run procedure
 
-A run goes through the run script outside the repository. It applies the P2 start gate (at least 2 GiB of free host memory in three samples 5 s apart, at most ten attempts 30 s apart), records host CPU with it, and then starts the fixture from a clean tree. Nothing else that loads the host (build, test, review) runs during a measured run. `MONITOR` is attached to the verification run only. End of a run: k6 ends → wait until no slot is in use (bounded by TTL + claim deadline + 15 s) → Redis dump → application stop → SQL snapshot → `admission-final.sql` → ledger comparison → cleanup.
+A run goes through the run script outside the repository. It applies the P2 start gate (at least 2 GiB of free host memory in three samples 5 s apart, at most ten attempts 30 s apart), records host CPU with it, and then starts the fixture from a clean tree. From 2026-10-06 the same three samples must also show a host CPU of at most 30%, and no container of another project may be running (`my-factory-db`, which runs permanently, is the exception); the retries are the same, and the container names before and after the run are in the gate record. Other projects' containers are never touched. Nothing else that loads the host (build, test, review) runs during a measured run. `MONITOR` is attached to the verification run only. End of a run: k6 ends → wait until no slot is in use (bounded by TTL + claim deadline + 15 s) → Redis dump → application stop → SQL snapshot → `admission-final.sql` → ledger comparison → cleanup.
 
 ## Pilot plan (fixed before the first pilot)
 
@@ -96,15 +98,24 @@ Every pilot uses the load model above unless a line says otherwise, 1,000 VUs, a
    - The formal arrival condition is the lowest step at which A is not stable. If at that step the unfinished share of the measurement cohort (1 − completion) and the write failure share of the cohort's attempts are both below 5%, it is the next higher step. If A is stable at every step, it is 50/s × 20 s and is described as a condition in which A is not overloaded.
    - If 10/s is not stable, the work stops.
 4. **Pilot branch** `claude/issue-17-p8-pilot`, local only: from the work branch, one commit that derives the polling boundary of `admission.service.ts` as `5 * admissionProfile.rate`, then one commit of constants per candidate. A candidate runs from a clean tree at its commit; its diff against the work branch and the hash of that diff are kept with the run.
-5. **R pilot**, arm B, formal arrival condition: `p8-pilot-b-r<R>-01` for R1 = min(highest step at which A was stable, 20) and R2 = ⌈R1/2⌉, each with batch = ⌈R/4⌉ and C = 3R, everything else seed. Drain budget: ⌈1.25 · buyers / R⌉ − arrival seconds + 45 s, rounded up to 5 s, so that the buyers' cutoff is ⌈1.25 · buyers / R⌉ + 30 s after the start.
-   - Chosen: the largest R whose run is valid and has a write failure share of the measurement cohort ≤ 1%, a recognition → paid p99 of the measurement cohort ≤ 2,000 ms, and no row of the final SQL. If neither candidate qualifies, R3 = ⌈R2/2⌉ is run once; if that fails too, the work stops.
-6. **C pilot**, arm B, R fixed: C ∈ {8, ⌈1.5 · R · h⌉, 3R}, where h is the mean slot occupation in seconds of the chosen R run (`admission.slotOccupationSeconds`). The run of 3R is the R pilot's; equal values are run once. Run ids `p8-pilot-b-r<R>c<C>-01`, the drain budget of the R pilot.
-   - Chosen: the smallest C whose run is valid, keeps the three criteria of the R pilot and reaches a promotion achievement of at least 95% while somebody waits (`queue.promotionAchievement`). If no C does, the work stops.
+5. **C pilot** (rule of 2026-10-06), arm B, formal arrival condition, R 20 and batch 5 fixed: `p8-pilot-b-r20c8-01` (C 8) and `p8-pilot-b-r20c12-01` (C 12), drain 275 s.
+   - Chosen: the largest C whose run is valid and has a write failure share of the measurement cohort ≤ 1%, a recognition → paid p99 of the measurement cohort ≤ 2,000 ms, and no row of the final SQL. If neither qualifies, the work stops.
+   - The promotion achievement while somebody waits (`queue.promotionAchievement`) is reported as a number and selects nothing.
    - An entry of a foreground buyer that expires is analysed and reported. The TTL is not changed.
-7. **Confirmation** `p8-pilot-c-01`: arm C with the chosen profile, same condition and drain budget.
+6. **R** (rule of 2026-10-06): with h the mean slot occupation in seconds of the chosen C run (`admission.slotOccupationSeconds`), R′ = min(20, max(2, ⌊C / (1.5 · h)⌋)) and batch = ⌈R′/4⌉. If R′ is 20, the chosen C run is the R run. Otherwise `p8-pilot-b-r<R′>c<C>-01`, arm B, once, with the drain budget ⌈1.25 · buyers / R′⌉ − arrival seconds + 45 s, rounded up to 5 s and at most 900 s.
+   - If that run is valid and keeps the three criteria of the C pilot, (R′, batch, C) is the proposed profile. If not, the work stops.
+7. **Confirmation** `p8-pilot-c-01`: arm C with the proposed profile, same condition and the drain budget of the run that gave the profile.
 8. **Verification** `p8-verify-b-01`: arm B with the chosen profile and `--monitor`. The capture must have begun on an empty admission keyspace and must not have ended by itself; the replay of `admission-transition-log` with the chosen R and C must report no violation, and its final sets must equal the Redis dump. Excluded from every statistic.
 
 The work also stops on an integrity defect, on two invalid runs in a row for one slot, and on ten failed start gates in a row.
+
+Items 5 and 6 were changed on 2026-10-06, after the R pilot had stopped and before the C pilot, by the user's decision (plan, "Decisions (user, 2026-10-06)"): the failure share followed C and not R, so C is calibrated first. As fixed before the first pilot, and as the R pilot below was run, they read:
+
+> 5. **R pilot**, arm B, formal arrival condition: `p8-pilot-b-r<R>-01` for R1 = min(highest step at which A was stable, 20) and R2 = ⌈R1/2⌉, each with batch = ⌈R/4⌉ and C = 3R, everything else seed. Drain budget: ⌈1.25 · buyers / R⌉ − arrival seconds + 45 s, rounded up to 5 s, so that the buyers' cutoff is ⌈1.25 · buyers / R⌉ + 30 s after the start.
+>    - Chosen: the largest R whose run is valid and has a write failure share of the measurement cohort ≤ 1%, a recognition → paid p99 of the measurement cohort ≤ 2,000 ms, and no row of the final SQL. If neither candidate qualifies, R3 = ⌈R2/2⌉ is run once; if that fails too, the work stops.
+> 6. **C pilot**, arm B, R fixed: C ∈ {8, ⌈1.5 · R · h⌉, 3R}, where h is the mean slot occupation in seconds of the chosen R run (`admission.slotOccupationSeconds`). The run of 3R is the R pilot's; equal values are run once. Run ids `p8-pilot-b-r<R>c<C>-01`, the drain budget of the R pilot.
+>    - Chosen: the smallest C whose run is valid, keeps the three criteria of the R pilot and reaches a promotion achievement of at least 95% while somebody waits (`queue.promotionAchievement`). If no C does, the work stops.
+>    - An entry of a foreground buyer that expires is analysed and reported. The TTL is not changed.
 
 ## Verification record
 
