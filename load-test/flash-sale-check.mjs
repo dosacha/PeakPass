@@ -934,7 +934,7 @@ test('the monitor capture of a verification run keeps the admission writes only'
     assert.equal(harness.monitorKeeps(dropped), false, dropped);
   }
 });
-// ---- flash-sale-analysis-v3.0: a synthetic run directory of four buyers ----
+// ---- flash-sale-analysis-v3.x: a synthetic run directory of four buyers ----
 // Buyer 0 pays through a reservation, buyer 1 through a direct checkout whose first answer is 503,
 // buyer 2 is promoted just before the cutoff and never sees it, buyer 3 is promoted and expires unseen.
 async function queueRun(check, { arm = 'b' } = {}) {
@@ -1037,7 +1037,7 @@ test('a rolling second is (t - 1000, t]', async () => {
 test('a queue run keeps every scheduled buyer and keeps polling out of the purchase error share', async () => {
   await queueRun(async ({ analyze }) => {
     const r = await analyze();
-    assert.deepEqual([r.analysisRevision, r.arm, r.classification, r.invalidReasons], ['flash-sale-analysis-v3.0', 'b', 'valid-queue', []]);
+    assert.deepEqual([r.analysisRevision, r.arm, r.classification, r.invalidReasons], ['flash-sale-analysis-v3.1', 'b', 'valid-queue', []]);
     // Completion: paid with matching SQL identity over the whole scheduled cohort.
     assert.deepEqual([r.cohort.offered, r.cohort.confirmedPaid, r.cohort.completionFraction, r.cohort.unfinished], [4, 2, .5, 2]);
     assert.deepEqual(r.cohort.outcomes, { paid: 2, queue_waiting: 1, admission_expired: 1 });
@@ -1132,6 +1132,38 @@ test('a v2.6 run keeps the v2.6 analysis and its output shape', async () => {
     assert.ok((await analyzeRun(directory, { ...manifest, revision: 'flash-sale-v2.5' })).invalidReasons.includes('checkoutProtocol'));
   });
 });
+test('a v3 run allows a gap of 2,000 ms between pool samples and publishes the largest gap', async () => {
+  // The pool samples alone are changed: sample 2 is 500 ms late, or missing, or missing with sample 3 late (arm a has five samples).
+  const late = (sample, ms) => ({ ...sample, at: new Date(Date.parse(sample.at) + ms).toISOString() });
+  const pool = async (change, options) => { let r; await queueRun(async ({ samples, files, analyze }) => { files['app-metrics.json'].poolSamples = change(samples); r = await analyze(); }, options); return r; };
+  for (const arm of ['b', 'a']) {
+    const even = await pool(samples => samples, { arm });
+    assert.deepEqual([even.invalidReasons, even.disclosures.poolMaxGapMs], [[], 1000], arm);
+    const stalled = await pool(samples => samples.map((s, i) => (i === 2 ? late(s, 500) : s)), { arm });
+    assert.deepEqual([stalled.invalidReasons, stalled.evidence.pool.maxGapMs, stalled.disclosures.poolMaxGapMs], [[], 1500, 1500], arm);
+    const bound = await pool(samples => samples.filter((_, i) => i !== 2), { arm });
+    assert.deepEqual([bound.invalidReasons, bound.disclosures.poolMaxGapMs], [[], 2000], `${arm}: the bound itself is inside`);
+    const missing = await pool(samples => samples.filter((_, i) => i !== 2).map((s, i) => (i === 2 ? late(s, 500) : s)), { arm });
+    assert.deepEqual([missing.classification, missing.invalidReasons, missing.disclosures.poolMaxGapMs], ['invalid-measurement', ['pool'], 2500], arm);
+  }
+  assert.equal((await pool(samples => samples.map((s, i) => (i === 2 ? late(s, 500) : s)))).classification, 'valid-queue');
+  // The other sample bounds stay: the same late sample in the observation loop is a gap of 1,500 ms and invalid.
+  let observer; await queueRun(async ({ samples, files, analyze }) => { files['app-metrics.json'].poolSamples = samples.map(s => ({ ...s })); samples[2] = late(samples[2], 500); observer = await analyze(); });
+  assert.ok(observer.invalidReasons.includes('observer') && !observer.invalidReasons.includes('pool'), String(observer.invalidReasons));
+});
+
+test('a v2.6 run keeps the pool sample bound of 1,000 ms', async () => {
+  const { analyzeRun } = await import('./flash-sale-analysis.mjs');
+  await analysisFixture(async ({ directory, manifest, save }) => {
+    const { readFile } = await import('node:fs/promises');
+    const stored = JSON.parse(await readFile(join(directory, 'app-metrics.json'), 'utf8'));
+    stored.poolSamples[1].at = new Date(Date.parse(stored.poolSamples[1].at) + 500).toISOString();
+    await save('app-metrics.json', stored);
+    const r = await analyzeRun(directory, manifest);
+    assert.deepEqual([r.classification, r.invalidReasons, r.evidence.pool.maxGapMs], ['invalid-measurement', ['pool'], 1500]);
+  });
+});
+
 test('a promotion after the buyers cutoff is outside the recognition denominator', async () => {
   await queueRun(async ({ dump, start, analyze }) => {
     dump.entries[2].admittedAt = start + 17500; // 0.5 s after the cutoff of 17 s: nobody was left to see it

@@ -7,7 +7,7 @@ import { join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { createHash } from 'node:crypto';
 
-export const ANALYSIS_REVISION = 'flash-sale-analysis-v3.0';
+export const ANALYSIS_REVISION = 'flash-sale-analysis-v3.1';
 
 export function stats(values) {
   const a = values.filter(Number.isFinite).sort((x, y) => x - y);
@@ -278,7 +278,8 @@ async function analyzeV3(directory, m, read) {
     checkoutAuditObserved: verification.integrityNames?.includes('checkoutPaymentIdentity') === true,
     accounting: metricAccounting(points, summary.metrics, s.users),
     observer: coverage(observations, left, loadEnd, 1000), 'queue-observer': coverage(queueSamples, left, loadEnd, 1000),
-    pool: coverage(app.poolSamples, left, loadEnd, 1000), resources: coverage(resources, left, loadEnd, 6000),
+    // The application's 250 ms sampler stalls on an instance near its CPU limit: 2,000 ms, and the largest gap is published (v3.1).
+    pool: coverage(app.poolSamples, left, loadEnd, 2000), resources: coverage(resources, left, loadEnd, 6000),
     clockAligned: clocks.length === 2 && clocks.every(o => Math.abs(o.offsetMs) + o.roundTripMs / 2 <= 100),
     generatorObserved: generatorObserved(resources, left, loadEnd, m.loadEndedAt),
     containersObserved: resourceWindow.length > 0 && resourceWindow.every(o => ['app', 'postgres', 'redis'].every(service => o.containers?.some(x => x.service === service && Number.isFinite(x.cpuPercent) && Number.isFinite(x.memoryPercent)))),
@@ -415,7 +416,7 @@ async function analyzeV3(directory, m, read) {
   return { revision: m.revision, analysisRevision: ANALYSIS_REVISION, runId: m.runId, arm: m.arm, pollMode: m.pollMode ?? null, profile: m.profile ?? null, classification,
     smokePassed: m.smokePassed ?? m.passed, k6ExitCode: m.k6ExitCode, invalidReasons, validity,
     // Product behaviour that is published with a run and does not make it invalid.
-    disclosures: { quiesce: m.quiesce ?? null, applicationStop: m.applicationStop ?? null, monitor: m.monitor ?? null, readyAfterMs: m.readyAfterMs ?? null },
+    disclosures: { quiesce: m.quiesce ?? null, applicationStop: m.applicationStop ?? null, monitor: m.monitor ?? null, readyAfterMs: m.readyAfterMs ?? null, poolMaxGapMs: evidence.pool.maxGapMs },
     // The numbers the pilot rules read. Thresholds are fixed in the protocol, not here.
     criteria: { completionFraction: c.completionFraction, purchaseFailureFraction: purchase.measuredCohort.fraction,
       paidP99AfterAdmissionMs: queueArm ? admission.measuredRecognitionToPaidMs.p99 : c.paidJourneyMs.p99, promotionAchievement: queue.promotionAchievement,
