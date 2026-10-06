@@ -221,3 +221,35 @@ The raw runs of 2026-10-05 were analysed again by `flash-sale-analysis-v3.1` (`8
 | `p8-pre-c-01` | valid-queue | valid-queue | 252 ms |
 
 Three runs that were invalid for the pool gap alone are `valid-queue` under v3.1; `p8-pilot-b-r10-01` stays invalid for the host incident. The tables above keep the verdicts as they were recorded, and no decision of 2026-10-05 is taken again from the v3.1 verdicts: by their figures none of the three runs meets the criteria either.
+
+### Preflight repeated on the changed harness (2026-10-06, commit `cdfee1b`, seed profile, 24 buyers at 2/s, 24 VUs, drain 30 s)
+
+| Run | Arm | Verdict | Paid | Final SQL rows / ledger mismatches | Controller recognition, foreground upper bound p50 / p95 | Start gate |
+| --- | --- | --- | --- | --- | --- | --- |
+| `p8-pre-a-02` | A | valid-stable | 24/24 | 0 / 0 | – | first attempt, host CPU 10.3–16.1%, no other container |
+| `p8-pre-b-02` | B | valid-queue | 24/24 | 0 / 0 | 686 / 782 ms (24 buyers) | first attempt, 1.1–7.5% |
+| `p8-pre-c-02` | C | valid-queue | 24/24 | 0 / 0 | 850 / 1,012 ms (24 buyers) | first attempt, 2.1–7.2% |
+
+Every trace was complete, no slot was in use when k6 ended, and no container, network or volume of the three projects was left.
+
+### C pilot (2026-10-06) — stopped, no candidate qualified
+
+Arm B, the formal arrival condition (50/s × 20 s, 1,000 buyers, warmup 5 s, 1,000 VUs), R 20 and batch 5 fixed, drain 275 s (buyers' cutoff 280 s after the start), each candidate a commit of the rebuilt local pilot branch on top of `aed5b97` (the polling boundary as `5 * admissionProfile.rate`). Criteria: a valid run, write failure share of the measurement cohort ≤ 1%, recognition → paid p99 of the cohort ≤ 2,000 ms, no row of the final SQL. Analysis v3.1; every start gate passed at the first attempt (host CPU 2.3–5.8% and no other container before the first run).
+
+| Run | Candidate commit, profile | Verdict | Completion of the cohort | Write failure share of the cohort | Recognition → paid p50 / p95 / p99 | Mean slot occupation | Promotion achievement in the backlog | First purchase request: failed first attempts | 503 / 500 answers | Largest pool gap | Final SQL rows |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| `p8-pilot-b-r20c8-01` | `1253770`, R 20 / batch 5 / C 8 | invalid (`pool`: a gap of 2,113 ms, the bound is 2,000 ms) | 671/750 | 263 of 1,940 (13.56%) | 288 / 3,755 / 4,339 ms | 2.738 s | 16.50% | 287 of 923 | 396 / 15 | 2,113 ms | 0 |
+| `p8-pilot-b-r20c8-01r` | the same | valid-queue | 711/750 (94.80%) | 285 of 2,066 (13.79%) | 277 / 3,852 / 5,731 ms | 2.606 s | 17.30% | 292 of 964 | 407 / 22 | 1,031 ms | 0 |
+| `p8-pilot-b-r20c12-01` | `48e6ef1`, R 20 / batch 5 / C 12 | valid-queue | 744/750 (99.20%) | 464 of 2,333 (19.89%) | 380 / 4,311 / 8,430 ms | 3.286 s | 19.99% | 430 of 1,000 | 672 / 30 | 1,077 ms | 0 |
+
+Neither C 8 nor C 12 meets the write failure and the latency criterion, so by the rule of 2026-10-06 the work stopped here: no R′ run, no confirmation run and no verification run were started, and no profile is proposed. Nothing was changed in response. The figures of the invalid run are shown as recorded and choose nothing.
+
+What the three runs show, as observations of pilots:
+
+- Integrity held: no row of the final SQL, the ledger equal to Redis, at most 13 promotions in a rolling second against R 20, every trace complete, no 401, 403, 429 or `ADMISSION_QUEUE_FULL`.
+- The capacity bound, not R: the sampled slots in use reached C in every run, and the promotions while somebody waited were 3.3–4.0 per second (924 in 280.0 s, 969 in 280.0 s, 992 in 248.1 s), close to C divided by the mean slot occupation (8 / 2.606 s = 3.1 per second, 12 / 3.286 s = 3.7 per second). The promotion achievement of 17–20% is against R 20 and says that R 20 was never the limit here.
+- The 503 answers are again serialization failures (40001) of the purchase with admission fields whose retries ran out: 396, 407 and 672 transient purchase failures in the application logs, all with SQLSTATE 40001. The share of failed attempts is 13.6–13.8% at C 8 and 19.9% at C 12. With the same C 8 but R 2 and batch 2 (the seed profile, generator pilot) one first attempt of 70 had failed, so the share does not follow C alone: it is lower when fewer purchases with admission fields run at the same moment.
+- Buyers finished all the same: the controller repeats an undecided purchase with the same identity, and 94.80% (C 8) and 99.20% (C 12) of the measurement cohort were paid. The write failure share counts every failed attempt, also one whose repeat succeeded.
+- The rule for R applied to these runs as arithmetic only (no run qualified, so it selects nothing): ⌊8 / (1.5 · 2.606)⌋ = 2 and ⌊12 / (1.5 · 3.286)⌋ = 2, the seed's R.
+- The controller recognition had a foreground upper bound p95 of 2.7–2.9 s (above the 2 s goal), application CPU a median of 58–67% of its one CPU with about 900 buyers polling once a second, and 3 to 13 admitted foreground buyers expired per run.
+- The wait for free slots ran to its bound of 60 s in the two C 8 runs (13 and 55 buyers were still waiting); in the C 12 run every buyer had been promoted and it took 2 ms.
