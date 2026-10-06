@@ -126,6 +126,8 @@ To be completed with each stage. So far (2026-10-05, run in this session unless 
 - Harness at `d2b51b0`: `npm run test:flash-sale` 50/50 on the host (Node 24.15.0) and 50/50 in a `node:18-alpine` container (Node 18.20.8, the major version of CI). Six behaviours were changed one at a time (the join key, the controller's stop at an outcome, admission fields on the reservation's checkout, polling in the purchase share, promotions after the cutoff, the activation gate) and the checks failed each time; `npm run build` passed; `npm run lint` 0 errors and 11 warnings, as at the base.
 - The 14 stored v2.6 archives of the v261 index, hashes verified, re-analysed by the v3 analyzer: every field but `analysisRevision` equals the stored analysis (stored evidence, re-analysed in this session).
 - A development smoke `p8-dev-b-01` (arm B, 12 buyers, 2/s, seed profile): classified `valid-queue`, 12 of 12 paid. It is not part of the pilot plan.
+- Analyzer v3.1 at `8e1148f` (2026-10-06, run in this session): the checks for the pool bound were seen failing first (2 of 52: the revision and the published gap), then `npm run test:flash-sale` 52/52 on the host (Node 24.15.0) and 52/52 in a `node:18-alpine` container (Node 18.20.8); `npm run build` passed; `npm run lint` 0 errors and 11 warnings; the 14 stored v2.6 archives re-analysed equal their index in every field but `analysisRevision`; `git diff 1bb2796 -- src frontend ':!src/tests'` is empty.
+- Start gate of 2026-10-06 in the run script (outside the repository): three samples with at least 2 GiB free and a host CPU of at most 30%, and no running container but `my-factory-db`; the names of the running containers before and after a run are in `gates/<run-id>.json`.
 
 ## Results
 
@@ -196,3 +198,26 @@ What the six runs have in common, as observations of pilots:
 - Admitted buyers of the foreground expired in every run (3 to 96 entries): the admission ran out while the purchase was repeated.
 - The wait for free slots after the load ran to its bound of 60 s in every run, because buyers were still waiting and the scheduler kept promoting them.
 - Another project's containers started on the host twice during these runs; one run was invalid for it.
+
+### Kept runs under analysis v3.1 (2026-10-06, stored evidence re-analysed in this session)
+
+The raw runs of 2026-10-05 were analysed again by `flash-sale-analysis-v3.1` (`8e1148f`). Their folders were only read: the stored `analysis.json` of each run is the v3.0 result and was not rewritten, and the v3.1 results are kept outside the repository (`run/reanalysis/<run-id>.v3.1.json`). In every run the two analyses differ only in the verdict fields shown here, in `evidence.pool` and in `disclosures.poolMaxGapMs`.
+
+| Run | Verdict as recorded (analysis v3.0) | Verdict of analysis v3.1 | Largest gap between pool samples |
+| --- | --- | --- | --- |
+| `p8-dev-b-01` | valid-queue | valid-queue | 266 ms |
+| `p8-gen-b-01` | valid-queue | valid-queue | 846 ms |
+| `p8-pilot-a-r10-01` | valid-stable | valid-stable | 262 ms |
+| `p8-pilot-a-r25-01` | valid-stable | valid-stable | 260 ms |
+| `p8-pilot-a-r50-01` | valid-overload | valid-overload | 291 ms |
+| `p8-pilot-b-r10-01` | invalid-measurement [observer,queue-observer,pool,resources,generatorObserved,host-pressure] | invalid-measurement [observer,queue-observer,pool,resources,generatorObserved,host-pressure] | 4464 ms |
+| `p8-pilot-b-r10-01r` | valid-queue | valid-queue | 974 ms |
+| `p8-pilot-b-r20-01` | invalid-measurement [pool] | valid-queue | 1059 ms |
+| `p8-pilot-b-r20-01r` | valid-queue | valid-queue | 745 ms |
+| `p8-pilot-b-r5-01` | invalid-measurement [pool] | valid-queue | 1593 ms |
+| `p8-pilot-b-r5-01r` | invalid-measurement [pool] | valid-queue | 1001 ms |
+| `p8-pre-a-01` | valid-stable | valid-stable | 252 ms |
+| `p8-pre-b-01` | valid-queue | valid-queue | 256 ms |
+| `p8-pre-c-01` | valid-queue | valid-queue | 252 ms |
+
+Three runs that were invalid for the pool gap alone are `valid-queue` under v3.1; `p8-pilot-b-r10-01` stays invalid for the host incident. The tables above keep the verdicts as they were recorded, and no decision of 2026-10-05 is taken again from the v3.1 verdicts: by their figures none of the three runs meets the criteria either.
