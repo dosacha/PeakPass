@@ -315,3 +315,132 @@ A reviewer that had not written the harness read the script, the fixture, the an
 - Reported per run in addition: `polling.lateMs` (generator timer lateness, which no validity rule judges), the recognition over all layers with the `reconnect` and unrecognized counts next to the foreground p95 (the criterion's percentile is over the recognized foreground buyers), and after the series the image ids of the eleven manifests are compared.
 - Application CPU and per-second polling are medians over windows of different length (arm A about 20 s, a queue arm until its last buyer) and are not compared between A and the queue arms.
 - Corrected in this document: the analysis revision and the number of checks in "What the branch adds", the description of the cutoff, and the definition of throughput.
+
+## Formal results (2026-10-08 23:06 to 2026-10-09 00:43 local, commit `6f9568f`, run in one stretch)
+
+Nine formal runs and two layer runs by the formal protocol above: 50 buyers per second for 20 s, 1,000 buyers (measurement cohort 750), 1,000 VUs, drain 900 s, profile `admission-v1-seed` (R 2, batch 2, C 8), analysis `flash-sale-analysis-v3.1`. **All eleven runs are valid at the first attempt; no slot was repeated and nothing was excluded.** Every start gate passed at the first attempt with `my-factory-db` as the only running container (host CPU 0.9–7.2%, 4.2–5.2 GiB free). Every figure below is one of these runs on one local host; it is not an operational result, and nothing is judged against the v2.6 baseline.
+
+### What the comparison shows
+
+- **A (no queue) is overloaded at this condition in three of three runs**: 16.00% [14.67%–19.73%] of the measurement cohort paid, 61.75% [59.32%–62.34%] of its purchase attempts failed, and the application answered 500 `INTERNAL_ERROR` 1,975 [1,907–1,977] times. The buyers who did not pay ended with `http_500`.
+- **B and C (queue, seed profile) completed the whole cohort in three of three runs**: 750 of 750 paid, with 0.32% [0.21%–0.37%] failed purchase attempts in B and none in C (0 of 1,875 in each run), and a paid p99 after admission of 804 ms [780–941 ms] in B and 134 ms [131–136 ms] in C.
+- **The price is the wait.** A buyer of the cohort waited from arrival to paid a median of 503.8 s in B and 306.8 s in C (p99 711.1 s and 485.9 s). With R 2 per second, 1,000 buyers cannot be admitted in less than 500 s; C stayed close to that bound and B took about 225 s longer. In A the 110–148 buyers who paid did so within 1.4–3.0 s (p99).
+- **Fixed polling held the scheduler back; adaptive polling did not.** B sent 249,395 [249,181–249,444] status requests, up to 971 in one second, and its scheduler reached 67.92% [67.92%–68.02%] of R while somebody waited. C sent 55,983 [55,938–56,061], up to 232 in one second, and reached 98.01% [97.98%–98.12%]. Criterion 4 (≥ 90%) is missed by B in three of three runs and met by C in three of three.
+- **The 2 s recognition goal, on the generator**: met by C in three of three runs (foreground upper bound p95 1,002 ms [987–1,004 ms]) and missed by B in three of three (2,720 ms [2,653–2,723 ms]). Every promoted buyer was recognized in every run (no unrecognized, no missed entry, no `reconnect` sample), so the foreground percentile covers all 1,000. This is the controller's recognition inside k6; the browser's recognition is not judged.
+- **Criteria**: C meets all four in every run. B meets completion, failures and latency in every run and misses the promotion achievement in every run. A misses completion and failures in every run; its latency criterion is conditional on the few buyers who paid (met in one run of three).
+- **Integrity**: in all eleven runs the final SQL returned no row, the ledger equals Redis, no rolling second had more than R promotions, every trace is complete, nothing was dropped, and no slot was in use when k6 ended.
+- **The 503 answers of B** (15 [10–26] over all attempts, 0–1 in C) are serialization failures of the SERIALIZABLE purchase with admission fields whose retries ran out, the limit recorded in #27; the controller's repeat with the same identity succeeded every time, and no buyer ended with a 503. No product code was changed.
+
+#### Per run, in the order they ran
+
+| Run | Arm | Verdict | Completion of the cohort | Write failures of the cohort (per attempt) | Paid p50 / p95 / p99 after admission | Promotion achievement | 1 completion ≥ 99% | 2 failures ≤ 1% | 3 p99 ≤ 2,000 ms | 4 promotion ≥ 90% | Final SQL rows / ledger mismatches |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| `p8-a-01` | A | valid-overload | 148/750 (19.73%) | 1,394 of 2,350 (59.32%) | 449 / 1,009 / 1,353 ms | – | missed | missed | met | – | 0 / 0 |
+| `p8-b-01` | B | valid-queue | 750/750 (100.00%) | 6 of 1,881 (0.32%) | 141 / 365 / 804 ms | 68.02% (996 in 732.2 s) | met | met | met | missed | 0 / 0 |
+| `p8-c-01` | C | valid-queue | 750/750 (100.00%) | 0 of 1,875 (0.00%) | 89 / 110 / 134 ms | 98.12% (998 in 508.6 s) | met | met | met | met | 0 / 0 |
+| `p8-b-02` | B | valid-queue | 750/750 (100.00%) | 7 of 1,882 (0.37%) | 132 / 348 / 941 ms | 67.92% (996 in 733.2 s) | met | met | met | missed | 0 / 0 |
+| `p8-c-02` | C | valid-queue | 750/750 (100.00%) | 0 of 1,875 (0.00%) | 90 / 109 / 136 ms | 98.01% (996 in 508.1 s) | met | met | met | met | 0 / 0 |
+| `p8-a-02` | A | valid-overload | 120/750 (16.00%) | 1,453 of 2,353 (61.75%) | 1,682 / 2,673 / 3,024 ms | – | missed | missed | missed | – | 0 / 0 |
+| `p8-c-03` | C | valid-queue | 750/750 (100.00%) | 0 of 1,875 (0.00%) | 89 / 107 / 131 ms | 97.98% (996 in 508.3 s) | met | met | met | met | 0 / 0 |
+| `p8-a-03` | A | valid-overload | 110/750 (14.67%) | 1,445 of 2,318 (62.34%) | 1,075 / 1,938 / 2,362 ms | – | missed | missed | missed | – | 0 / 0 |
+| `p8-b-03` | B | valid-queue | 750/750 (100.00%) | 4 of 1,879 (0.21%) | 143 / 367 / 780 ms | 67.92% (996 in 733.2 s) | met | met | met | missed | 0 / 0 |
+
+#### Per arm, median [minimum–maximum] of three runs
+
+| Figure | A (no queue) | B (queue, fixed polling) | C (queue, adaptive polling) |
+| --- | --- | --- | --- |
+| Completion of the measurement cohort | 16.00% [14.67%–19.73%] | 100.00% [100.00%–100.00%] | 100.00% [100.00%–100.00%] |
+| Paid buyers of the cohort per second of the 920 s horizon | 0.130 [0.120–0.161] | 0.815 [0.815–0.815] | 0.815 [0.815–0.815] |
+| Purchase write failure share of the cohort, per attempt | 61.75% [59.32%–62.34%] | 0.32% [0.21%–0.37%] | 0.00% [0.00%–0.00%] |
+| First purchase requests that failed at the first attempt (all buyers) | 450 [410–458] | 13 [10–24] | 1 [0–1] |
+| 503 answers (all attempts) | 0 [0–0] | 15 [10–26] | 1 [0–1] |
+| 500 `INTERNAL_ERROR` answers (all attempts) | 1,975 [1,907–1,977] | 0 [0–1] | 0 [0–0] |
+| Paid p50 after admission (A: arrival → paid) | 1,075 ms [449 ms–1,682 ms] | 141 ms [132 ms–143 ms] | 89 ms [89 ms–90 ms] |
+| Paid p99 after admission (A: arrival → paid) | 2,362 ms [1,353 ms–3,024 ms] | 804 ms [780 ms–941 ms] | 134 ms [131 ms–136 ms] |
+| Whole wait, arrival → paid p50 | 1.1 s [0.4 s–1.7 s] | 503.8 s [503.5 s–504.5 s] | 306.8 s [306.3 s–307.1 s] |
+| Whole wait, arrival → paid p95 | 1.9 s [1.0 s–2.7 s] | 695.9 s [695.5 s–696.5 s] | 471.6 s [471.4 s–471.6 s] |
+| Whole wait, arrival → paid p99 | 2.4 s [1.4 s–3.0 s] | 711.1 s [710.2 s–711.1 s] | 485.9 s [485.7 s–486.4 s] |
+| Promotion achievement while somebody waited | – | 67.92% [67.92%–68.02%] | 98.01% [97.98%–98.12%] |
+| Recognition, foreground upper bound p50 | – | 1,706 ms [1,704 ms–1,730 ms] | 514 ms [501 ms–551 ms] |
+| Recognition, foreground upper bound p95 | – | 2,720 ms [2,653 ms–2,723 ms] | 1,002 ms [987 ms–1,004 ms] |
+| Status requests | – | 249,395 [249,181–249,444] | 55,983 [55,938–56,061] |
+| Status requests per registered buyer, median | – | 248.0 [247.5–248.5] | 56.0 [56.0–56.0] |
+| Status requests in one second, maximum | – | 971 [958–975] | 232 [222–236] |
+| Mean slot occupation | – | 1.854 s [1.816 s–1.859 s] | 0.561 s [0.556 s–0.584 s] |
+| Time until k6 ended | 21 s [21 s–22 s] | 735 s [734 s–735 s] | 510 s [510 s–511 s] |
+| Runs meeting criteria 1 / 2 / 3 / 4 | 0 of 3 / 0 of 3 / 1 of 3 / – | 3 of 3 / 3 of 3 / 3 of 3 / 0 of 3 | 3 of 3 / 3 of 3 / 3 of 3 / 3 of 3 |
+
+#### Queue arms: recognition, polling and the generator
+
+| Run | Promoted / recognized / unrecognized / missed | Foreground upper bound p50 / p95 (count) | All layers upper bound p95 (count), `reconnect` | 2 s goal | Status requests, per second median / max | By reason | Timer lateness p99 / max | Foreground entries expired | Application CPU median / max | Largest pool gap |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| `p8-b-01` | 1000 / 1000 / 0 / 0 | 1,730 / 2,720 ms (1000) | 2,720 ms (1000), 0 | missed | 249,181, 279 / 971 | recover 1,000, timer 247,181, refresh 1,000 | 15 / 90 ms | 0 | 46% / 100% | 777 ms |
+| `p8-c-01` | 1000 / 1000 / 0 / 0 | 514 / 987 ms (1000) | 987 ms (1000), 0 | met | 56,061, 111 / 222 | recover 1,000, timer 54,061, refresh 1,000 | 1 / 68 ms | 0 | 27% / 65% | 285 ms |
+| `p8-b-02` | 1000 / 1000 / 0 / 0 | 1,706 / 2,723 ms (1000) | 2,723 ms (1000), 0 | missed | 249,444, 293 / 958 | recover 1,000, timer 247,444, refresh 1,000 | 18 / 84 ms | 0 | 46% / 99% | 762 ms |
+| `p8-c-02` | 1000 / 1000 / 0 / 0 | 501 / 1,002 ms (1000) | 1,002 ms (1000), 0 | met | 55,938, 109 / 236 | recover 1,000, timer 53,938, refresh 1,000 | 1 / 61 ms | 0 | 28% / 63% | 277 ms |
+| `p8-c-03` | 1000 / 1000 / 0 / 0 | 551 / 1,004 ms (1000) | 1,004 ms (1000), 0 | met | 55,983, 112 / 232 | recover 1,000, timer 53,983, refresh 1,000 | 1 / 58 ms | 0 | 28% / 60% | 267 ms |
+| `p8-b-03` | 1000 / 1000 / 0 / 0 | 1,704 / 2,653 ms (1000) | 2,653 ms (1000), 0 | missed | 249,395, 275 / 975 | recover 1,000, timer 247,395, refresh 1,000 | 15 / 92 ms | 0 | 44% / 100% | 732 ms |
+
+#### Throughput windows of the analysis, with the warmup cohort's late payers
+
+| Run | Arrival window (15 s): paid, of them warmup cohort, per second | Horizon window (915 s): paid, of them warmup cohort | Cohort paid over 920 s, per second | Outcomes of the cohort |
+| --- | --- | --- | --- | --- |
+| `p8-a-01` | 134, 2, 8.93 | 150, 2 | 0.161 | http_500 602, paid 148 |
+| `p8-b-01` | 20, 20, 1.33 | 992, 242 | 0.815 | paid 750 |
+| `p8-c-01` | 27, 27, 1.80 | 990, 240 | 0.815 | paid 750 |
+| `p8-b-02` | 20, 20, 1.33 | 992, 242 | 0.815 | paid 750 |
+| `p8-c-02` | 28, 28, 1.87 | 990, 240 | 0.815 | paid 750 |
+| `p8-a-02` | 70, 0, 4.67 | 120, 0 | 0.130 | paid 120, http_500 630 |
+| `p8-c-03` | 30, 30, 2.00 | 991, 241 | 0.815 | paid 750 |
+| `p8-a-03` | 75, 0, 5.00 | 110, 0 | 0.120 | paid 110, http_500 640 |
+| `p8-b-03` | 19, 19, 1.27 | 992, 242 | 0.815 | paid 750 |
+
+#### Validity and environment per run
+
+| Run | Commit | Application image | Arrival lag max | Dropped | Host CPU median / max | PostgreSQL / Redis CPU median | Trace | Free slots after | Application exit | Transient purchase failures in the log |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| `p8-a-01` | `6f9568f` | `219426f8c783` | 26 ms | 0 | 4.4% / 5.5% | 81% / 6% | complete | 2 ms | 0 after 0.6 s | 0 |
+| `p8-b-01` | `6f9568f` | `318c029a9a8d` | 49 ms | 0 | 5.9% / 12.0% | 6% / 9% | complete | 1 ms | 0 after 0.6 s | 15 |
+| `p8-c-01` | `6f9568f` | `1048ced49fb9` | 23 ms | 0 | 3.7% / 12.4% | 5% / 7% | complete | 2 ms | 0 after 0.6 s | 1 |
+| `p8-b-02` | `6f9568f` | `c5b22d63f173` | 30 ms | 0 | 6.3% / 11.8% | 5% / 9% | complete | 1 ms | 0 after 0.6 s | 26 |
+| `p8-c-02` | `6f9568f` | `67364c30d7a4` | 27 ms | 0 | 3.8% / 9.1% | 6% / 7% | complete | 1 ms | 0 after 0.6 s | 0 |
+| `p8-a-02` | `6f9568f` | `4cabab6693e0` | 20 ms | 0 | 4.6% / 5.2% | 81% / 6% | complete | 1 ms | 0 after 0.7 s | 0 |
+| `p8-c-03` | `6f9568f` | `a13efabe48ae` | 37 ms | 0 | 3.5% / 10.0% | 5% / 7% | complete | 1 ms | 0 after 0.6 s | 1 |
+| `p8-a-03` | `6f9568f` | `f0a8d6a91230` | 22 ms | 0 | 3.3% / 4.2% | 79% / 6% | complete | 1 ms | 0 after 0.6 s | 0 |
+| `p8-b-03` | `6f9568f` | `7eecfd67f1d1` | 25 ms | 0 | 6.1% / 11.7% | 6% / 10% | complete | 2 ms | 0 after 0.6 s | 10 |
+
+#### Layer runs (hidden 20%, no statistic)
+
+| Run | Arm | Verdict | Completion of the cohort | Write failures of the cohort | Promoted / recognized / unrecognized / missed | Foreground upper bound p50 / p95 (count) | Hidden upper bound p50 / p95 / max (count) | `reconnect` (count) | Entries expired: foreground | Outcomes of the cohort | Status requests | Final SQL rows / ledger |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| `p8-layer-b-01` | B | valid-queue | 750/750 | 30 of 1905 | 1000 / 1000 / 0 / 0 | 1,530 / 2,383 ms (800) | 7,617 / 14,546 / 16,239 ms (199) | 1 | 0 | paid 750 | 205,642 | 0 / 0 |
+| `p8-layer-c-01` | C | valid-queue | 750/750 | 1 of 1876 | 1000 / 1000 / 0 / 0 | 530 / 995 ms (800) | 8,001 / 14,027 / 14,887 ms (200) | 0 | 0 | paid 750 | 48,559 | 0 / 0 |
+
+Reading the tables:
+
+- Throughput is compared by the cohort's paid buyers over the 920 s horizon (reporting rule of the independent review). B and C both show 0.815 per second because both completed all 750; the figure does not separate them, the whole wait and the time until k6 ended do. The analyzer's windows count late payers of the warmup cohort (240–242 of about 991 in a queue arm, 0–2 in A) and are shown for transparency only.
+- Application CPU, per-second polling and "time until k6 ended" come from windows of different length (A about 21 s, C about 510 s, B about 735 s); CPU and polling are not compared between A and the queue arms.
+- The generator did not limit arm B: its timers were late by at most 92 ms (p99 15–18 ms), the arrival lag was at most 49 ms and host CPU at most 12.4%.
+- Images over 11 runs: application 11 distinct id(s), PostgreSQL 1, Redis 1; commits 6f9568f780219ea8e28e026072c448a38e8e069b. The application image is built again for every run, so its id differs from run to run; the 15 hashed source files are identical in all eleven manifests, and PostgreSQL and Redis ran from one image id each.
+- Layer runs: with 20% of the buyers in a hidden tab the hidden layer's recognition had an upper bound p95 of 14.5 s (B) and 14.0 s (C), which is the hidden polling interval of 15 s at work, while the foreground layer stayed where it was in the formal runs (2,383 ms and 995 ms). Everybody was recognized and paid; no entry expired. In `p8-layer-b-01` 30 of 1,905 purchase attempts of the cohort failed (1.57%); the layer runs enter no statistic.
+
+### Limits of these results
+
+- One host, one application instance with one scheduler, one arrival condition, three repeats per arm; minimum and maximum of three are not a confidence interval.
+- The buyers are k6 iterations that run the page's controller; k6 cannot cancel a request, every tab is in the foreground in the formal runs, nobody leaves or cancels, and a purchase follows recognition after 20 ms.
+- The profile was chosen by single pilot runs (see the pilot sections). Larger R with C 8 or 12 failed the write failure criterion because of the serialization failures of the purchase with admission fields (#27); that product limit, not the queue, is what keeps the profile at the seed.
+- The promotion achievement of B is the scheduler of one instance sharing one CPU with about 900 polls per second; the tick interval itself was not measured.
+- The whole wait of several minutes is the direct consequence of R 2 per second for 1,000 buyers. Whether that wait is acceptable is a product decision this comparison does not make.
+
+### Evidence
+
+`load-test/results/flash-sale-abc-v3/index.json` lists every P8 run (35) with its kind, commit, profile, settings and verdict. For the nine formal and two layer runs it carries the full analysis and names one archive each (`<run-id>.zip`, 0.4–1.7 MB, 15 MB together) with size and SHA256; an archive holds every artifact of the run except `k6-raw.jsonl` and `app.jsonl`. Those two stay in the ignored result folder of the work tree (formal B run: 1.0 GB and 188 MB) with their size and SHA256 in the index under `localOnly`, as do all artifacts of the pilot, preflight, development, invalid and verification runs. A check of `load-test/flash-sale-check.mjs` verifies every archive against the index.
+
+### Verification of the final state (2026-10-09, run in this session after the series)
+
+- `npm run test:flash-sale` 53/53 on the host (Node 24.15.0) and 53/53 in a `node:18-alpine` container (Node 18.20.8); the added check is the one on the evidence index.
+- `npm run build` passed; `npm run lint` 0 errors and 11 warnings, as at the base; `npm test` (unit) 251/251 in 25 suites.
+- The 14 stored v2.6 archives re-analysed equal their index in every field but `analysisRevision`.
+- `git diff 1bb2796 -- src frontend` and the diff of the contract document and the migrations are empty: no product code, test under `src`, contract or migration changed in P8. The integration and fault suites and the browser scenarios were therefore not run again; their last results are those of P7 at the consumed commit.
+- No container, network or volume of this task is left; the images `peakpass:fs-p8-*` are kept until close-out.
+- Corrected with this commit (D13, facts only): three statements of `docs/ISSUE_16_VALIDATION.md` that were written before the merge of PR #31.

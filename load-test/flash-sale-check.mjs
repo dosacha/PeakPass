@@ -1172,3 +1172,25 @@ test('a promotion after the buyers cutoff is outside the recognition denominator
     assert.equal(r.classification, 'valid-queue');
   });
 });
+
+test('the P8 index names the archive of every formal and layer run with its size and hash', async () => {
+  const { createHash } = await import('node:crypto');
+  const folder = new URL('./results/flash-sale-abc-v3/', import.meta.url);
+  const index = JSON.parse(await readFile(new URL('index.json', folder), 'utf8'));
+  const { ANALYSIS_REVISION } = await import('./flash-sale-analysis.mjs');
+  assert.deepEqual([index.revision, index.analysisRevision], [harness.REVISION, ANALYSIS_REVISION]);
+  const archived = index.runs.filter(run => run.archive);
+  assert.deepEqual(archived.map(run => run.runId).sort(), [...index.order, ...index.layers].sort());
+  assert.deepEqual([index.order.length, index.layers.length, new Set(archived.map(run => run.commit)).size], [9, 2, 1], 'eleven runs of one commit');
+  for (const run of archived) {
+    const bytes = await readFile(new URL(run.archive, folder));
+    assert.deepEqual([bytes.length, createHash('sha256').update(bytes).digest('hex')], [run.bytes, run.sha256], run.runId);
+    assert.deepEqual([run.analysis.runId, run.analysis.analysisRevision, run.analysis.classification, run.analysis.invalidReasons], [run.runId, ANALYSIS_REVISION, run.classification, []], run.runId);
+    assert.match(run.classification, run.arm === 'a' ? /^valid-(stable|overload|limited)$/ : /^valid-queue$/, run.runId);
+    assert.deepEqual([run.settings.users, run.settings.rate, run.settings.drainSeconds, run.settings.hiddenShare, run.analysis.criteria.finalSqlRows, run.analysis.criteria.ledgerMismatches],
+      [1000, 50, 900, run.kind === 'layer' ? 20 : 0, 0, 0], run.runId);
+    // The two raw files are not in the archive; the index carries their size and hash.
+    for (const name of ['k6-raw.jsonl', 'app.jsonl']) assert.match(run.localOnly[name].sha256, /^[0-9a-f]{64}$/, `${run.runId} ${name}`);
+  }
+  assert.deepEqual(['a', 'b', 'c'].map(arm => index.order.filter(id => id.startsWith(`p8-${arm}-`)).length), [3, 3, 3]);
+});
