@@ -616,7 +616,7 @@ function virtualClock(start = Date.parse('2026-10-05T00:00:00.000Z')) {
 const QUEUE_EPOCH = '11111111-1111-4111-8111-111111111111';
 const purchaseStages = ['reservation', 'checkout', 'settlement'];
 
-async function runQueue({ arm = 'b', iteration = 0, options = [], faults = [], admitAfterMs = 1500, position = 30, latencyMs = 5, fate = null, random = null } = {}) {
+async function runQueue({ arm = 'b', iteration = 0, options = [], faults = [], admitAfterMs = 1500, position = 30, latencyMs = 5, fate = null, random = null, shape = body => body } = {}) {
   const secret = 'test-webhook-secret', clock = virtualClock(), start = clock.now();
   const settings = parseOptions(['--users', '2', '--rate', '1', '--replay-every', '1', '--arm', arm, '--pre-vus', '2', '--max-vus', '2', ...options]);
   const users = [0, 1].map(i => ({ id: `user-${i}`, token: jwt.sign({ sub: `user-${i}` }, 'a'.repeat(32)), checkoutKey: `checkout-${i}`, callbackKey: `callback-${i}`, provider: `provider-${i}`, joinKey: `join-${i}` }));
@@ -644,7 +644,7 @@ async function runQueue({ arm = 'b', iteration = 0, options = [], faults = [], a
   const order = { id: 'order', status: 'paid', userId: user.id, eventId: 'event', quantity: settings.quantity, tierId: 'standard', reservationId: iteration === 0 ? 'reservation' : null };
   const tickets = Array.from({ length: settings.quantity }, (_, i) => ({ id: `ticket-${i}`, orderId: 'order', userId: user.id, eventId: 'event', status: 'active' }));
   function answer(stage, kind, input) {
-    if (stage === 'status') return [200, admissionBody()];
+    if (stage === 'status') return [200, shape(admissionBody())];
     if (stage === 'join') { entry ??= { state: 'waiting', joined: clock.now(), key: input.joinRequestId }; return [201, admissionBody()]; }
     if (input.admissionId && entry.state === 'admitted') entry.state = 'consumed';
     if (stage === 'reservation') return [201, { id: 'reservation', userId: user.id, eventId: 'event', quantity: settings.quantity, tierId: 'standard', status: 'active' }];
@@ -854,6 +854,29 @@ test('every way a queue journey ends is one outcome, and nothing starts after th
   // A repeat that is waiting when the cutoff arrives is dropped.
   await ends('http_503', { admitAfterMs: 15500, faults: [{ stage: 'reservation', status: 503, code: 'ADMISSION_UNAVAILABLE' }] }, run => assert.ok(run.of('reservation').length <= 2));
   await ends('unknown_outcome', { admitAfterMs: 8000, faults: [{ stage: 'reservation', status: 0 }] }, run => assert.equal(run.of('reservation').length, 1));
+  // Paid shortly before the cutoff: the first replay is out when it passes and is not answered, and the second does not start.
+  await ends('paid', { admitAfterMs: 14000, faults: [{ stage: 'checkout', kind: 'replay', status: 0 }] }, run => {
+    const replays = run.requests.filter(r => r.kind === 'replay');
+    assert.deepEqual(replays.map(r => r.stage), ['checkout']);
+    assert.ok(replays[0].at < run.deadline && replays[0].at + 10000 > run.deadline, 'the first replay spans the cutoff');
+    assert.ok(run.metrics.some(m => m.name === 'replay_failures' && m.value === 1), 'the unanswered replay is a replay failure');
+  });
+  // Before the cutoff both replays are sent, as in arm a.
+  await ends('paid', {}, run => assert.deepEqual(run.requests.filter(r => r.kind === 'replay').map(r => r.stage), ['checkout', 'settlement']));
+});
+
+test('a status answer without the times the recognition needs is a protocol failure', async () => {
+  const failures = run => run.metrics.filter(m => m.name === 'protocol_failures' && m.value === 1).map(m => m.tags.stage);
+  const whole = await runQueue();
+  assert.deepEqual([failures(whole), Number.isFinite(whole.journeys[0].recognition.upperMs)], [[], true]);
+  const admitted = body => body.admission?.state === 'admitted';
+  for (const [name, shape] of [
+    ['serverTime', body => { if (admitted(body)) delete body.serverTime; return body; }],
+    ['serverTime that is no time', body => { if (admitted(body)) body.serverTime = 'soon'; return body; }],
+    ['admittedAt', body => { if (admitted(body)) body.admission.admittedAt = null; return body; }],
+    ['expiresAt', body => { if (admitted(body)) delete body.admission.expiresAt; return body; }],
+    ['serverTime while waiting', body => { if (body.admission?.state === 'waiting') delete body.serverTime; return body; }],
+  ]) assert.ok(failures(await runQueue({ shape })).includes('status'), name);
 });
 
 test('the queue path judges purchase answers as the A path does', async () => {
@@ -1037,7 +1060,7 @@ test('a rolling second is (t - 1000, t]', async () => {
 test('a queue run keeps every scheduled buyer and keeps polling out of the purchase error share', async () => {
   await queueRun(async ({ analyze }) => {
     const r = await analyze();
-    assert.deepEqual([r.analysisRevision, r.arm, r.classification, r.invalidReasons], ['flash-sale-analysis-v3.1', 'b', 'valid-queue', []]);
+    assert.deepEqual([r.analysisRevision, r.arm, r.classification, r.invalidReasons], ['flash-sale-analysis-v3.2', 'b', 'valid-queue', []]);
     // Completion: paid with matching SQL identity over the whole scheduled cohort.
     assert.deepEqual([r.cohort.offered, r.cohort.confirmedPaid, r.cohort.completionFraction, r.cohort.unfinished], [4, 2, .5, 2]);
     assert.deepEqual(r.cohort.outcomes, { paid: 2, queue_waiting: 1, admission_expired: 1 });
@@ -1065,6 +1088,8 @@ test('a queue run keeps every scheduled buyer and keeps polling out of the purch
     assert.deepEqual([r.admission.recognitionToPaidMs.count, r.admission.recognitionToPaidMs.min, r.admission.recognitionToPaidMs.max], [2, 200, 600]);
     assert.deepEqual([r.admission.admittedToPurchaseAnswerMs.min, r.admission.admittedToPurchaseAnswerMs.max, r.admission.slotOccupationSeconds], [540, 1500, 1.02]);
     assert.equal(r.cohort.paidJourneyMs.max, 2700, 'the whole wait is arrival to paid');
+    // Expired as Redis kept it: buyer 3 saw it; buyer 2 was promoted 100 ms before the cutoff, left as waiting, and its entry expired afterwards.
+    assert.deepEqual([r.admission.foregroundExpired, r.admission.expiredEntries], [1, { foreground: 2, hidden: 0, byOutcome: { queue_waiting: 1, admission_expired: 1 } }]);
     // The queue: every admittedAt against R, and the promotions while somebody waited.
     assert.deepEqual([r.queue.rate, r.queue.maxPromotionsPerRollingSecond, r.queue.rateHeld, r.queue.redisClockOffsetMs], [2, 2, true, 3]);
     assert.deepEqual([r.queue.samples.waiting.max, r.queue.samples.active.max, r.queue.backlogSeconds, r.queue.promotionsInBacklog, r.queue.promotionAchievement], [2, 1, 15, 3, 3 / 30]);
@@ -1094,6 +1119,10 @@ test('a queue run is invalid when its arm, its Redis or its trace is not what it
   await invalid('trace', ({ points }) => { points.splice(points.findIndex(p => p.metric === 'admission_trace' && p.data.tags.buyer === '2'), 1); });
   await invalid('trace', ({ points }) => { const p = points.find(p => p.metric === 'admission_journey' && p.data.tags.buyer === '1'); p.data.metadata.e = p.data.metadata.e.replace('"joinKey":"j1"', '"joinKey":"other"'); });
   await invalid('trace', ({ dump }) => { dump.joins.j3 = 'a0'; });
+  const journeyOf = (points, buyer, change) => { const p = points.find(p => p.metric === 'admission_journey' && p.data.tags.buyer === String(buyer)), e = JSON.parse(p.data.metadata.e); change(e); p.data.metadata.e = JSON.stringify(e); };
+  await invalid('trace', ({ points }) => journeyOf(points, 0, e => { e.recognition.upperMs = null; }));
+  await invalid('trace', ({ points }) => journeyOf(points, 1, e => { e.recognition.lowerMs = null; }));
+  await invalid('trace', ({ points }) => journeyOf(points, 1, e => { delete e.recognition.at; }));
   await invalid('admission-evidence', ({ files }) => { files['admission-final.json'].ledger = null; });
   await invalid('queue-observer', ({ samples }) => { for (const sample of samples.slice(5, 9)) delete sample.queue; });
   await invalid('auth', ({ files }) => { files['negative-checks.json'].checks.pop(); });
@@ -1110,6 +1139,18 @@ test('a queue run is invalid when its arm, its Redis or its trace is not what it
   const late = await reasons(({ manifest }) => { manifest.quiesce = { limitMs: 60000, elapsedMs: 60010, reached: false, remaining: { waiting: 0, active: 1, claims: 1 } }; manifest.applicationStop.seconds = 73.4; });
   assert.deepEqual([late.classification, late.disclosures.quiesce.reached, late.disclosures.applicationStop.seconds], ['valid-queue', false, 73.4]);
   assert.equal((await reasons(({ manifest }) => { manifest.settings = { ...manifest.settings, monitor: true }; })).classification, 'valid-verification');
+});
+
+test('a manifest of the first and of the current v3 harness revision is analysed as a v3 run', async () => {
+  assert.equal(harness.REVISION, 'flash-sale-v3.1');
+  await queueRun(async ({ manifest, analyze }) => {
+    assert.equal(manifest.revision, 'flash-sale-v3.0');
+    const first = await analyze();
+    manifest.revision = harness.REVISION;
+    const current = await analyze();
+    assert.deepEqual([first.classification, current.classification, current.revision], ['valid-queue', 'valid-queue', 'flash-sale-v3.1']);
+    assert.deepEqual({ ...current, revision: first.revision }, first);
+  });
 });
 
 test('arm a of a v3 run is judged by the P2 rules and has no queue figures', async () => {
@@ -1177,15 +1218,14 @@ test('the P8 index names the archive of every formal and layer run with its size
   const { createHash } = await import('node:crypto');
   const folder = new URL('./results/flash-sale-abc-v3/', import.meta.url);
   const index = JSON.parse(await readFile(new URL('index.json', folder), 'utf8'));
-  const { ANALYSIS_REVISION } = await import('./flash-sale-analysis.mjs');
-  assert.deepEqual([index.revision, index.analysisRevision], [harness.REVISION, ANALYSIS_REVISION]);
+  assert.deepEqual([index.revision, index.analysisRevision], ['flash-sale-v3.0', 'flash-sale-analysis-v3.1'], 'as the runs were made and analysed');
   const archived = index.runs.filter(run => run.archive);
   assert.deepEqual(archived.map(run => run.runId).sort(), [...index.order, ...index.layers].sort());
   assert.deepEqual([index.order.length, index.layers.length, new Set(archived.map(run => run.commit)).size], [9, 2, 1], 'eleven runs of one commit');
   for (const run of archived) {
     const bytes = await readFile(new URL(run.archive, folder));
     assert.deepEqual([bytes.length, createHash('sha256').update(bytes).digest('hex')], [run.bytes, run.sha256], run.runId);
-    assert.deepEqual([run.analysis.runId, run.analysis.analysisRevision, run.analysis.classification, run.analysis.invalidReasons], [run.runId, ANALYSIS_REVISION, run.classification, []], run.runId);
+    assert.deepEqual([run.analysis.runId, run.analysis.analysisRevision, run.analysis.classification, run.analysis.invalidReasons], [run.runId, index.analysisRevision, run.classification, []], run.runId);
     assert.match(run.classification, run.arm === 'a' ? /^valid-(stable|overload|limited)$/ : /^valid-queue$/, run.runId);
     assert.deepEqual([run.settings.users, run.settings.rate, run.settings.drainSeconds, run.settings.hiddenShare, run.analysis.criteria.finalSqlRows, run.analysis.criteria.ledgerMismatches],
       [1000, 50, 900, run.kind === 'layer' ? 20 : 0, 0, 0], run.runId);

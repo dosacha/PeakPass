@@ -151,7 +151,7 @@ function purchase() {
   }
 }
 
-// ---- Arms b and c: the queue journey (flash-sale-v3.0) ----
+// ---- Arms b and c: the queue journey (flash-sale-v3.0; v3.1 checks the times of a status answer and the cutoff before each replay) ----
 // One iteration is one buyer with one tab: one controller of frontend/admission-polling.js with its
 // transport, clock, timers and visibility injected. k6 has no AbortController and cannot cancel a
 // request, so a request ends by its timeout. Nothing here blocks the VU's event loop, and every timer
@@ -215,9 +215,12 @@ function admissionRequest(user, method, path, body, note) {
   note.requests[stage]++;
   return http.asyncRequest(method, `${__ENV.FS_BASE_URL}${path}`, payload, { headers, tags, timeout: admission.POLICY.timeoutMs }).then(response => {
     const result = json(response);
-    const valid = (response.status === 200 || response.status === 201) && result.contractRevision === 'admission-v1'
+    // The recognition is computed from serverTime and, once admitted, from admittedAt and expiresAt: an answer without them is no success.
+    const time = value => typeof value === 'string' && Number.isFinite(Date.parse(value));
+    const valid = (response.status === 200 || response.status === 201) && result.contractRevision === 'admission-v1' && time(result.serverTime)
       && result.queue?.eventId === fixture.eventId && typeof result.queue.epoch === 'string'
-      && (result.admission === null || (result.admission?.epoch === result.queue.epoch && typeof result.admission.admissionId === 'string'));
+      && (result.admission === null || (result.admission?.epoch === result.queue.epoch && typeof result.admission.admissionId === 'string'
+        && (result.admission.state !== 'admitted' || (time(result.admission.admittedAt) && time(result.admission.expiresAt)))));
     const metricTags = { ...tags, status: String(response.status), error_code: String(response.error_code || 0), code: result.error?.code ?? 'none', business: valid ? 'success' : 'failure' };
     responses.add(1, metricTags);
     apiDuration.add(response.timings.duration, metricTags);
@@ -372,7 +375,8 @@ async function purchaseThroughQueue() {
   if (outcome === 'paid' && s.replayEvery > 0 && index % s.replayEvery === 0 && Date.now() < deadline) {
     const ticketIds = result.tickets.map(t => t.id), { body, settlement, orderId } = done.replay;
     const replayCheckout = await requestAsync('checkout', body, user, user.checkoutKey, 'replay', orderId, ticketIds);
-    const replaySettlement = await requestAsync('settlement', settlement, user, user.callbackKey, 'replay', orderId, ticketIds);
-    if (!replayCheckout.businessValid || !replaySettlement.businessValid) replayFailures.add(1);
+    // The cutoff holds for each replay: the second does not start after it.
+    const replaySettlement = Date.now() < deadline ? await requestAsync('settlement', settlement, user, user.callbackKey, 'replay', orderId, ticketIds) : null;
+    if (!replayCheckout.businessValid || (replaySettlement && !replaySettlement.businessValid)) replayFailures.add(1);
   }
 }

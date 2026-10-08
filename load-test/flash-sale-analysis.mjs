@@ -7,7 +7,7 @@ import { join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { createHash } from 'node:crypto';
 
-export const ANALYSIS_REVISION = 'flash-sale-analysis-v3.1';
+export const ANALYSIS_REVISION = 'flash-sale-analysis-v3.2';
 
 export function stats(values) {
   const a = values.filter(Number.isFinite).sort((x, y) => x - y);
@@ -158,7 +158,7 @@ export async function analyzeRun(directory, suppliedManifest) {
   const m = suppliedManifest ?? await read('manifest.json');
   if (!suppliedManifest) await verifyArtifacts(directory, m);
   // A v3 run has arms and a queue; everything below this line is the v2.6 analysis, unchanged.
-  if (m.revision === 'flash-sale-v3.0') return analyzeV3(directory, m, read);
+  if (['flash-sale-v3.0', 'flash-sale-v3.1'].includes(m.revision)) return analyzeV3(directory, m, read);
   const requiredMetrics = new Set(['scenario_start_ms', 'buyers_started', 'buyers_completed', 'journey_outcomes', 'journey_duration',
     'api_responses', 'api_duration', 'arrival_lag_ms', 'active_vus_at_arrival', 'dropped_iterations', 'script_failures', 'protocol_failures', 'replay_failures']);
   const [points, sql, verification, observations, app, resources, cleanup, negatives, summary] = await Promise.all([
@@ -349,6 +349,8 @@ async function analyzeV3(directory, m, read) {
       if (journey.traceEvents !== (tracesOf.get(buyer) ?? 0)) problems.push(`buyer ${buyer}: ${tracesOf.get(buyer) ?? 0} of ${journey.traceEvents} trace events`);
       if (journey.requests?.status !== (statusOf.get(buyer) ?? 0) || journey.requests?.join !== (joinsOf.get(buyer) ?? 0)) problems.push(`buyer ${buyer}: request counts differ from the summary`);
       if (journey.joinKey !== m.fixture.joinKeys?.[buyer]) problems.push(`buyer ${buyer}: another join key`);
+      // A recognition is a sample only with both bounds and its instant (v3.2).
+      if (journey.recognition && ![journey.recognition.lowerMs, journey.recognition.upperMs, journey.recognition.at].every(Number.isFinite)) problems.push(`buyer ${buyer}: a recognition without its delays`);
       // An entry the buyer saw is the one Redis keeps for that user and that join key.
       if (journey.admissionId && !(entry?.admissionId === journey.admissionId && dump.joins?.[journey.joinKey] === journey.admissionId)) problems.push(`buyer ${buyer}: entry or join mapping differs`);
     }
@@ -363,6 +365,8 @@ async function analyzeV3(directory, m, read) {
     const paidAfter = recognized.filter(([, j]) => j.outcome === 'paid'), bought = recognized.filter(([, j]) => j.purchase);
     // An upper bound of admittedAt → purchase answer, on the generator's clock alone.
     const occupation = bought.map(([, j]) => j.recognition.upperMs + (j.purchase.lastRecvAt - j.recognition.at));
+    // Entries promoted before the cutoff that Redis kept as expired, whatever outcome their buyer was left with (v3.2).
+    const expired = promoted.filter(e => e.state === 'expired').map(e => journeys.get(buyerIndex.get(e.userId)));
     admission = { registered: new Set(entries.map(e => e.userId)).size, promoted: promoted.length,
       promotedAfterCutoff: entries.filter(e => Number.isFinite(e.admittedAt) && e.admittedAt > cutoff).length,
       recognized: recognized.length, missed: missed.length, unrecognized: promoted.filter(e => !seen.has(buyerIndex.get(e.userId))).length,
@@ -371,6 +375,7 @@ async function analyzeV3(directory, m, read) {
       measuredRecognitionToPaidMs: stats(paidAfter.filter(([buyer]) => cohortBuyer(buyer)).map(([, j]) => j.endedAt - j.recognition.at)),
       admittedToPurchaseAnswerMs: stats(occupation), slotOccupationSeconds: occupation.length ? occupation.reduce((sum, ms) => sum + ms, 0) / occupation.length / 1000 : null,
       foregroundExpired: all.filter(([, j]) => j.outcome === 'admission_expired' && !j.hidden).length,
+      expiredEntries: { foreground: expired.filter(j => !j?.hidden).length, hidden: expired.filter(j => j?.hidden).length, byOutcome: Object.fromEntries(tally(expired, j => j?.outcome ?? 'no summary')) },
       entryStates: Object.fromEntries(tally(entries, e => `${e.state}/${e.phase}`)) };
     const layer = name => { const list = recognized.map(([, j]) => j.recognition).filter(r => !name || r.layer === name);
       return { count: list.length, lowerMs: stats(list.map(r => r.lowerMs)), upperMs: stats(list.map(r => r.upperMs)) }; };
