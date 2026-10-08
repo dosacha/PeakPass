@@ -107,10 +107,10 @@ Steps:
 
 ## Task 3 (S3): Pilots
 
-- [ ] The protocol (ladder, selection rules, candidates, drain budgets, stop criteria) is committed in `docs/ISSUE_17_VALIDATION.md` before the first pilot.
-- [ ] Generator pilot `p8-gen-b-01`: k6 memory and CPU, arrival lag, raw and log sizes, application and Redis CPU. Most buyers ending as still waiting is expected.
-- [ ] A ladder, three runs; apply the selection rule.
-- [ ] Pilot branch; R pilot; C pilot; confirmation run of arm C; `MONITOR` verification run with the replay.
+- [x] The protocol (ladder, selection rules, candidates, drain budgets, stop criteria) is committed in `docs/ISSUE_17_VALIDATION.md` before the first pilot.
+- [x] Generator pilot `p8-gen-b-01`: k6 memory and CPU, arrival lag, raw and log sizes, application and Redis CPU. Most buyers ending as still waiting is expected.
+- [x] A ladder, three runs; apply the selection rule.
+- [x] Pilot branch; R pilot; C pilot; confirmation run of arm C; `MONITOR` verification run with the replay (order and candidates as changed by E1–E5).
 
 ## Task 4 (S4): Report and stop
 
@@ -176,3 +176,4 @@ Steps:
 - 2026-10-06, second user decision, on the stop report of the C pilot ("전부 추천안"): (1) one run each of R 4 / batch 1 / C 8 and R 2 / batch 2 / C 8 at the formal arrival condition; (2) the failure criterion stays per attempt, the outcome after repeats is reported next to it and the unit is decided with D10; (3) no product code change. Fixed as E5 in the Decisions and in the pilot plan by this commit, before the runs. What follows a qualifying candidate (the larger R is proposed, then confirmation and verification as in E1) is this session's reading of the approved flow and is reported as such.
 - 2026-10-06, candidates near the seed (run in this session, arm B, 50/s × 20 s, C 8; pilot branch `e9bb12e` R 4 / batch 1 and `eb8956c` R 2 / batch 2, build passed): `p8-pilot-b-r4c8-01` valid-queue, write failure 4.25%, recognition → paid p99 2,043 ms: not qualified. `p8-pilot-b-r2c8-01` valid-queue, 0.42% (6 of 1,444), p99 1,018 ms, final SQL 0 rows: **qualified**; the proposed profile is R 2 / batch 2 / C 8. Ledger equal, promotions per rolling second at most R, traces complete in both. Promotions while somebody waited: 2.15 per second (batch 1, 53.68% of R 4) and 1.26 per second (batch 2, 63.04% of R 2) with free slots, which fits a tick of about 0.47 s; 263 and 175 buyers of the cohort were still waiting at the cutoff, so the drain budget of the formula is too short for a formal run.
   - **Stopped (2026-10-07).** Stop condition "ten failed start gates in a row": the gate of `p8-pilot-c-01` failed ten times (`run/gates/p8-pilot-c-01.json`) because another project's containers ran throughout; one attempt saw 99–100% host CPU and 0.0 GiB free. The run did not start. The confirmation run and the verification run are open; the next prompt is `run/handoff/next-session-prompt-5.md`.
+- 2026-10-08, resumed on the user's word that the other project is not worked on (run in this session; only `my-factory-db` running, tree clean at `fdf7ced`, origin/main unchanged; gates passed at the first attempt). Confirmation `p8-pilot-c-01` (arm C, `eb8956c`, drain 650 s): valid-queue, 750/750 paid, 0 of 1,875 purchase attempts of the cohort failed, recognition → paid p99 132 ms, promotion achievement 97.38%, recognition upper bound p95 1,015 ms, final SQL 0 rows, ledger equal. Verification `p8-verify-b-01` (arm B, `--monitor`): valid-verification, `keysAtStart` 0, `endedEarly` false; replay by `run/replay-monitor.mts` (first use; the dump's set members are `{ id, score }`): 659,027 lines, none unparsed, 732 promotions as in the dump, 0 violations, final sets equal to `redis-admission.json`. Task 3 is complete with the changes of E1–E5; Task 4 (report) follows and the work stops there.
