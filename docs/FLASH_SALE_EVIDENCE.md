@@ -15,6 +15,8 @@ P8([Issue #17](https://github.com/dosacha/PeakPass/issues/17))의 동일 조건 
 - **manifest.** `arm`, `pollMode`, `behaviour`, 실행 중인 image에서 읽은 `profile`, 비밀값을 뺀 `applicationEnvironment`, Redis `CONFIG` 3개 값과 run id의 전·후(`redis`), policy 행과 control의 전·후가 추가된다. `sourceHashes`에 `frontend/admission-polling.js`와 admission 소스 5개가 추가된다.
 - **검증 run.** `--monitor`는 활성화와 앱 시작 전에 Redis `MONITOR`를 붙여 admission 쓰기를 `redis-monitor.txt`에 남긴다. `MONITOR`는 Redis를 느리게 하므로 측정 run에는 쓰지 않으며 이 run의 분류는 `valid-verification`이다.
 
+2026-10-09 외부 리뷰 뒤의 revision: 하네스 `flash-sale-v3.1`은 script 두 곳만 다르다(대기열 arm의 두 번째 replay도 cutoff 뒤에는 시작하지 않는다. 2xx 조회·등록 응답에 해석 가능한 `serverTime`이 없거나 `admitted` 상태인데 `admittedAt`·`expiresAt`이 없으면 protocol failure다). 분석 `flash-sale-analysis-v3.2`는 `admission.expiredEntries`(cutoff 전에 승격됐고 Redis dump에 expired로 남은 entry 수, 구매자 outcome별)를 더하고, lower·upper·시각이 없는 인지 기록을 `trace` invalid로 판정한다. 분석기는 `flash-sale-v3.0`과 `flash-sale-v3.1` manifest를 같은 v3 규칙으로 분석한다. 정식 11회는 `flash-sale-v3.0`으로 실행해 `flash-sale-analysis-v3.1`로 분석한 그대로 보존하며, v3.2 재분석은 추가 필드 외에 같다.
+
 분석 `flash-sale-analysis-v3.0`(2026-10-06부터 `flash-sale-analysis-v3.1`. 아래 표본 간격 항목만 다르다)이 v3 run에 적용하는 규칙:
 
 - 완료율·throughput·paid 여정의 정의는 v2.6과 같다. 구매 write 지표는 `reservation`·`checkout`·`settlement` 단계만 센다. 조회·등록은 어떤 구매 오류율에도 들어가지 않고 `polling`에 따로 집계한다.

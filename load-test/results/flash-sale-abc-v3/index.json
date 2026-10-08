@@ -9119,6 +9119,50 @@
       }
     },
     {
+      "runId": "p8-pre-b-03",
+      "kind": "preflight",
+      "arm": "b",
+      "commit": "13c6937b5eacfcd1ebf9c16dcf66409dcaaaa05c",
+      "profile": {
+        "revision": "admission-v1-seed",
+        "rate": 2,
+        "capacity": 8,
+        "ttlMs": 30000,
+        "claimMs": 15000,
+        "tickMs": 250,
+        "batch": 2,
+        "cleanup": 100,
+        "reclaim": 8,
+        "leaseMs": 120000,
+        "maxWaiting": 1000,
+        "maxEntries": 10000,
+        "epochMs": 86400000
+      },
+      "classification": "valid-queue",
+      "invalidReasons": [],
+      "analysisRevision": "flash-sale-analysis-v3.2",
+      "settings": {
+        "users": 24,
+        "rate": 2,
+        "durationSeconds": 12,
+        "warmupSeconds": 0,
+        "drainSeconds": 30,
+        "maxVus": 24,
+        "hiddenShare": 0,
+        "monitor": false
+      },
+      "localOnly": {
+        "k6-raw.jsonl": {
+          "bytes": 739459,
+          "sha256": "9c64ad26d66616b32a8dfba974407d0377e4aa94c426ecae2422ba990c9484d6"
+        },
+        "app.jsonl": {
+          "bytes": 213480,
+          "sha256": "304db436642572a1576ce34561afb764629062103aefd2f307fe98631bd1e18a"
+        }
+      }
+    },
+    {
       "runId": "p8-pre-c-01",
       "kind": "preflight",
       "arm": "c",
@@ -9209,6 +9253,50 @@
         "app.jsonl": {
           "bytes": 215348,
           "sha256": "eb0898788f7071964501558830edf8527b0aa352c1e05577c21063023e36a638"
+        }
+      }
+    },
+    {
+      "runId": "p8-pre-c-03",
+      "kind": "preflight",
+      "arm": "c",
+      "commit": "13c6937b5eacfcd1ebf9c16dcf66409dcaaaa05c",
+      "profile": {
+        "revision": "admission-v1-seed",
+        "rate": 2,
+        "capacity": 8,
+        "ttlMs": 30000,
+        "claimMs": 15000,
+        "tickMs": 250,
+        "batch": 2,
+        "cleanup": 100,
+        "reclaim": 8,
+        "leaseMs": 120000,
+        "maxWaiting": 1000,
+        "maxEntries": 10000,
+        "epochMs": 86400000
+      },
+      "classification": "valid-queue",
+      "invalidReasons": [],
+      "analysisRevision": "flash-sale-analysis-v3.2",
+      "settings": {
+        "users": 24,
+        "rate": 2,
+        "durationSeconds": 12,
+        "warmupSeconds": 0,
+        "drainSeconds": 30,
+        "maxVus": 24,
+        "hiddenShare": 0,
+        "monitor": false
+      },
+      "localOnly": {
+        "k6-raw.jsonl": {
+          "bytes": 740327,
+          "sha256": "ef0485597f70490434538326d3dee202fa99199d8038d777b654f222ad95e7a0"
+        },
+        "app.jsonl": {
+          "bytes": 216552,
+          "sha256": "dc37a249c12adcf35dd34cbad2108230812e018eeb53ced8268ba77f49509144"
         }
       }
     },
