@@ -9259,6 +9259,50 @@
       }
     },
     {
+      "runId": "p8-pre-b-06",
+      "kind": "preflight",
+      "arm": "b",
+      "commit": "bac732e119ac226612057b1ff046d30f61805df5",
+      "profile": {
+        "revision": "admission-v1-seed",
+        "rate": 2,
+        "capacity": 8,
+        "ttlMs": 30000,
+        "claimMs": 15000,
+        "tickMs": 250,
+        "batch": 2,
+        "cleanup": 100,
+        "reclaim": 8,
+        "leaseMs": 120000,
+        "maxWaiting": 1000,
+        "maxEntries": 10000,
+        "epochMs": 86400000
+      },
+      "classification": "valid-queue",
+      "invalidReasons": [],
+      "analysisRevision": "flash-sale-analysis-v3.8",
+      "settings": {
+        "users": 24,
+        "rate": 2,
+        "durationSeconds": 12,
+        "warmupSeconds": 0,
+        "drainSeconds": 30,
+        "maxVus": 24,
+        "hiddenShare": 0,
+        "monitor": false
+      },
+      "localOnly": {
+        "k6-raw.jsonl": {
+          "bytes": 739480,
+          "sha256": "aa932a27e0af6f099adec8c4ba1b72b3690c50abc57185c3ed3e0072620642a9"
+        },
+        "app.jsonl": {
+          "bytes": 215134,
+          "sha256": "cf2ab2b01f9be07c4b32048140966845a403aa512c5f800b8b4dcc61fbfce0c3"
+        }
+      }
+    },
+    {
       "runId": "p8-pre-c-01",
       "kind": "preflight",
       "arm": "c",
