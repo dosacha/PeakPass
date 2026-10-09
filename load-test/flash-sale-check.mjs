@@ -1145,7 +1145,7 @@ test('a rolling second is (t - 1000, t]', async () => {
 test('a queue run keeps every scheduled buyer and keeps polling out of the purchase error share', async () => {
   await queueRun(async ({ analyze }) => {
     const r = await analyze();
-    assert.deepEqual([r.analysisRevision, r.arm, r.classification, r.invalidReasons], ['flash-sale-analysis-v3.5', 'b', 'valid-queue', []]);
+    assert.deepEqual([r.analysisRevision, r.arm, r.classification, r.invalidReasons], ['flash-sale-analysis-v3.6', 'b', 'valid-queue', []]);
     // Completion: paid with matching SQL identity over the whole scheduled cohort.
     assert.deepEqual([r.cohort.offered, r.cohort.confirmedPaid, r.cohort.completionFraction, r.cohort.unfinished], [4, 2, .5, 2]);
     assert.deepEqual(r.cohort.outcomes, { paid: 2, queue_waiting: 1, admission_expired: 1 });
@@ -1209,6 +1209,18 @@ test('a queue run is invalid when its arm, its Redis or its trace is not what it
   await invalid('trace', ({ points }) => journeyOf(points, 1, e => { e.recognition.lowerMs = null; }));
   await invalid('trace', ({ points }) => journeyOf(points, 1, e => { delete e.recognition.at; }));
   await invalid('admission-evidence', ({ files }) => { files['admission-final.json'].ledger = null; });
+  // An entry in a state that only a promotion leads to carries the instant of that promotion, and every entry its registration.
+  await invalid('admission-evidence', ({ dump }) => { dump.entries[0].admittedAt = null; });
+  await invalid('admission-evidence', ({ dump }) => { delete dump.entries[1].admittedAt; });
+  await invalid('admission-evidence', ({ dump }) => { dump.entries[1].admittedAt = '2026-10-05T00:00:01.500Z'; });
+  await invalid('admission-evidence', ({ dump }) => { Object.assign(dump.entries[2], { state: 'admitted', admittedAt: null }); });
+  await invalid('admission-evidence', ({ dump }) => { dump.entries[3].joinedAt = null; });
+  // An entry that expired while waiting was never promoted and has no such instant.
+  assert.ok(!(await reasons(({ dump }) => { dump.entries[3].admittedAt = null; })).invalidReasons.includes('admission-evidence'));
+  // A buyer Redis has registered under its join key carries that entry in its summary.
+  await invalid('trace', ({ points }) => journeyOf(points, 2, e => { e.admissionId = null; }));
+  await invalid('trace', ({ points }) => journeyOf(points, 0, e => { e.admissionId = ''; }));
+  await invalid('trace', ({ points }) => journeyOf(points, 3, e => { delete e.admissionId; }));
   // A deliberate replay that was not answered as the original: the queue run is not a valid one.
   await invalid('replay', ({ point }) => point('replay_failures', 0, 1800, 1));
   assert.ok(!(await reasons(({ point }) => point('replay_failures', 0, 1800, 1), { arm: 'a' })).invalidReasons.includes('replay'), 'arm a keeps the P2 rule: not stable');
@@ -1222,6 +1234,11 @@ test('a queue run is invalid when its arm, its Redis or its trace is not what it
   await defect(({ files }) => { files['admission-final.json'].rows = [{ check_name: 'seat_equation' }]; });
   await defect(({ files }) => { files['admission-final.json'].ledger = ['entry a0 is consumed without a ledger row']; });
   await defect(({ dump, start }) => { dump.entries[3].admittedAt = start + 1600; });
+  // A sample with more slots in use than C (the sentinel counted apart) shows the capacity broken, during the load or after it.
+  await defect(({ samples }) => { samples[3].queue.active = 10; });
+  await defect(({ samples }) => { samples.at(-1).queue.active = 10; });
+  const full = await reasons(({ samples }) => { samples[3].queue.active = 9; });
+  assert.deepEqual([full.classification, full.queue.capacity, full.queue.maxActiveSampled, full.queue.capacityHeldInSamples], ['valid-queue', 8, 8, true]);
   await defect(({ files }) => { files['sql-snapshot.json'].orders.pop(); });
   // A late reclamation and a slow exit are published, not invalid; a verification run is not a measurement.
   const late = await reasons(({ manifest }) => { manifest.quiesce = { limitMs: 60000, elapsedMs: 60010, reached: false, remaining: { waiting: 0, active: 1, claims: 1 } }; manifest.applicationStop.seconds = 73.4; });

@@ -7,7 +7,7 @@ import { join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { createHash } from 'node:crypto';
 
-export const ANALYSIS_REVISION = 'flash-sale-analysis-v3.5';
+export const ANALYSIS_REVISION = 'flash-sale-analysis-v3.6';
 
 export function stats(values) {
   const a = values.filter(Number.isFinite).sort((x, y) => x - y);
@@ -287,7 +287,10 @@ async function analyzeV3(directory, m, read) {
     // Three authentication refusals, and in a queue arm the refusal of a purchase without admission fields.
     auth: negatives.dataUnchanged === true && negatives.checks.length === (queueArm ? 4 : 3) && negatives.checks.every(o => o.status === o.expected && (o.expectedCode === undefined || o.code === o.expectedCode)),
     lifecycle: !m.evidenceErrors?.length && [0, 99].includes(m.k6ExitCode),
-    'admission-evidence': Array.isArray(final.rows) && Array.isArray(final.ledger) && Array.isArray(dump.entries),
+    // The dump is evidence only when every entry carries its registration and, in a state that only a promotion
+    // leads to, the instant of that promotion (v3.6): the rate bound and the denominators are computed from them.
+    'admission-evidence': Array.isArray(final.rows) && Array.isArray(final.ledger) && Array.isArray(dump.entries)
+      && dump.entries.every(e => Number.isFinite(e.joinedAt) && (Number.isFinite(e.admittedAt) || (!['admitted', 'consumed'].includes(e.state) && (e.admittedAt === null || e.admittedAt === undefined)))),
   };
   const hostPressure = resourceWindow.some((_, i) => i >= 2 && resourceWindow.slice(i - 2, i + 1).every(o => o.hostCpuPercent >= 90 || o.hostFreeBytes < 1073741824));
 
@@ -305,7 +308,9 @@ async function analyzeV3(directory, m, read) {
     backlogMs += next.queue.redisTimeMs - o.queue.redisTimeMs;
     promotionsInBacklog += admittedTimes.filter(t => t >= o.queue.redisTimeMs && t < next.queue.redisTimeMs).length;
   });
-  const queue = { rate, capacity: m.profile?.capacity, redisClockOffsetMs: offsetMs,
+  // Samples cannot prove that the capacity held, but one sample above C shows that it did not (v3.6).
+  const capacity = m.profile?.capacity, maxActiveSampled = Math.max(0, ...queueSamples.map(o => held(o, 'active')).filter(Number.isFinite));
+  const queue = { rate, capacity, maxActiveSampled, capacityHeldInSamples: !Number.isFinite(capacity) || maxActiveSampled <= capacity, redisClockOffsetMs: offsetMs,
     samples: Object.fromEntries(['waiting', 'active', 'claims', 'window'].map(name => [name, stats(loadSamples.map(o => held(o, name)))])),
     maxPromotionsPerRollingSecond: maxPerSecond, rateHeld: Number.isFinite(rate) && maxPerSecond <= rate,
     // While two consecutive samples both saw somebody waiting: promotions against R times that time.
@@ -352,7 +357,9 @@ async function analyzeV3(directory, m, read) {
       // A recognition is a sample only with both bounds and its instant (v3.2).
       if (journey.recognition && ![journey.recognition.lowerMs, journey.recognition.upperMs, journey.recognition.at].every(Number.isFinite)) problems.push(`buyer ${buyer}: a recognition without its delays`);
       // An entry the buyer saw is the one Redis keeps for that user and that join key.
-      if (journey.admissionId && !(entry?.admissionId === journey.admissionId && dump.joins?.[journey.joinKey] === journey.admissionId)) problems.push(`buyer ${buyer}: entry or join mapping differs`);
+      // A registration on either side must be the same one on both (v3.6).
+      const mapped = dump.joins?.[journey.joinKey];
+      if ((journey.admissionId || mapped || entry) && !(entry?.admissionId === journey.admissionId && mapped === journey.admissionId)) problems.push(`buyer ${buyer}: entry or join mapping differs`);
     }
     trace = { complete: problems.length === 0, problems: problems.length, sample: problems.slice(0, 5) };
 
@@ -428,7 +435,7 @@ async function analyzeV3(directory, m, read) {
   const sqlChecks = (verification.integrityNames ?? []).filter(name => !['admissionFinalSql', 'admissionLedger'].includes(name));
   const integrity = Array.isArray(verification.integrityNames) && sqlChecks.every(name => verification.checks?.[name] === true)
     && a.httpPaidWithoutSql === 0 && a.httpPaidIdentityMismatches === 0
-    && !(Array.isArray(final.rows) && final.rows.length) && !(Array.isArray(final.ledger) && final.ledger.length) && queue.rateHeld && replayHeld;
+    && !(Array.isArray(final.rows) && final.rows.length) && !(Array.isArray(final.ledger) && final.ledger.length) && queue.rateHeld && queue.capacityHeldInSamples && replayHeld;
   const classification = !integrity ? 'integrity-defect' : invalidReasons.length ? 'invalid-measurement'
     : s.monitor ? 'valid-verification' : queueArm ? 'valid-queue' : classify({ integrity, valid: true, stable, stock: s.stock });
   const logs = app.admissionLogs ?? [];
