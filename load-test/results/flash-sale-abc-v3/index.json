@@ -9393,6 +9393,50 @@
       }
     },
     {
+      "runId": "p8-pre-c-05",
+      "kind": "preflight",
+      "arm": "c",
+      "commit": "ae0585dca82b39c9710a933052d7a01f2899cf9d",
+      "profile": {
+        "revision": "admission-v1-seed",
+        "rate": 2,
+        "capacity": 8,
+        "ttlMs": 30000,
+        "claimMs": 15000,
+        "tickMs": 250,
+        "batch": 2,
+        "cleanup": 100,
+        "reclaim": 8,
+        "leaseMs": 120000,
+        "maxWaiting": 1000,
+        "maxEntries": 10000,
+        "epochMs": 86400000
+      },
+      "classification": "valid-queue",
+      "invalidReasons": [],
+      "analysisRevision": "flash-sale-analysis-v3.4",
+      "settings": {
+        "users": 24,
+        "rate": 2,
+        "durationSeconds": 12,
+        "warmupSeconds": 0,
+        "drainSeconds": 30,
+        "maxVus": 24,
+        "hiddenShare": 0,
+        "monitor": false
+      },
+      "localOnly": {
+        "k6-raw.jsonl": {
+          "bytes": 740054,
+          "sha256": "c2785b552214c97407e7f4a2f4a5ea7696c0bd26fbf3c1e154dd89032a1469ff"
+        },
+        "app.jsonl": {
+          "bytes": 216980,
+          "sha256": "b0d86c16aa5a4769a054baef3261fa787ba8a357abfde78252f08cd4d247db71"
+        }
+      }
+    },
+    {
       "runId": "p8-verify-b-01",
       "kind": "verification",
       "arm": "b",
@@ -9437,6 +9481,54 @@
         "redis-monitor.txt": {
           "bytes": 99137955,
           "sha256": "d44f45ff06a23916441b740dd10b86f791919aae4d955f12272a7af2b5ab02a3"
+        }
+      }
+    },
+    {
+      "runId": "p8-verify-b-02",
+      "kind": "verification",
+      "arm": "b",
+      "commit": "ae0585dca82b39c9710a933052d7a01f2899cf9d",
+      "profile": {
+        "revision": "admission-v1-seed",
+        "rate": 2,
+        "capacity": 8,
+        "ttlMs": 30000,
+        "claimMs": 15000,
+        "tickMs": 250,
+        "batch": 2,
+        "cleanup": 100,
+        "reclaim": 8,
+        "leaseMs": 120000,
+        "maxWaiting": 1000,
+        "maxEntries": 10000,
+        "epochMs": 86400000
+      },
+      "classification": "valid-verification",
+      "invalidReasons": [],
+      "analysisRevision": "flash-sale-analysis-v3.4",
+      "settings": {
+        "users": 1000,
+        "rate": 50,
+        "durationSeconds": 20,
+        "warmupSeconds": 5,
+        "drainSeconds": 900,
+        "maxVus": 1000,
+        "hiddenShare": 0,
+        "monitor": true
+      },
+      "localOnly": {
+        "k6-raw.jsonl": {
+          "bytes": 1442095563,
+          "sha256": "5962bafdc3501bd3ff0315bd3479b2f6dd9a7fb210647a99bcf1c07b295242ab"
+        },
+        "app.jsonl": {
+          "bytes": 264512707,
+          "sha256": "248438aa618acd20755dd76fee825b4dd053aa3a874262aca93a3e81ef21074d"
+        },
+        "redis-monitor.txt": {
+          "bytes": 108798070,
+          "sha256": "5ef37a5900e8c33ace6416fd4dd16298a69b83b456009464e9dd86a6f5708bc1"
         }
       }
     }
