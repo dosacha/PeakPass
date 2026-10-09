@@ -2,6 +2,7 @@
 import assert from 'node:assert/strict';
 import { randomUUID, randomBytes, createHash } from 'node:crypto';
 import { spawn } from 'node:child_process';
+import { createRequire } from 'node:module';
 import { mkdir, mkdtemp, writeFile, readFile, appendFile, readdir, rm } from 'node:fs/promises';
 import { createReadStream, createWriteStream } from 'node:fs';
 import { once } from 'node:events';
@@ -18,7 +19,7 @@ import { createClient } from 'redis';
 import { analyzeRun } from './flash-sale-analysis.mjs';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
-export const REVISION = 'flash-sale-v3.2';
+export const REVISION = 'flash-sale-v3.3';
 const defaults = { users: 12, rate: 2, 'think-ms': 20, retries: 1, 'retry-delay-ms': 100, 'replay-every': 3, quantity: 2, 'pre-vus': 10, 'max-vus': 20, 'pool-max': 10, 'sample-ms': 250, 'warmup-seconds': 0, 'drain-seconds': 30, 'limiter-max': 1000000, 'hidden-share': 0 };
 // The longest request of a journey is 10 s. A buyer starts nothing new this long before k6's drain ends.
 const CUTOFF_MARGIN_SECONDS = 15;
@@ -174,6 +175,7 @@ export function parseOptions(args) {
   assert.ok(['a', 'b', 'c'].includes(s.arm), '--arm must be a, b or c');
   s.pollMode = { a: null, b: 'fixed', c: 'adaptive' }[s.arm];
   s.monitor = values.monitor === true;
+  assert.ok(!s.monitor || s.arm === 'b', '--monitor is the verification run of arm b');
   s.cutoffSeconds = s.durationSeconds + s.drainSeconds - CUTOFF_MARGIN_SECONDS;
   assert.ok(s.hiddenShare <= 100 && (s.arm !== 'a' || s.hiddenShare === 0), '--hidden-share is 0–100 and needs a queue arm');
   // A waiting buyer keeps its VU, so a queue arm needs one per buyer and a drain longer than the cutoff margin.
@@ -402,7 +404,13 @@ export async function main(args = process.argv.slice(2)) {
     await save('redis-admission.json', { at: new Date().toISOString(), eventId: fixture.eventId, epoch: keys.epoch, control: manifest.control.after, meta,
       entries: Object.entries(entries).filter(([id]) => id !== '__').map(([, raw]) => entry(raw)), joins: Object.fromEntries(Object.entries(joins).filter(([id]) => id !== '__')),
       waiting: members(waiting), active: members(active), claims: members(claims), window: members(window), sequence });
-    if (capture) manifest.monitor = await capture.detach();
+    if (capture) {
+      manifest.monitor = await capture.detach();
+      // The capture is replayed against the profile the image runs; the analysis reads the result and gives the verdict.
+      const tsx = createRequire(import.meta.url).resolve('tsx/cli'), replay = fileURLToPath(new URL('./flash-sale-monitor-replay.mts', import.meta.url));
+      try { await command(process.execPath, [tsx, replay, output, String(manifest.profile.rate), String(manifest.profile.capacity), String(manifest.profile.ttlMs)], 'monitor-replay.txt'); }
+      catch (err) { (manifest.evidenceErrors ??= []).push({ step: 'monitor-replay', error: clean(err.message) }); }
+    }
   }
   // F2: an instance may take long to leave after SIGTERM. Outside every window; duration and exit code are recorded.
   async function stopApp() {

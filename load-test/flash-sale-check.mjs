@@ -537,6 +537,14 @@ test('the Compose file runs Redis without persistence or eviction and turns admi
   assert.ok(compose.includes('\n      ENABLE_ADMISSION: "true"\n'));
 });
 
+test('the MONITOR capture belongs to the verification run of arm b', () => {
+  const base = ['--users', '4', '--rate', '2', '--pre-vus', '4', '--max-vus', '4'];
+  assert.equal(parseOptions([...base, '--arm', 'b', '--monitor']).monitor, true);
+  assert.throws(() => parseOptions([...base, '--monitor']), /--monitor/, 'arm a is the default');
+  assert.throws(() => parseOptions([...base, '--arm', 'a', '--monitor']), /--monitor/);
+  assert.throws(() => parseOptions([...base, '--arm', 'c', '--monitor']), /--monitor/);
+});
+
 test('cleanup deletes admission results before what they reference', () => {
   assert.deepEqual(harness.CLEANUP.map(statement => /^DELETE FROM (\w+)/.exec(statement)[1]),
     ['admission_results', 'tickets', 'payment_records', 'orders', 'reservations', 'events']);
@@ -891,9 +899,52 @@ test('a queue answer that is not an admission-v1 response is a protocol failure'
     ['an expiresAt that is no time', 'status', entry(a => { a.expiresAt = 'later'; }, (body, stage) => stage === 'status' && body.admission.state === 'waiting')],
     ['another queue mode', 'status', (body, stage) => { if (stage === 'status') body.queue.mode = 'paused'; return body; }],
     ['a nextPollAfterMs that is no number', 'status', (body, stage) => { if (stage === 'status' && body.admission) body.nextPollAfterMs = '1000'; return body; }],
+    ['no reason', 'status', entry(a => { delete a.reason; }, (_, stage) => stage === 'status')],
+    ['a reason that is no text', 'status', entry(a => { a.reason = 7; }, (_, stage) => stage === 'status')],
+    ['no outcome', 'status', entry(a => { delete a.outcome; }, (_, stage) => stage === 'status')],
+    ['an outcome of a kind the contract does not have', 'status', entry(a => { a.outcome = { kind: 'won', resourceId: null, code: null }; }, (_, stage) => stage === 'status')],
+    ['an outcome whose resource is no id', 'status', entry(a => { a.outcome = { kind: 'reservation', resourceId: 7, code: null }; }, (_, stage) => stage === 'status')],
+    ['an outcome without its code', 'status', entry(a => { a.outcome = { kind: 'rejected', resourceId: null }; }, (_, stage) => stage === 'status')],
     ['a join answered without an entry', 'join', (body, stage) => { if (stage === 'join') body.admission = null; return body; }],
     ['a join answered with a broken entry', 'join', entry(a => { delete a.joinedAt; }, (_, stage) => stage === 'join')],
   ]) assert.ok(failures(await runQueue({ shape })).includes(stage), name);
+  // The outcomes the contract has are accepted.
+  for (const outcome of [{ kind: 'reservation', resourceId: 'reservation', code: null }, { kind: 'direct-checkout', resourceId: 'order', code: null }, { kind: 'rejected', resourceId: null, code: 'INSUFFICIENT_INVENTORY' }])
+    assert.deepEqual(failures(await runQueue({ shape: entry(a => { if (a.state === 'consumed') a.outcome = outcome; }) })), [], outcome.kind);
+});
+
+test('the capture of a verification run is replayed into an artifact the analysis can read', async t => {
+  const { spawnSync } = await import('node:child_process');
+  const { createRequire } = await import('node:module');
+  const { fileURLToPath } = await import('node:url');
+  const cli = createRequire(import.meta.url).resolve('tsx/cli'), script = fileURLToPath(new URL('./flash-sale-monitor-replay.mts', import.meta.url));
+  // tsx needs the esbuild binary of this platform; where node_modules were installed for another one the replay cannot run.
+  if (spawnSync(process.execPath, [cli, '--version']).status !== 0) return t.skip('tsx cannot run here');
+  const dir = await mkdtemp(join(tmpdir(), 'peakpass-replay-check-'));
+  try {
+    const event = '22222222-2222-4222-8222-222222222222', key = name => `peakpass:admission:${event}:${QUEUE_EPOCH}:${name}`;
+    const line = (seconds, ...args) => `${seconds.toFixed(6)} [0 lua] ${args.map(arg => JSON.stringify(String(arg))).join(' ')}`;
+    await writeFile(join(dir, 'redis-monitor.txt'), [
+      line(1000.1, 'ZADD', key('waiting'), 1, 'first'), line(1000.2, 'ZADD', key('waiting'), 2, 'second'),
+      line(1001.0, 'ZREM', key('waiting'), 'first'), line(1001.0, 'ZADD', key('active'), 1001000 + 30000, 'first'),
+      line(1001.5, 'ZADD', key('claims'), 1016500, 'first'), line(1002.0, 'ZREM', key('claims'), 'first'),
+    ].join('\n') + '\n');
+    const dump = { eventId: event, epoch: QUEUE_EPOCH, entries: [{ admissionId: 'first', admittedAt: 1001000 }, { admissionId: 'second', admittedAt: null }],
+      waiting: [{ id: 'second', score: 2 }], active: [{ id: 'first', score: 1031000 }], claims: [] };
+    await writeFile(join(dir, 'redis-admission.json'), JSON.stringify(dump));
+    const replay = async (capacity = '8') => {
+      const run = spawnSync(process.execPath, [cli, script, dir, '2', capacity, '30000'], { encoding: 'utf8' });
+      assert.equal(run.status, 0, run.stderr);
+      return JSON.parse(await readFile(join(dir, 'monitor-replay.json'), 'utf8'));
+    };
+    const whole = await replay();
+    assert.deepEqual([whole.profile, whole.lines, whole.unparsed, whole.promotions, whole.promotedEntriesInDump, whole.violations, whole.namespaces], [{ rate: 2, capacity: 8, ttlMs: 30000 }, 6, 0, 1, 1, [], [`${event}:${QUEUE_EPOCH}`]]);
+    assert.deepEqual(whole.sets, { waiting: { replayed: 1, dumped: 1, equal: true }, active: { replayed: 1, dumped: 1, equal: true }, claims: { replayed: 0, dumped: 0, equal: true } });
+    // A bound that the log breaks, and a dump the log does not lead to.
+    assert.deepEqual((await replay('0')).violations.map(v => v.rule), ['capacity']);
+    await writeFile(join(dir, 'redis-admission.json'), JSON.stringify({ ...dump, active: [] }));
+    assert.deepEqual((await replay()).sets.active, { replayed: 1, dumped: 0, equal: false });
+  } finally { await rm(dir, { recursive: true, force: true }); }
 });
 
 test('a MONITOR connection that Redis closes fails the setup, or marks the capture as ended early', async () => {
@@ -1094,7 +1145,7 @@ test('a rolling second is (t - 1000, t]', async () => {
 test('a queue run keeps every scheduled buyer and keeps polling out of the purchase error share', async () => {
   await queueRun(async ({ analyze }) => {
     const r = await analyze();
-    assert.deepEqual([r.analysisRevision, r.arm, r.classification, r.invalidReasons], ['flash-sale-analysis-v3.3', 'b', 'valid-queue', []]);
+    assert.deepEqual([r.analysisRevision, r.arm, r.classification, r.invalidReasons], ['flash-sale-analysis-v3.4', 'b', 'valid-queue', []]);
     // Completion: paid with matching SQL identity over the whole scheduled cohort.
     assert.deepEqual([r.cohort.offered, r.cohort.confirmedPaid, r.cohort.completionFraction, r.cohort.unfinished], [4, 2, .5, 2]);
     assert.deepEqual(r.cohort.outcomes, { paid: 2, queue_waiting: 1, admission_expired: 1 });
@@ -1173,25 +1224,42 @@ test('a queue run is invalid when its arm, its Redis or its trace is not what it
   const late = await reasons(({ manifest }) => { manifest.quiesce = { limitMs: 60000, elapsedMs: 60010, reached: false, remaining: { waiting: 0, active: 1, claims: 1 } }; manifest.applicationStop.seconds = 73.4; });
   assert.deepEqual([late.classification, late.disclosures.quiesce.reached, late.disclosures.applicationStop.seconds], ['valid-queue', false, 73.4]);
   // A verification run is no measurement, and it is one only with a whole capture: begun on an empty keyspace and ended by the fixture.
-  const verification = monitor => reasons(({ manifest }) => { manifest.settings = { ...manifest.settings, monitor: true }; if (monitor) manifest.monitor = monitor; });
-  assert.equal((await verification({ keysAtStart: 0, lines: 12, endedEarly: false })).classification, 'valid-verification');
-  for (const monitor of [{ keysAtStart: 0, lines: 12, endedEarly: true }, { keysAtStart: 3, lines: 12, endedEarly: false }, { keysAtStart: null, lines: 0, endedEarly: false }, null]) {
+  const whole = { keysAtStart: 0, lines: 12, endedEarly: false };
+  const replayed = { profile: { rate: 2, capacity: 8, ttlMs: 30000 }, lines: 12, unparsed: 0, promotions: 4, promotedEntriesInDump: 4, violations: [],
+    sets: { waiting: { replayed: 0, dumped: 0, equal: true }, active: { replayed: 0, dumped: 0, equal: true }, claims: { replayed: 0, dumped: 0, equal: true } } };
+  const verification = (monitor, replay = replayed) => reasons(({ manifest, files }) => { manifest.settings = { ...manifest.settings, monitor: true }; if (monitor) manifest.monitor = monitor; if (replay) files['monitor-replay.json'] = replay; });
+  const verified = await verification(whole);
+  assert.deepEqual([verified.classification, verified.invalidReasons, verified.monitorReplay], ['valid-verification', [], { lines: 12, promotions: 4, violations: 0, byRule: {}, setsEqual: true }]);
+  for (const monitor of [{ keysAtStart: 0, lines: 12, endedEarly: true }, { keysAtStart: 3, lines: 12, endedEarly: false }, { keysAtStart: null, lines: 12, endedEarly: false }]) {
     const r = await verification(monitor);
     assert.deepEqual([r.classification, r.invalidReasons], ['invalid-measurement', ['monitor-capture']], JSON.stringify(monitor));
   }
+  assert.deepEqual((await verification(null)).invalidReasons, ['monitor-capture', 'monitor-replay']);
+  // Without a replay of the whole capture under the run's own profile there is no verdict of a verification.
+  for (const [name, replay] of [['no replay', null], ['another number of lines', { ...replayed, lines: 11 }], ['a line that was not read', { ...replayed, unparsed: 1 }],
+    ['another capacity', { ...replayed, profile: { ...replayed.profile, capacity: 12 } }], ['another rate', { ...replayed, profile: { ...replayed.profile, rate: 4 } }],
+    ['fewer promotions than the dump has', { ...replayed, promotions: 3 }], ['no list of violations', { ...replayed, violations: 0 }]]) {
+    const r = await verification(whole, replay);
+    assert.deepEqual([r.classification, r.invalidReasons], ['invalid-measurement', ['monitor-replay']], name);
+  }
+  // A violation in the log, or sets the log does not lead to, is a broken bound of the contract.
+  const broken = await verification(whole, { ...replayed, violations: [{ rule: 'capacity', detail: '9 entries in use', time: 1 }, { rule: 'capacity', detail: '9 entries in use', time: 2 }] });
+  assert.deepEqual([broken.classification, broken.monitorReplay.violations, broken.monitorReplay.byRule], ['integrity-defect', 2, { capacity: 2 }]);
+  assert.equal((await verification(whole, { ...replayed, sets: { ...replayed.sets, active: { replayed: 8, dumped: 7, equal: false } } })).classification, 'integrity-defect');
+  // A run without --monitor has no such field and needs no replay.
+  assert.equal('monitorReplay' in (await reasons(() => {})), false);
 });
 
 test('a manifest of the first and of the current v3 harness revision is analysed as a v3 run', async () => {
-  assert.equal(harness.REVISION, 'flash-sale-v3.2');
+  assert.equal(harness.REVISION, 'flash-sale-v3.3');
   await queueRun(async ({ manifest, analyze }) => {
     assert.equal(manifest.revision, 'flash-sale-v3.0');
     const first = await analyze();
     manifest.revision = harness.REVISION;
     const current = await analyze();
-    assert.deepEqual([first.classification, current.classification, current.revision], ['valid-queue', 'valid-queue', 'flash-sale-v3.2']);
+    assert.deepEqual([first.classification, current.classification, current.revision], ['valid-queue', 'valid-queue', 'flash-sale-v3.3']);
     assert.deepEqual({ ...current, revision: first.revision }, first);
-    manifest.revision = 'flash-sale-v3.1';
-    assert.deepEqual({ ...(await analyze()), revision: first.revision }, first);
+    for (const earlier of ['flash-sale-v3.1', 'flash-sale-v3.2']) { manifest.revision = earlier; assert.deepEqual({ ...(await analyze()), revision: first.revision }, first); }
   });
 });
 

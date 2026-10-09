@@ -7,7 +7,7 @@ import { join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { createHash } from 'node:crypto';
 
-export const ANALYSIS_REVISION = 'flash-sale-analysis-v3.3';
+export const ANALYSIS_REVISION = 'flash-sale-analysis-v3.4';
 
 export function stats(values) {
   const a = values.filter(Number.isFinite).sort((x, y) => x - y);
@@ -158,7 +158,7 @@ export async function analyzeRun(directory, suppliedManifest) {
   const m = suppliedManifest ?? await read('manifest.json');
   if (!suppliedManifest) await verifyArtifacts(directory, m);
   // A v3 run has arms and a queue; everything below this line is the v2.6 analysis, unchanged.
-  if (['flash-sale-v3.0', 'flash-sale-v3.1', 'flash-sale-v3.2'].includes(m.revision)) return analyzeV3(directory, m, read);
+  if (['flash-sale-v3.0', 'flash-sale-v3.1', 'flash-sale-v3.2', 'flash-sale-v3.3'].includes(m.revision)) return analyzeV3(directory, m, read);
   const requiredMetrics = new Set(['scenario_start_ms', 'buyers_started', 'buyers_completed', 'journey_outcomes', 'journey_duration',
     'api_responses', 'api_duration', 'arrival_lag_ms', 'active_vus_at_arrival', 'dropped_iterations', 'script_failures', 'protocol_failures', 'replay_failures']);
   const [points, sql, verification, observations, app, resources, cleanup, negatives, summary] = await Promise.all([
@@ -408,6 +408,14 @@ async function analyzeV3(directory, m, read) {
   if (!trace.complete) invalidReasons.push('trace');
   // A verification run proves its bounds only with a whole capture: begun on an empty admission keyspace, ended by the fixture (v3.3).
   if (s.monitor && !(m.monitor && m.monitor.keysAtStart === 0 && m.monitor.endedEarly === false)) invalidReasons.push('monitor-capture');
+  // ... and with the replay of that capture (v3.4): every line read, under the run's own rate and capacity, as many promotions as the dump has.
+  const replay = s.monitor ? await read('monitor-replay.json').catch(() => null) : null;
+  const replaySets = replay?.sets && ['waiting', 'active', 'claims'].every(name => typeof replay.sets[name]?.equal === 'boolean') ? replay.sets : null;
+  const replayed = Boolean(replay && replaySets && Array.isArray(replay.violations) && replay.unparsed === 0 && replay.lines === m.monitor?.lines
+    && replay.profile?.rate === m.profile?.rate && replay.profile?.capacity === m.profile?.capacity && replay.promotions === replay.promotedEntriesInDump);
+  if (s.monitor && !replayed) invalidReasons.push('monitor-replay');
+  // A violation in the log, or final sets the log does not lead to, is a broken bound of the contract.
+  const replayHeld = !replayed || (replay.violations.length === 0 && Object.values(replaySets).every(set => set.equal));
 
   const stable = a.replayFailures === 0 && c.completionFraction >= .99 && w.failureFraction !== null && w.failureFraction <= .01 && c.paidJourneyMs.p99 !== null && c.paidJourneyMs.p99 <= 2000
     && Math.abs(w.firstHalfPaidPerSecond - w.secondHalfPaidPerSecond) / s.rate <= .2;
@@ -416,12 +424,14 @@ async function analyzeV3(directory, m, read) {
   const sqlChecks = (verification.integrityNames ?? []).filter(name => !['admissionFinalSql', 'admissionLedger'].includes(name));
   const integrity = Array.isArray(verification.integrityNames) && sqlChecks.every(name => verification.checks?.[name] === true)
     && a.httpPaidWithoutSql === 0 && a.httpPaidIdentityMismatches === 0
-    && !(Array.isArray(final.rows) && final.rows.length) && !(Array.isArray(final.ledger) && final.ledger.length) && queue.rateHeld;
+    && !(Array.isArray(final.rows) && final.rows.length) && !(Array.isArray(final.ledger) && final.ledger.length) && queue.rateHeld && replayHeld;
   const classification = !integrity ? 'integrity-defect' : invalidReasons.length ? 'invalid-measurement'
     : s.monitor ? 'valid-verification' : queueArm ? 'valid-queue' : classify({ integrity, valid: true, stable, stock: s.stock });
   const logs = app.admissionLogs ?? [];
   return { revision: m.revision, analysisRevision: ANALYSIS_REVISION, runId: m.runId, arm: m.arm, pollMode: m.pollMode ?? null, profile: m.profile ?? null, classification,
     smokePassed: m.smokePassed ?? m.passed, k6ExitCode: m.k6ExitCode, invalidReasons, validity,
+    ...(s.monitor ? { monitorReplay: replayed ? { lines: replay.lines, promotions: replay.promotions, violations: replay.violations.length,
+      byRule: Object.fromEntries(tally(replay.violations, v => v.rule)), setsEqual: Object.values(replaySets).every(set => set.equal) } : null } : {}),
     // Product behaviour that is published with a run and does not make it invalid.
     disclosures: { quiesce: m.quiesce ?? null, applicationStop: m.applicationStop ?? null, monitor: m.monitor ?? null, readyAfterMs: m.readyAfterMs ?? null, poolMaxGapMs: evidence.pool.maxGapMs },
     // The numbers the pilot rules read. Thresholds are fixed in the protocol, not here.
