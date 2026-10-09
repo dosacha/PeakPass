@@ -19,7 +19,7 @@ import { createClient } from 'redis';
 import { analyzeRun } from './flash-sale-analysis.mjs';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
-export const REVISION = 'flash-sale-v3.5';
+export const REVISION = 'flash-sale-v3.6';
 const defaults = { users: 12, rate: 2, 'think-ms': 20, retries: 1, 'retry-delay-ms': 100, 'replay-every': 3, quantity: 2, 'pre-vus': 10, 'max-vus': 20, 'pool-max': 10, 'sample-ms': 250, 'warmup-seconds': 0, 'drain-seconds': 30, 'limiter-max': 1000000, 'hidden-share': 0 };
 // The longest request of a journey is 10 s. A buyer starts nothing new this long before k6's drain ends.
 const CUTOFF_MARGIN_SECONDS = 15;
@@ -85,6 +85,7 @@ export function monitorAdmission(port, path) {
     const socket = connect(port, '127.0.0.1'), file = createWriteStream(path);
     const state = { keysAtStart: null, lines: 0, endedEarly: false };
     let text = '', streaming = false, detached = false;
+    const kept = [], waiters = new Set();
     socket.setEncoding('latin1');
     socket.on('error', error => { if (!streaming) reject(error); });
     // Closed before the capture began: the setup fails. Closed afterwards without the fixture: the capture is not whole.
@@ -100,13 +101,27 @@ export function monitorAdmission(port, path) {
         if (lines[1 + count * 2] !== '+OK') return void reject(new Error('Redis refused MONITOR'));
         streaming = true; state.keysAtStart = count;
         text = lines.slice(2 + count * 2).join('\r\n');
-        resolve({ state, async detach() { detached = true; socket.destroy(); file.end(); await once(file, 'finish'); return state; } });
+        resolve({ state,
+          // Resolves true once a kept line holds `text`, false after `ms`: the capture's connection delivers in its own time.
+          waitFor(text, ms) {
+            if (kept.some(line => line.includes(text))) return Promise.resolve(true);
+            return new Promise(done => {
+              const waiter = { text, done: found => { clearTimeout(timer); waiters.delete(waiter); done(found); } };
+              const timer = setTimeout(() => waiter.done(false), ms);
+              waiters.add(waiter);
+            });
+          },
+          async detach() { detached = true; for (const waiter of [...waiters]) waiter.done(false); socket.destroy(); file.end(); await once(file, 'finish'); return state; } });
       }
       let from = 0;
       for (let end = text.indexOf('\r\n', from); end >= 0; end = text.indexOf('\r\n', from)) {
         const line = text.slice(from + 1, end); // without the '+' of the simple string
         from = end + 2;
-        if (monitorKeeps(line)) { file.write(line + '\n'); state.lines++; }
+        if (monitorKeeps(line)) {
+          file.write(line + '\n'); state.lines++;
+          // Only the marks of a dump are remembered, for waitFor.
+          if (line.includes('"ECHO"')) { kept.push(line); for (const waiter of [...waiters]) if (line.includes(waiter.text)) waiter.done(true); }
+        }
       }
       text = text.slice(from);
     });
@@ -176,6 +191,8 @@ export function parseOptions(args) {
   assert.match(s.runId, /^[a-z0-9][a-z0-9-]{2,40}$/, 'Unsafe --run-id');
   // The arm: a leaves the event unprotected; b and c protect it and differ in the polling mode only.
   s.arm = values.arm ?? 'a';
+  // A run of the comparison names its arm; the default run without --arm keeps the P2 options.
+  s.armNamed = values.arm !== undefined;
   assert.ok(['a', 'b', 'c'].includes(s.arm), '--arm must be a, b or c');
   s.pollMode = { a: null, b: 'fixed', c: 'adaptive' }[s.arm];
   s.monitor = values.monitor === true;
@@ -411,7 +428,9 @@ export async function main(args = process.argv.slice(2)) {
       entries: Object.entries(entries).filter(([id]) => id !== '__').map(([, raw]) => entry(raw)), joins: Object.fromEntries(Object.entries(joins).filter(([id]) => id !== '__')),
       waiting: members(waiting), active: members(active), claims: members(claims), window: members(window), sequence });
     if (capture) {
-      manifest.monitor = await capture.detach();
+      // The mark of the dump arrives on the capture's own connection: wait for it, then detach.
+      const markSeen = await capture.waitFor(dumpMarker(settings.runId), 5000);
+      manifest.monitor = { ...(await capture.detach()), dumpMarkerSeen: markSeen };
       // The capture is replayed against the profile the image runs; the analysis reads the result and gives the verdict.
       const tsx = createRequire(import.meta.url).resolve('tsx/cli'), replay = fileURLToPath(new URL('./flash-sale-monitor-replay.mts', import.meta.url));
       try { await command(process.execPath, [tsx, replay, output, String(manifest.profile.rate), String(manifest.profile.capacity), String(manifest.profile.ttlMs)], 'monitor-replay.txt'); }

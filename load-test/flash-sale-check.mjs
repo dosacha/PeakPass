@@ -530,7 +530,8 @@ test('arm options are validated before provisioning', () => {
   // A run of the comparison names its arm, and its generator allocates every VU before the load: preAllocatedVUs = maxVUs.
   for (const arm of ['a', 'b', 'c']) assert.throws(() => parseOptions([...base, '--arm', arm, '--pre-vus', '24', '--max-vus', '30']), /--pre-vus/, arm);
   assert.deepEqual([parseOptions([...base, '--arm', 'a', ...queueVUs]).preVus, parseOptions([...base, '--arm', 'a', ...queueVUs]).maxVus], [24, 24]);
-  assert.deepEqual([parseOptions(base).preVus, parseOptions(base).maxVus], [10, 20], 'the P2 defaults of a run without --arm stay');
+  assert.deepEqual([parseOptions(base).preVus, parseOptions(base).maxVus, parseOptions(base).armNamed], [10, 20, false], 'the P2 defaults of a run without --arm stay');
+  assert.deepEqual([parseOptions([...base, '--arm', 'a', ...queueVUs]).armNamed, parseOptions([...base, '--arm', 'b', ...queueVUs]).armNamed], [true, true]);
   const layer = parseOptions([...base, '--arm', 'b', ...queueVUs, '--hidden-share', '20', '--monitor']);
   assert.deepEqual([layer.hiddenShare, layer.monitor], [20, true]);
 });
@@ -973,6 +974,13 @@ test('a MONITOR connection that Redis closes fails the setup, or marks the captu
     const capture = await within(harness.monitorAdmission(streaming.address().port, join(dir, 'b.txt')), 2000);
     await new Promise(resolve => setTimeout(resolve, 200));
     assert.deepEqual(await capture.detach(), { keysAtStart: 0, lines: 0, endedEarly: true });
+    // The mark of the dump travels on the capture's own connection and may arrive after the dump has answered: the fixture waits for it.
+    const marker = harness.dumpMarker('p8-check');
+    const late = await serve(socket => socket.once('data', () => { socket.write('*0\r\n+OK\r\n'); setTimeout(() => socket.write(`+1791160866.4 [0 172.18.0.1:5000] "ECHO" "${marker}"\r\n`), 150); }));
+    const waiting = await within(harness.monitorAdmission(late.address().port, join(dir, 'c.txt')), 2000);
+    assert.deepEqual([await waiting.waitFor(harness.dumpMarker('another-run'), 50), waiting.state.lines], [false, 0]);
+    assert.equal(await within(waiting.waitFor(marker, 2000), 3000), true);
+    assert.deepEqual(await waiting.detach(), { keysAtStart: 0, lines: 1, endedEarly: false });
   } finally { for (const server of servers) server.close(); await rm(dir, { recursive: true, force: true }); }
 });
 
@@ -1162,7 +1170,7 @@ test('a rolling second is (t - 1000, t]', async () => {
 test('a queue run keeps every scheduled buyer and keeps polling out of the purchase error share', async () => {
   await queueRun(async ({ analyze }) => {
     const r = await analyze();
-    assert.deepEqual([r.analysisRevision, r.arm, r.classification, r.invalidReasons], ['flash-sale-analysis-v3.8', 'b', 'valid-queue', []]);
+    assert.deepEqual([r.analysisRevision, r.arm, r.classification, r.invalidReasons], ['flash-sale-analysis-v3.9', 'b', 'valid-queue', []]);
     // Completion: paid with matching SQL identity over the whole scheduled cohort.
     assert.deepEqual([r.cohort.offered, r.cohort.confirmedPaid, r.cohort.completionFraction, r.cohort.unfinished], [4, 2, .5, 2]);
     assert.deepEqual(r.cohort.outcomes, { paid: 2, queue_waiting: 1, admission_expired: 1 });
@@ -1244,6 +1252,17 @@ test('a queue run is invalid when its arm, its Redis or its trace is not what it
   // The generator allocated every VU before the load.
   await invalid('generator-allocation', ({ manifest }) => { manifest.settings = { ...manifest.settings, preVus: 2 }; });
   await invalid('generator-allocation', ({ manifest }) => { manifest.settings = { ...manifest.settings, maxVus: 8 }; }, { arm: 'a' });
+  // The default run of the fixture, without --arm, keeps the P2 options (10 and 20 VUs) and is no run of the comparison.
+  const legacy = await reasons(({ manifest }) => { manifest.settings = { ...manifest.settings, maxVus: 8, armNamed: false }; }, { arm: 'a' });
+  assert.ok(!legacy.invalidReasons.includes('generator-allocation') && /^valid-/.test(legacy.classification), `${legacy.classification} ${legacy.invalidReasons}`);
+  // Arm a keeps one policy row through the run, like the queue arms.
+  await invalid('policy', ({ manifest }) => { manifest.policy.after.generation = '1'; }, { arm: 'a' });
+  await invalid('policy', ({ manifest }) => { manifest.policy.after.epoch = 'another'; }, { arm: 'a' });
+  await invalid('policy', ({ manifest }) => { manifest.policy.after.phase = 'open'; }, { arm: 'a' });
+  // What Redis holds is the registrations of the fixture's buyers and nothing else.
+  await invalid('trace', ({ dump }) => { dump.entries.push({ ...dump.entries[0], admissionId: 'foreign', userId: 'somebody-else', sequence: '9', state: 'waiting', admittedAt: null }); });
+  await invalid('trace', ({ dump }) => { dump.joins.unknown = 'a0'; });
+  await invalid('trace', ({ dump }) => { dump.entries.push({ ...dump.entries[0], admissionId: 'second-entry', sequence: '9', state: 'waiting', admittedAt: null }); });
   // The arm is its polling mode: every buyer's summary and the manifest say the mode of the arm.
   await invalid('trace', ({ points }) => journeyOf(points, 1, e => { e.mode = 'adaptive'; }));
   await invalid('trace', ({ points }) => journeyOf(points, 2, e => { delete e.mode; }));
@@ -1318,15 +1337,15 @@ test('a queue run is invalid when its arm, its Redis or its trace is not what it
 });
 
 test('a manifest of the first and of the current v3 harness revision is analysed as a v3 run', async () => {
-  assert.equal(harness.REVISION, 'flash-sale-v3.5');
+  assert.equal(harness.REVISION, 'flash-sale-v3.6');
   await queueRun(async ({ manifest, analyze }) => {
     assert.equal(manifest.revision, 'flash-sale-v3.0');
     const first = await analyze();
     manifest.revision = harness.REVISION;
     const current = await analyze();
-    assert.deepEqual([first.classification, current.classification, current.revision], ['valid-queue', 'valid-queue', 'flash-sale-v3.5']);
+    assert.deepEqual([first.classification, current.classification, current.revision], ['valid-queue', 'valid-queue', 'flash-sale-v3.6']);
     assert.deepEqual({ ...current, revision: first.revision }, first);
-    for (const earlier of ['flash-sale-v3.1', 'flash-sale-v3.2', 'flash-sale-v3.3', 'flash-sale-v3.4']) { manifest.revision = earlier; assert.deepEqual({ ...(await analyze()), revision: first.revision }, first); }
+    for (const earlier of ['flash-sale-v3.1', 'flash-sale-v3.2', 'flash-sale-v3.3', 'flash-sale-v3.4', 'flash-sale-v3.5']) { manifest.revision = earlier; assert.deepEqual({ ...(await analyze()), revision: first.revision }, first); }
   });
 });
 
@@ -1400,6 +1419,10 @@ test('a recognition of an entry promoted after the cutoff is outside the recogni
     assert.deepEqual([r.admission.promoted, r.admission.promotedAfterCutoff, r.admission.recognized, r.admission.recognizedAfterCutoff], [3, 1, 1, 1]);
     assert.deepEqual([r.recognition.all.count, r.recognition.foreground.count, r.recognition.foreground.upperMs.max, r.admission.recognitionToPaidMs.count, r.admission.measuredRecognitionToPaidMs.count, r.admission.admittedToPurchaseAnswerMs.count], [1, 1, 500, 1, 1, 1]);
     assert.ok(r.admission.recognized <= r.admission.promoted);
+    // Buyer 3 missed its entry; behind the cutoff that entry is in no figure either.
+    dump.entries[3].admittedAt = start + 17400;
+    const later = await analyze();
+    assert.deepEqual([later.admission.promoted, later.admission.promotedAfterCutoff, later.admission.missed, later.admission.missedAfterCutoff, later.recognition.missed, later.admission.unrecognized], [2, 2, 0, 1, 0, 1]);
   });
 });
 

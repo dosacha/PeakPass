@@ -7,7 +7,7 @@ import { join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { createHash } from 'node:crypto';
 
-export const ANALYSIS_REVISION = 'flash-sale-analysis-v3.8';
+export const ANALYSIS_REVISION = 'flash-sale-analysis-v3.9';
 // Every integrity check verifySnapshot of the fixture evaluates for a v3 run; a check of flash-sale-check.mjs pins the list to the fixture.
 export const V3_INTEGRITY_NAMES = ['inventory', 'singleOrderPerBuyer', 'singleReservationPerBuyer', 'orderIdentity', 'reservationIdentity', 'reservationConversion',
   'ticketOwnership', 'ticketQuantity', 'checkoutPaymentIdentity', 'settlementIdentity', 'noExtraSettlementFacts', 'callbackIdentity', 'admissionFinalSql', 'admissionLedger'];
@@ -164,7 +164,7 @@ export async function analyzeRun(directory, suppliedManifest) {
   const m = suppliedManifest ?? await read('manifest.json');
   if (!suppliedManifest) await verifyArtifacts(directory, m);
   // A v3 run has arms and a queue; everything below this line is the v2.6 analysis, unchanged.
-  if ([...UNMARKED_REVISIONS, 'flash-sale-v3.4', 'flash-sale-v3.5'].includes(m.revision)) return analyzeV3(directory, m, read);
+  if ([...UNMARKED_REVISIONS, 'flash-sale-v3.4', 'flash-sale-v3.5', 'flash-sale-v3.6'].includes(m.revision)) return analyzeV3(directory, m, read);
   const requiredMetrics = new Set(['scenario_start_ms', 'buyers_started', 'buyers_completed', 'journey_outcomes', 'journey_duration',
     'api_responses', 'api_duration', 'arrival_lag_ms', 'active_vus_at_arrival', 'dropped_iterations', 'script_failures', 'protocol_failures', 'replay_failures']);
   const [points, sql, verification, observations, app, resources, cleanup, negatives, summary] = await Promise.all([
@@ -241,7 +241,8 @@ export function admissionValidity(m, observations) {
     ? before?.protected === true && after?.protected === true && before.phase === 'open' && after.phase === 'open' && same(before, after)
       && first?.mode === 'ready' && last?.mode === 'ready' && same(first, last) && same(before, first)
       && sampled.every(control => control?.mode === 'ready' && same(control, first))
-    : before?.protected === false && after?.protected === false && first === null && last === null && sampled.every(control => control === null);
+    // Arm a: the same unprotected row before and after (v3.9), and no control at any time.
+    : before?.protected === false && after?.protected === false && same(before, after) && before.phase === after.phase && first === null && last === null && sampled.every(control => control === null);
   const runId = m.redis?.before?.runId;
   const redisProcess = !!runId && runId === m.redis?.after?.runId && (!queueArm || (first?.runId === runId && last?.runId === runId && sampled.every(control => control?.runId === runId)));
   const required = { appendonly: 'no', save: '', 'maxmemory-policy': 'noeviction' };
@@ -353,6 +354,12 @@ async function analyzeV3(directory, m, read) {
     const statusAnswers = answers.filter(p => p.data.tags.stage === 'status'), joinAnswers = answers.filter(p => p.data.tags.stage === 'join');
     const tracesOf = tally(events, e => e.buyer), statusOf = tally(statusAnswers, buyerOf), joinsOf = tally(joinAnswers, buyerOf);
     const entryOf = new Map(entries.map(e => [e.userId, e]));
+    // Redis holds the registrations of the fixture's buyers and nothing else (v3.9): one entry per user, no foreign user, no foreign join key.
+    const fixtureUsers = new Set(m.fixture.userIds), fixtureKeys = new Set(m.fixture.joinKeys ?? []);
+    const foreignEntries = entries.filter(e => !fixtureUsers.has(e.userId)).length, foreignJoins = Object.keys(dump.joins ?? {}).filter(key => !fixtureKeys.has(key)).length;
+    if (foreignEntries) problems.push(`${foreignEntries} entries of users outside the fixture`);
+    if (foreignJoins) problems.push(`${foreignJoins} join mappings outside the fixture`);
+    if (entryOf.size !== entries.length) problems.push(`${entries.length - entryOf.size} users with more than one entry`);
     if (events.some(e => e.type === 'unreadable')) problems.push('unreadable trace events');
     for (let buyer = 0; buyer < s.users; buyer++) {
       const journey = journeys.get(buyer), entry = entryOf.get(m.fixture.userIds[buyer]);
@@ -378,8 +385,9 @@ async function analyzeV3(directory, m, read) {
     // The recognition figures are those of the entries promoted before the cutoff (v3.8): a buyer whose entry falls behind it
     // on the Redis clock is counted apart and is in no percentile.
     const promotedIds = new Set(promoted.map(e => e.admissionId));
-    const all = [...journeys], recognized = all.filter(([, j]) => j.recognition && promotedIds.has(j.admissionId)), missed = all.filter(([, j]) => !j.recognition && j.missed);
+    const all = [...journeys], recognized = all.filter(([, j]) => j.recognition && promotedIds.has(j.admissionId)), missed = all.filter(([, j]) => !j.recognition && j.missed && promotedIds.has(j.admissionId));
     const recognizedAfterCutoff = all.filter(([, j]) => j.recognition && !promotedIds.has(j.admissionId)).length;
+    const missedAfterCutoff = all.filter(([, j]) => !j.recognition && j.missed && !promotedIds.has(j.admissionId)).length;
     const seen = new Set([...recognized, ...missed].map(([buyer]) => buyer));
     const paidAfter = recognized.filter(([, j]) => j.outcome === 'paid'), bought = recognized.filter(([, j]) => j.purchase);
     // An upper bound of admittedAt → purchase answer, on the generator's clock alone.
@@ -388,7 +396,7 @@ async function analyzeV3(directory, m, read) {
     const expired = promoted.filter(e => e.state === 'expired').map(e => journeys.get(buyerIndex.get(e.userId)));
     admission = { registered: new Set(entries.map(e => e.userId)).size, promoted: promoted.length,
       promotedAfterCutoff: entries.filter(e => Number.isFinite(e.admittedAt) && e.admittedAt > cutoff).length,
-      recognized: recognized.length, recognizedAfterCutoff, missed: missed.length, unrecognized: promoted.filter(e => !seen.has(buyerIndex.get(e.userId))).length,
+      recognized: recognized.length, recognizedAfterCutoff, missed: missed.length, missedAfterCutoff, unrecognized: promoted.filter(e => !seen.has(buyerIndex.get(e.userId))).length,
       queueWaitMs: stats(promoted.map(e => e.admittedAt - e.joinedAt)),
       recognitionToPaidMs: stats(paidAfter.map(([, j]) => j.endedAt - j.recognition.at)),
       measuredRecognitionToPaidMs: stats(paidAfter.filter(([buyer]) => cohortBuyer(buyer)).map(([, j]) => j.endedAt - j.recognition.at)),
@@ -430,7 +438,8 @@ async function analyzeV3(directory, m, read) {
   const names = verification.integrityNames;
   if (!(Array.isArray(names) && names.length === V3_INTEGRITY_NAMES.length && V3_INTEGRITY_NAMES.every(name => names.includes(name) && typeof verification.checks?.[name] === 'boolean'))) invalidReasons.push('integrity-evidence');
   // The comparison fixes preAllocatedVUs = maxVUs (v3.8).
-  if (s.preVus !== s.maxVus) invalidReasons.push('generator-allocation');
+  // A run without --arm (armNamed false, from harness v3.6 on) is the fixture's default run with the P2 options, not a run of the comparison (v3.9).
+  if (s.armNamed !== false && s.preVus !== s.maxVus) invalidReasons.push('generator-allocation');
   // A verification run proves its bounds only with a whole capture: begun on an empty admission keyspace, ended by the fixture (v3.3).
   if (s.monitor && !(m.monitor && m.monitor.keysAtStart === 0 && m.monitor.endedEarly === false)) invalidReasons.push('monitor-capture');
   // ... and with the replay of that capture (v3.4): every line read, under the run's own rate and capacity, as many promotions as the dump has.
