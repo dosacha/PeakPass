@@ -19,7 +19,7 @@ import { createClient } from 'redis';
 import { analyzeRun } from './flash-sale-analysis.mjs';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
-export const REVISION = 'flash-sale-v3.3';
+export const REVISION = 'flash-sale-v3.4';
 const defaults = { users: 12, rate: 2, 'think-ms': 20, retries: 1, 'retry-delay-ms': 100, 'replay-every': 3, quantity: 2, 'pre-vus': 10, 'max-vus': 20, 'pool-max': 10, 'sample-ms': 250, 'warmup-seconds': 0, 'drain-seconds': 30, 'limiter-max': 1000000, 'hidden-share': 0 };
 // The longest request of a journey is 10 s. A buyer starts nothing new this long before k6's drain ends.
 const CUTOFF_MARGIN_SECONDS = 15;
@@ -66,13 +66,17 @@ const PROFILE_READER = "import('/app/dist/core/models/admission.js').then(m => c
 // Verification runs only (--monitor): the admission writes of a Redis MONITOR stream, as the replay of
 // src/tests/helpers/admission-transition-log.ts reads them. MONITOR slows Redis down and is never
 // attached to a measured run.
+// The Redis dump runs in one transaction that begins with this ECHO, so a capture shows where the dump was taken:
+// the scheduler may write after the dump and before the capture is detached, and the replay ends at the mark.
+export const dumpMarker = runId => `peakpass:admission:dump:${runId}`;
 export const monitorKeeps = line => {
   const at = line.indexOf('] "');
   if (at < 0) return false;
   const command = line.slice(at + 3, line.indexOf('"', at + 3)).toUpperCase();
   return command === 'FLUSHALL' || command === 'FLUSHDB'
     || (['ZADD', 'ZREM', 'UNLINK', 'DEL'].includes(command) && line.includes('peakpass:admission:') && !line.includes(':limit:'))
-    || (command === 'HSET' && line.includes(':control"'));
+    || (command === 'HSET' && line.includes(':control"'))
+    || (command === 'ECHO' && line.includes('"peakpass:admission:dump:'));
 };
 // KEYS and MONITOR travel in one write and Redis runs them back to back, so a capture that saw no
 // admission key holds every later write.
@@ -394,7 +398,7 @@ export async function main(args = process.argv.slice(2)) {
       await delay(250);
     }
     manifest.quiesce = { limitMs, elapsedMs: Date.now() - started, reached: !remaining.active && !remaining.claims, remaining };
-    const [control, meta, entries, joins, waiting, active, claims, window, sequence] = await redis.multi().hGetAll(keys.control).hGetAll(keys.meta).hGetAll(keys.entries).hGetAll(keys.joins)
+    const [, control, meta, entries, joins, waiting, active, claims, window, sequence] = await redis.multi().echo(dumpMarker(settings.runId)).hGetAll(keys.control).hGetAll(keys.meta).hGetAll(keys.entries).hGetAll(keys.joins)
       .zRangeWithScores(keys.waiting, 0, -1).zRangeWithScores(keys.active, 0, -1).zRangeWithScores(keys.claims, 0, -1).zRangeWithScores(keys.window, 0, -1).get(keys.sequence).exec();
     const members = list => list.filter(member => member.value !== '__').map(member => ({ id: member.value, score: member.score }));
     const entry = raw => { const { claimToken, ...rest } = JSON.parse(raw); return rest; };

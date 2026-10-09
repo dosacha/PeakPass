@@ -2,7 +2,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { createHmac } from 'node:crypto';
-import { readFile, mkdtemp, writeFile, rm } from 'node:fs/promises';
+import { readFile, mkdtemp, writeFile, appendFile, rm } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { createContext, runInContext, SourceTextModule, SyntheticModule } from 'node:vm';
@@ -939,11 +939,19 @@ test('the capture of a verification run is replayed into an artifact the analysi
     };
     const whole = await replay();
     assert.deepEqual([whole.profile, whole.lines, whole.unparsed, whole.promotions, whole.promotedEntriesInDump, whole.violations, whole.namespaces], [{ rate: 2, capacity: 8, ttlMs: 30000 }, 6, 0, 1, 1, [], [`${event}:${QUEUE_EPOCH}`]]);
+    assert.deepEqual([whole.dumpMarker, whole.linesAfterDump], [false, 0], 'a capture of an earlier harness has no mark and is replayed to its end');
     assert.deepEqual(whole.sets, { waiting: { replayed: 1, dumped: 1, equal: true }, active: { replayed: 1, dumped: 1, equal: true }, claims: { replayed: 0, dumped: 0, equal: true } });
     // A bound that the log breaks, and a dump the log does not lead to.
     assert.deepEqual((await replay('0')).violations.map(v => v.rule), ['capacity']);
     await writeFile(join(dir, 'redis-admission.json'), JSON.stringify({ ...dump, active: [] }));
     assert.deepEqual((await replay()).sets.active, { replayed: 1, dumped: 0, equal: false });
+    // The scheduler went on after the dump: what follows the dump's mark is not replayed, and is counted.
+    await writeFile(join(dir, 'redis-admission.json'), JSON.stringify(dump));
+    await appendFile(join(dir, 'redis-monitor.txt'), [line(1003.0, 'ECHO', 'peakpass:admission:dump:synthetic'),
+      line(1003.2, 'ZREM', key('waiting'), 'second'), line(1003.2, 'ZADD', key('active'), 1003200 + 30000, 'second')].join('\n') + '\n');
+    const marked = await replay();
+    assert.deepEqual([marked.lines, marked.dumpMarker, marked.linesAfterDump, marked.unparsed, marked.promotions, marked.promotedEntriesInDump, marked.violations], [9, true, 2, 0, 1, 1, []]);
+    assert.deepEqual(marked.sets, whole.sets);
   } finally { await rm(dir, { recursive: true, force: true }); }
 });
 
@@ -1041,6 +1049,10 @@ test('the monitor capture of a verification run keeps the admission writes only'
     line('"PING"'), line('"ZADD" "ratelimit:user" "1" "r"'), line(`"EVAL" "local x='ZADD ${namespace}:control'" "13"`), 'OK', '']) {
     assert.equal(harness.monitorKeeps(dropped), false, dropped);
   }
+  // The mark the dump leaves in the capture is kept, and it is that of the run.
+  assert.equal(harness.dumpMarker('p8-verify-b-03'), 'peakpass:admission:dump:p8-verify-b-03');
+  assert.equal(harness.monitorKeeps(`1791160866.4 [0 172.18.0.1:5000] "ECHO" "${harness.dumpMarker('p8-verify-b-03')}"`), true);
+  assert.equal(harness.monitorKeeps(line('"ECHO" "hello"')), false);
 });
 // ---- flash-sale-analysis-v3.x: a synthetic run directory of four buyers ----
 // Buyer 0 pays through a reservation, buyer 1 through a direct checkout whose first answer is 503,
@@ -1145,7 +1157,7 @@ test('a rolling second is (t - 1000, t]', async () => {
 test('a queue run keeps every scheduled buyer and keeps polling out of the purchase error share', async () => {
   await queueRun(async ({ analyze }) => {
     const r = await analyze();
-    assert.deepEqual([r.analysisRevision, r.arm, r.classification, r.invalidReasons], ['flash-sale-analysis-v3.6', 'b', 'valid-queue', []]);
+    assert.deepEqual([r.analysisRevision, r.arm, r.classification, r.invalidReasons], ['flash-sale-analysis-v3.7', 'b', 'valid-queue', []]);
     // Completion: paid with matching SQL identity over the whole scheduled cohort.
     assert.deepEqual([r.cohort.offered, r.cohort.confirmedPaid, r.cohort.completionFraction, r.cohort.unfinished], [4, 2, .5, 2]);
     assert.deepEqual(r.cohort.outcomes, { paid: 2, queue_waiting: 1, admission_expired: 1 });
@@ -1215,8 +1227,19 @@ test('a queue run is invalid when its arm, its Redis or its trace is not what it
   await invalid('admission-evidence', ({ dump }) => { dump.entries[1].admittedAt = '2026-10-05T00:00:01.500Z'; });
   await invalid('admission-evidence', ({ dump }) => { Object.assign(dump.entries[2], { state: 'admitted', admittedAt: null }); });
   await invalid('admission-evidence', ({ dump }) => { dump.entries[3].joinedAt = null; });
+  await invalid('admission-evidence', ({ dump }) => { Object.assign(dump.entries[3], { fingerprint: 'sha256:claimed', admittedAt: null }); });
+  assert.ok(!(await reasons(({ dump }) => { dump.entries[3].fingerprint = 'sha256:claimed'; })).invalidReasons.includes('admission-evidence'), 'claimed, expired, with its instant');
   // An entry that expired while waiting was never promoted and has no such instant.
   assert.ok(!(await reasons(({ dump }) => { dump.entries[3].admittedAt = null; })).invalidReasons.includes('admission-evidence'));
+  // The arm is its polling mode: every buyer's summary and the manifest say the mode of the arm.
+  await invalid('trace', ({ points }) => journeyOf(points, 1, e => { e.mode = 'adaptive'; }));
+  await invalid('trace', ({ points }) => journeyOf(points, 2, e => { delete e.mode; }));
+  await invalid('policy', ({ manifest }) => { manifest.pollMode = 'adaptive'; });
+  await invalid('policy', ({ manifest }) => { manifest.settings = { ...manifest.settings, pollMode: 'adaptive' }; });
+  // The purchase limiter without its Redis is a failure of the experiment, not a measured purchase failure, in every arm.
+  await invalid('auth-or-limiter', ({ call }) => call(1, 3100, 'checkout', 503, 'retry', 'RATE_LIMIT_UNAVAILABLE'));
+  await invalid('auth-or-limiter', ({ call }) => call(0, 1650, 'settlement', 503, 'retry', 'RATE_LIMIT_UNAVAILABLE'), { arm: 'a' });
+  assert.equal((await reasons(({ call }) => call(1, 3100, 'checkout', 503, 'retry', 'ADMISSION_UNAVAILABLE'))).classification, 'valid-queue', 'another 503 is a measured answer');
   // A buyer Redis has registered under its join key carries that entry in its summary.
   await invalid('trace', ({ points }) => journeyOf(points, 2, e => { e.admissionId = null; }));
   await invalid('trace', ({ points }) => journeyOf(points, 0, e => { e.admissionId = ''; }));
@@ -1249,7 +1272,12 @@ test('a queue run is invalid when its arm, its Redis or its trace is not what it
     sets: { waiting: { replayed: 0, dumped: 0, equal: true }, active: { replayed: 0, dumped: 0, equal: true }, claims: { replayed: 0, dumped: 0, equal: true } } };
   const verification = (monitor, replay = replayed) => reasons(({ manifest, files }) => { manifest.settings = { ...manifest.settings, monitor: true }; if (monitor) manifest.monitor = monitor; if (replay) files['monitor-replay.json'] = replay; });
   const verified = await verification(whole);
-  assert.deepEqual([verified.classification, verified.invalidReasons, verified.monitorReplay], ['valid-verification', [], { lines: 12, promotions: 4, violations: 0, byRule: {}, setsEqual: true }]);
+  assert.deepEqual([verified.classification, verified.invalidReasons, verified.monitorReplay], ['valid-verification', [], { lines: 12, promotions: 4, violations: 0, byRule: {}, setsEqual: true, dumpMarker: false, linesAfterDump: 0 }]);
+  // From harness v3.4 on the dump marks the capture, and a replay without that mark did not end at the dump.
+  const current = (replay, monitor = whole) => reasons(({ manifest, files }) => { manifest.revision = harness.REVISION; manifest.settings = { ...manifest.settings, monitor: true }; manifest.monitor = monitor; files['monitor-replay.json'] = replay; });
+  assert.deepEqual((await current(replayed)).invalidReasons, ['monitor-replay']);
+  const marked = await current({ ...replayed, dumpMarker: true, linesAfterDump: 3 });
+  assert.deepEqual([marked.classification, marked.invalidReasons, marked.monitorReplay.dumpMarker, marked.monitorReplay.linesAfterDump], ['valid-verification', [], true, 3]);
   for (const monitor of [{ keysAtStart: 0, lines: 12, endedEarly: true }, { keysAtStart: 3, lines: 12, endedEarly: false }, { keysAtStart: null, lines: 12, endedEarly: false }]) {
     const r = await verification(monitor);
     assert.deepEqual([r.classification, r.invalidReasons], ['invalid-measurement', ['monitor-capture']], JSON.stringify(monitor));
@@ -1276,15 +1304,15 @@ test('a queue run is invalid when its arm, its Redis or its trace is not what it
 });
 
 test('a manifest of the first and of the current v3 harness revision is analysed as a v3 run', async () => {
-  assert.equal(harness.REVISION, 'flash-sale-v3.3');
+  assert.equal(harness.REVISION, 'flash-sale-v3.4');
   await queueRun(async ({ manifest, analyze }) => {
     assert.equal(manifest.revision, 'flash-sale-v3.0');
     const first = await analyze();
     manifest.revision = harness.REVISION;
     const current = await analyze();
-    assert.deepEqual([first.classification, current.classification, current.revision], ['valid-queue', 'valid-queue', 'flash-sale-v3.3']);
+    assert.deepEqual([first.classification, current.classification, current.revision], ['valid-queue', 'valid-queue', 'flash-sale-v3.4']);
     assert.deepEqual({ ...current, revision: first.revision }, first);
-    for (const earlier of ['flash-sale-v3.1', 'flash-sale-v3.2']) { manifest.revision = earlier; assert.deepEqual({ ...(await analyze()), revision: first.revision }, first); }
+    for (const earlier of ['flash-sale-v3.1', 'flash-sale-v3.2', 'flash-sale-v3.3']) { manifest.revision = earlier; assert.deepEqual({ ...(await analyze()), revision: first.revision }, first); }
   });
 });
 

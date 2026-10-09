@@ -7,7 +7,10 @@ import { join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { createHash } from 'node:crypto';
 
-export const ANALYSIS_REVISION = 'flash-sale-analysis-v3.6';
+export const ANALYSIS_REVISION = 'flash-sale-analysis-v3.7';
+const ARM_MODES = { b: 'fixed', c: 'adaptive' };
+// The v3 harness revisions whose Redis dump leaves no mark in a MONITOR capture.
+const UNMARKED_REVISIONS = ['flash-sale-v3.0', 'flash-sale-v3.1', 'flash-sale-v3.2', 'flash-sale-v3.3'];
 
 export function stats(values) {
   const a = values.filter(Number.isFinite).sort((x, y) => x - y);
@@ -158,7 +161,7 @@ export async function analyzeRun(directory, suppliedManifest) {
   const m = suppliedManifest ?? await read('manifest.json');
   if (!suppliedManifest) await verifyArtifacts(directory, m);
   // A v3 run has arms and a queue; everything below this line is the v2.6 analysis, unchanged.
-  if (['flash-sale-v3.0', 'flash-sale-v3.1', 'flash-sale-v3.2', 'flash-sale-v3.3'].includes(m.revision)) return analyzeV3(directory, m, read);
+  if ([...UNMARKED_REVISIONS, 'flash-sale-v3.4'].includes(m.revision)) return analyzeV3(directory, m, read);
   const requiredMetrics = new Set(['scenario_start_ms', 'buyers_started', 'buyers_completed', 'journey_outcomes', 'journey_duration',
     'api_responses', 'api_duration', 'arrival_lag_ms', 'active_vus_at_arrival', 'dropped_iterations', 'script_failures', 'protocol_failures', 'replay_failures']);
   const [points, sql, verification, observations, app, resources, cleanup, negatives, summary] = await Promise.all([
@@ -288,9 +291,9 @@ async function analyzeV3(directory, m, read) {
     auth: negatives.dataUnchanged === true && negatives.checks.length === (queueArm ? 4 : 3) && negatives.checks.every(o => o.status === o.expected && (o.expectedCode === undefined || o.code === o.expectedCode)),
     lifecycle: !m.evidenceErrors?.length && [0, 99].includes(m.k6ExitCode),
     // The dump is evidence only when every entry carries its registration and, in a state that only a promotion
-    // leads to, the instant of that promotion (v3.6): the rate bound and the denominators are computed from them.
+    // leads to or that was claimed (v3.7: a fingerprint), the instant of that promotion (v3.6): the rate bound and the denominators are computed from them.
     'admission-evidence': Array.isArray(final.rows) && Array.isArray(final.ledger) && Array.isArray(dump.entries)
-      && dump.entries.every(e => Number.isFinite(e.joinedAt) && (Number.isFinite(e.admittedAt) || (!['admitted', 'consumed'].includes(e.state) && (e.admittedAt === null || e.admittedAt === undefined)))),
+      && dump.entries.every(e => Number.isFinite(e.joinedAt) && (Number.isFinite(e.admittedAt) || (!['admitted', 'consumed'].includes(e.state) && !e.fingerprint && (e.admittedAt === null || e.admittedAt === undefined)))),
   };
   const hostPressure = resourceWindow.some((_, i) => i >= 2 && resourceWindow.slice(i - 2, i + 1).every(o => o.hostCpuPercent >= 90 || o.hostFreeBytes < 1073741824));
 
@@ -354,6 +357,8 @@ async function analyzeV3(directory, m, read) {
       if (journey.traceEvents !== (tracesOf.get(buyer) ?? 0)) problems.push(`buyer ${buyer}: ${tracesOf.get(buyer) ?? 0} of ${journey.traceEvents} trace events`);
       if (journey.requests?.status !== (statusOf.get(buyer) ?? 0) || journey.requests?.join !== (joinsOf.get(buyer) ?? 0)) problems.push(`buyer ${buyer}: request counts differ from the summary`);
       if (journey.joinKey !== m.fixture.joinKeys?.[buyer]) problems.push(`buyer ${buyer}: another join key`);
+      // The arm is its polling mode (v3.7).
+      if (journey.mode !== ARM_MODES[m.arm]) problems.push(`buyer ${buyer}: polling mode ${journey.mode} in arm ${m.arm}`);
       // A recognition is a sample only with both bounds and its instant (v3.2).
       if (journey.recognition && ![journey.recognition.lowerMs, journey.recognition.upperMs, journey.recognition.at].every(Number.isFinite)) problems.push(`buyer ${buyer}: a recognition without its delays`);
       // An entry the buyer saw is the one Redis keeps for that user and that join key.
@@ -407,9 +412,10 @@ async function analyzeV3(directory, m, read) {
   if (a.arrivalLagMs.max === null || a.arrivalLagMs.max > 250) invalidReasons.push('arrival-lag');
   if (a.scriptFailures || a.protocolFailures) invalidReasons.push('script/protocol');
   if (hostPressure) invalidReasons.push('host-pressure');
-  if (answers.some(p => ['401', '403'].includes(p.data.tags.status) || (p.data.tags.status === '429' && PURCHASE_STAGES.includes(p.data.tags.stage)))) invalidReasons.push('auth-or-limiter');
+  // A limiter that could not reach its Redis answers 503 RATE_LIMIT_UNAVAILABLE: the experiment failed, not a purchase (v3.7).
+  if (answers.some(p => ['401', '403'].includes(p.data.tags.status) || (p.data.tags.status === '429' && PURCHASE_STAGES.includes(p.data.tags.stage)) || p.data.tags.code === 'RATE_LIMIT_UNAVAILABLE')) invalidReasons.push('auth-or-limiter');
   if (answers.some(p => (p.data.tags.status === '429' && QUEUE_STAGES.includes(p.data.tags.stage)) || ['ADMISSION_QUEUE_FULL', 'ADMISSION_RATE_LIMITED'].includes(p.data.tags.code))) invalidReasons.push('admission-limiter');
-  if (!validity.policy || !validity.environment) invalidReasons.push('policy');
+  if (!validity.policy || !validity.environment || (queueArm && (m.pollMode !== ARM_MODES[m.arm] || s.pollMode !== ARM_MODES[m.arm]))) invalidReasons.push('policy');
   if (!validity.redisProcess) invalidReasons.push('redis-restart');
   if (!validity.redisConfig) invalidReasons.push('redis-config');
   if (!trace.complete) invalidReasons.push('trace');
@@ -420,7 +426,9 @@ async function analyzeV3(directory, m, read) {
   const replaySets = replay?.sets && ['waiting', 'active', 'claims'].every(name => typeof replay.sets[name]?.equal === 'boolean') ? replay.sets : null;
   const readable = Boolean(replay && replaySets && Array.isArray(replay.violations));
   const replayed = readable && replay.unparsed === 0 && replay.lines === m.monitor?.lines
-    && replay.profile?.rate === m.profile?.rate && replay.profile?.capacity === m.profile?.capacity && replay.promotions === replay.promotedEntriesInDump;
+    && replay.profile?.rate === m.profile?.rate && replay.profile?.capacity === m.profile?.capacity && replay.promotions === replay.promotedEntriesInDump
+    // From harness v3.4 on the replay ends at the mark of the dump (v3.7).
+    && (UNMARKED_REVISIONS.includes(m.revision) || replay.dumpMarker === true);
   if (s.monitor && !replayed) invalidReasons.push('monitor-replay');
   // A violation in the log, or final sets the log does not lead to, is a broken bound of the contract. It counts
   // whenever the replay can be read, also when the replay is incomplete in another respect (v3.5).
@@ -442,7 +450,8 @@ async function analyzeV3(directory, m, read) {
   return { revision: m.revision, analysisRevision: ANALYSIS_REVISION, runId: m.runId, arm: m.arm, pollMode: m.pollMode ?? null, profile: m.profile ?? null, classification,
     smokePassed: m.smokePassed ?? m.passed, k6ExitCode: m.k6ExitCode, invalidReasons, validity,
     ...(s.monitor ? { monitorReplay: readable ? { lines: replay.lines, promotions: replay.promotions, violations: replay.violations.length,
-      byRule: Object.fromEntries(tally(replay.violations, v => v.rule)), setsEqual: Object.values(replaySets).every(set => set.equal) } : null } : {}),
+      byRule: Object.fromEntries(tally(replay.violations, v => v.rule)), setsEqual: Object.values(replaySets).every(set => set.equal),
+      dumpMarker: replay.dumpMarker === true, linesAfterDump: replay.linesAfterDump ?? 0 } : null } : {}),
     // Product behaviour that is published with a run and does not make it invalid.
     disclosures: { quiesce: m.quiesce ?? null, applicationStop: m.applicationStop ?? null, monitor: m.monitor ?? null, readyAfterMs: m.readyAfterMs ?? null, poolMaxGapMs: evidence.pool.maxGapMs },
     // The numbers the pilot rules read. Thresholds are fixed in the protocol, not here.
