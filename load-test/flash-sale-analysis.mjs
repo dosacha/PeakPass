@@ -7,7 +7,7 @@ import { join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { createHash } from 'node:crypto';
 
-export const ANALYSIS_REVISION = 'flash-sale-analysis-v3.9';
+export const ANALYSIS_REVISION = 'flash-sale-analysis-v3.10';
 // Every integrity check verifySnapshot of the fixture evaluates for a v3 run; a check of flash-sale-check.mjs pins the list to the fixture.
 export const V3_INTEGRITY_NAMES = ['inventory', 'singleOrderPerBuyer', 'singleReservationPerBuyer', 'orderIdentity', 'reservationIdentity', 'reservationConversion',
   'ticketOwnership', 'ticketQuantity', 'checkoutPaymentIdentity', 'settlementIdentity', 'noExtraSettlementFacts', 'callbackIdentity', 'admissionFinalSql', 'admissionLedger'];
@@ -367,6 +367,9 @@ async function analyzeV3(directory, m, read) {
       if (journey.traceEvents !== (tracesOf.get(buyer) ?? 0)) problems.push(`buyer ${buyer}: ${tracesOf.get(buyer) ?? 0} of ${journey.traceEvents} trace events`);
       if (journey.requests?.status !== (statusOf.get(buyer) ?? 0) || journey.requests?.join !== (joinsOf.get(buyer) ?? 0)) problems.push(`buyer ${buyer}: request counts differ from the summary`);
       if (journey.joinKey !== m.fixture.joinKeys?.[buyer]) problems.push(`buyer ${buyer}: another join key`);
+      // An expired entry without a fingerprint may have expired while waiting, and then it has no admittedAt. When its own buyer
+      // saw it promoted, the dump must carry the instant (v3.10); a promotion nobody saw cannot be told from the dump alone.
+      if (entry && !Number.isFinite(entry.admittedAt) && (journey.admittedAt || journey.recognition || journey.purchase)) problems.push(`buyer ${buyer}: promoted by its own trace, without admittedAt in the dump`);
       // The arm is its polling mode (v3.7).
       if (journey.mode !== ARM_MODES[m.arm]) problems.push(`buyer ${buyer}: polling mode ${journey.mode} in arm ${m.arm}`);
       // A recognition is a sample only with both bounds and its instant (v3.2).

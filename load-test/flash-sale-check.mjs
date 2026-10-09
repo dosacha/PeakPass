@@ -1170,7 +1170,7 @@ test('a rolling second is (t - 1000, t]', async () => {
 test('a queue run keeps every scheduled buyer and keeps polling out of the purchase error share', async () => {
   await queueRun(async ({ analyze }) => {
     const r = await analyze();
-    assert.deepEqual([r.analysisRevision, r.arm, r.classification, r.invalidReasons], ['flash-sale-analysis-v3.9', 'b', 'valid-queue', []]);
+    assert.deepEqual([r.analysisRevision, r.arm, r.classification, r.invalidReasons], ['flash-sale-analysis-v3.10', 'b', 'valid-queue', []]);
     // Completion: paid with matching SQL identity over the whole scheduled cohort.
     assert.deepEqual([r.cohort.offered, r.cohort.confirmedPaid, r.cohort.completionFraction, r.cohort.unfinished], [4, 2, .5, 2]);
     assert.deepEqual(r.cohort.outcomes, { paid: 2, queue_waiting: 1, admission_expired: 1 });
@@ -1259,6 +1259,13 @@ test('a queue run is invalid when its arm, its Redis or its trace is not what it
   await invalid('policy', ({ manifest }) => { manifest.policy.after.generation = '1'; }, { arm: 'a' });
   await invalid('policy', ({ manifest }) => { manifest.policy.after.epoch = 'another'; }, { arm: 'a' });
   await invalid('policy', ({ manifest }) => { manifest.policy.after.phase = 'open'; }, { arm: 'a' });
+  // An entry its own buyer saw promoted (the summary's admittedAt, a recognition or a purchase) carries the instant in the dump,
+  // also when it expired without a claim and so without a fingerprint.
+  const seenPromoted = change => ({ dump, points }) => { Object.assign(dump.entries[2], { state: 'expired', admittedAt: null }); journeyOf(points, 2, change); };
+  await invalid('trace', seenPromoted(e => { e.admittedAt = '2026-10-05T00:00:16.900Z'; }));
+  await invalid('trace', seenPromoted(e => { e.recognition = { lowerMs: 80, upperMs: 100, layer: 'foreground', at: Date.parse('2026-10-05T00:00:16.950Z') }; }));
+  await invalid('trace', seenPromoted(e => { e.purchase = { attempts: 1, firstSendAt: 1, lastRecvAt: 2, status: 503 }; }));
+  assert.ok(!(await reasons(({ dump }) => { Object.assign(dump.entries[2], { state: 'expired', admittedAt: null }); })).invalidReasons.includes('trace'), 'expired while waiting, as far as anybody saw');
   // What Redis holds is the registrations of the fixture's buyers and nothing else.
   await invalid('trace', ({ dump }) => { dump.entries.push({ ...dump.entries[0], admissionId: 'foreign', userId: 'somebody-else', sequence: '9', state: 'waiting', admittedAt: null }); });
   await invalid('trace', ({ dump }) => { dump.joins.unknown = 'a0'; });
