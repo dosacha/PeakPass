@@ -17,6 +17,7 @@ services:
       retries: 60
   redis:
     image: redis:7-alpine
+    command: ["redis-server", "--save", "", "--appendonly", "no", "--maxmemory-policy", "noeviction"]
     ports: ["127.0.0.1::6379"]
     volumes: ["redis-data:/data"]
     cpus: 0.5
@@ -58,6 +59,7 @@ services:
       RATE_LIMIT_WINDOW_MS: 60000
       RATE_LIMIT_MAX_REQUESTS: ${FS_RATE_LIMIT:?}
       LOG_LEVEL: info
+      ENABLE_ADMISSION: "true"
 volumes:
   postgres-data:
   redis-data:

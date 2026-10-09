@@ -7,7 +7,13 @@ import { join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { createHash } from 'node:crypto';
 
-export const ANALYSIS_REVISION = 'flash-sale-analysis-v2.6.1';
+export const ANALYSIS_REVISION = 'flash-sale-analysis-v3.11';
+// Every integrity check verifySnapshot of the fixture evaluates for a v3 run; a check of flash-sale-check.mjs pins the list to the fixture.
+export const V3_INTEGRITY_NAMES = ['inventory', 'singleOrderPerBuyer', 'singleReservationPerBuyer', 'orderIdentity', 'reservationIdentity', 'reservationConversion',
+  'ticketOwnership', 'ticketQuantity', 'checkoutPaymentIdentity', 'settlementIdentity', 'noExtraSettlementFacts', 'callbackIdentity', 'admissionFinalSql', 'admissionLedger'];
+const ARM_MODES = { b: 'fixed', c: 'adaptive' };
+// The v3 harness revisions whose Redis dump leaves no mark in a MONITOR capture.
+const UNMARKED_REVISIONS = ['flash-sale-v3.0', 'flash-sale-v3.1', 'flash-sale-v3.2', 'flash-sale-v3.3'];
 
 export function stats(values) {
   const a = values.filter(Number.isFinite).sort((x, y) => x - y);
@@ -157,6 +163,8 @@ export async function analyzeRun(directory, suppliedManifest) {
   const read = name => readFile(join(directory, name), 'utf8').then(JSON.parse);
   const m = suppliedManifest ?? await read('manifest.json');
   if (!suppliedManifest) await verifyArtifacts(directory, m);
+  // A v3 run has arms and a queue; everything below this line is the v2.6 analysis, unchanged.
+  if ([...UNMARKED_REVISIONS, 'flash-sale-v3.4', 'flash-sale-v3.5', 'flash-sale-v3.6'].includes(m.revision)) return analyzeV3(directory, m, read);
   const requiredMetrics = new Set(['scenario_start_ms', 'buyers_started', 'buyers_completed', 'journey_outcomes', 'journey_duration',
     'api_responses', 'api_duration', 'arrival_lag_ms', 'active_vus_at_arrival', 'dropped_iterations', 'script_failures', 'protocol_failures', 'replay_failures']);
   const [points, sql, verification, observations, app, resources, cleanup, negatives, summary] = await Promise.all([
@@ -201,6 +209,296 @@ export async function analyzeRun(directory, suppliedManifest) {
       containers: Object.fromEntries(['app', 'postgres', 'redis'].map(service => [service, {
         cpuPercent: stats(resourceWindow.map(o => o.containers?.find(c => c.service === service)?.cpuPercent)),
         memoryPercent: stats(resourceWindow.map(o => o.containers?.find(c => c.service === service)?.memoryPercent)),
+      }])), generatorCpuSeconds: stats(resourceWindow.map(o => o.generator?.cpuSeconds)), generatorMemoryBytes: stats(resourceWindow.map(o => o.generator?.memoryBytes)) },
+    sqlCounts: verification.counts, failedSmokeChecks: Object.entries(verification.checks).filter(([, v]) => !v).map(([k]) => k) };
+}
+
+// ---- flash-sale-v3.0: arms a, b and c ----
+// Purchase writes are these three stages. Status, join and cancel requests of the queue API are never
+// part of a purchase error share.
+export const PURCHASE_STAGES = ['reservation', 'checkout', 'settlement'];
+const QUEUE_STAGES = ['status', 'join', 'cancel'];
+
+/** The largest number of instants inside any (t - windowMs, t]. */
+export function rollingMax(times, windowMs = 1000) {
+  const sorted = times.filter(Number.isFinite).sort((x, y) => x - y);
+  let max = 0, from = 0;
+  sorted.forEach((t, i) => { while (sorted[from] <= t - windowMs) from++; max = Math.max(max, i - from + 1); });
+  return max;
+}
+
+/**
+ * Was the arm what it claims? A stays unprotected and never has a control. B and C begin and end
+ * protected and open in one generation and epoch, with a ready control of the same Redis process in
+ * every sample. All arms run with the feature on and on a Redis without persistence and eviction.
+ */
+export function admissionValidity(m, observations) {
+  const queueArm = m.arm === 'b' || m.arm === 'c';
+  const { before, after } = m.policy ?? {}, { before: first, after: last } = m.control ?? {};
+  // One generation and epoch, and no marker of a script that failed half-way (v3.11: `dirty` fences the queue while the mode still reads ready).
+  const same = (x, y) => !!x && !!y && x.generation === y.generation && x.epoch === y.epoch && x.dirty === undefined && y.dirty === undefined;
+  const sampled = observations.map(o => o.queue?.control).filter(control => control !== undefined);
+  const policy = queueArm
+    ? before?.protected === true && after?.protected === true && before.phase === 'open' && after.phase === 'open' && same(before, after)
+      && first?.mode === 'ready' && last?.mode === 'ready' && same(first, last) && same(before, first)
+      && sampled.every(control => control?.mode === 'ready' && same(control, first))
+    // Arm a: the same unprotected row before and after (v3.9), and no control at any time.
+    : before?.protected === false && after?.protected === false && same(before, after) && before.phase === after.phase && first === null && last === null && sampled.every(control => control === null);
+  const runId = m.redis?.before?.runId;
+  const redisProcess = !!runId && runId === m.redis?.after?.runId && (!queueArm || (first?.runId === runId && last?.runId === runId && sampled.every(control => control?.runId === runId)));
+  const required = { appendonly: 'no', save: '', 'maxmemory-policy': 'noeviction' };
+  const redisConfig = [m.redis?.before?.config, m.redis?.after?.config].every(config => !!config && Object.entries(required).every(([key, value]) => config[key] === value));
+  return { policy, redisProcess, redisConfig, environment: m.applicationEnvironment?.ENABLE_ADMISSION === 'true' };
+}
+
+const failedAttempt = p => p.data.tags.status === '0' || p.data.tags.status === '429' || Number(p.data.tags.status) >= 500;
+const share = list => { const failures = list.filter(failedAttempt).length; return { attempts: list.length, failures, fraction: list.length ? failures / list.length : null }; };
+const tally = (list, pick) => { const counts = new Map(); for (const item of list) counts.set(pick(item), (counts.get(pick(item)) ?? 0) + 1); return counts; };
+const recorded = p => { try { return JSON.parse(p.data.metadata.e); } catch { return null; } };
+
+async function analyzeV3(directory, m, read) {
+  const s = m.settings, queueArm = m.arm === 'b' || m.arm === 'c';
+  const metrics = new Set(['scenario_start_ms', 'buyers_started', 'buyers_completed', 'journey_outcomes', 'journey_duration', 'api_responses', 'api_duration', 'arrival_lag_ms',
+    'active_vus_at_arrival', 'dropped_iterations', 'script_failures', 'protocol_failures', 'replay_failures', 'admission_trace', 'admission_journey']);
+  const [points, sql, verification, observations, app, resources, cleanup, negatives, summary, dump, final] = await Promise.all([
+    jsonLines(join(directory, 'k6-raw.jsonl'), p => p.type === 'Point' && metrics.has(p.metric)), read('sql-snapshot.json'), read('verification.json'),
+    jsonLines(join(directory, 'observations.jsonl')), read('app-metrics.json'), jsonLines(join(directory, 'resources.jsonl')), read('cleanup.json'), read('negative-checks.json'), read('k6-summary.json'),
+    read('redis-admission.json'), read('admission-final.json'),
+  ]);
+  const answers = points.filter(p => p.metric === 'api_responses');
+  // The P2 figures are computed over purchase requests only, so polling cannot dilute an error share.
+  const purchasePoints = points.filter(p => !['api_responses', 'api_duration'].includes(p.metric) || PURCHASE_STAGES.includes(p.data.tags.stage));
+  const analysis = analyzePoints(purchasePoints, m, sql), w = analysis.window, a = analysis.all, c = analysis.cohort;
+  // The same figures over the whole horizon: the arrival window plus the drain budget.
+  const whole = analyzePoints(purchasePoints, { ...m, settings: { ...s, durationSeconds: s.durationSeconds + s.drainSeconds, measurementSeconds: s.measurementSeconds + s.drainSeconds } }, sql).window;
+  const start = points.find(p => p.metric === 'scenario_start_ms').data.value;
+  const left = Date.parse(w.start), horizonEnd = start + (s.durationSeconds + s.drainSeconds) * 1000;
+  // Observation must cover the load as long as it ran: to the end of k6 or of the horizon.
+  const loadEnd = Math.min(horizonEnd, epoch(m.loadEndedAt));
+  const inLoad = row => inside(row.at ?? row.time, left, loadEnd);
+  const observed = observations.filter(inLoad), pools = app.poolSamples.filter(inLoad), resourceWindow = resources.filter(inLoad);
+  const queueSamples = observations.filter(o => o.queue);
+  const clocks = m.clockChecks ?? [];
+  const validity = admissionValidity(m, observations);
+  const evidence = {
+    sourceClean: m.workingTree === '',
+    paidIdentityObserved: a.missingPaidIdentity === 0,
+    checkoutAuditObserved: verification.integrityNames?.includes('checkoutPaymentIdentity') === true,
+    accounting: metricAccounting(points, summary.metrics, s.users),
+    observer: coverage(observations, left, loadEnd, 1000), 'queue-observer': coverage(queueSamples, left, loadEnd, 1000),
+    // The application's 250 ms sampler stalls on an instance near its CPU limit: 2,000 ms, and the largest gap is published (v3.1).
+    pool: coverage(app.poolSamples, left, loadEnd, 2000), resources: coverage(resources, left, loadEnd, 6000),
+    clockAligned: clocks.length === 2 && clocks.every(o => Math.abs(o.offsetMs) + o.roundTripMs / 2 <= 100),
+    generatorObserved: generatorObserved(resources, left, loadEnd, m.loadEndedAt),
+    containersObserved: resourceWindow.length > 0 && resourceWindow.every(o => ['app', 'postgres', 'redis'].every(service => o.containers?.some(x => x.service === service && Number.isFinite(x.cpuPercent) && Number.isFinite(x.memoryPercent)))),
+    clean: cleanup.passed === true && !m.cleanupError && !m.teardownError,
+    // Three authentication refusals, and in a queue arm the refusal of a purchase without admission fields.
+    auth: negatives.dataUnchanged === true && negatives.checks.length === (queueArm ? 4 : 3) && negatives.checks.every(o => o.status === o.expected && (o.expectedCode === undefined || o.code === o.expectedCode)),
+    lifecycle: !m.evidenceErrors?.length && [0, 99].includes(m.k6ExitCode),
+    // The dump is evidence only when every entry carries its registration and, in a state that only a promotion
+    // leads to or that was claimed (v3.7: a fingerprint), the instant of that promotion (v3.6): the rate bound and the denominators are computed from them.
+    'admission-evidence': Array.isArray(final.rows) && Array.isArray(final.ledger) && Array.isArray(dump.entries)
+      && dump.entries.every(e => Number.isFinite(e.joinedAt) && (Number.isFinite(e.admittedAt) || (!['admitted', 'consumed'].includes(e.state) && !e.fingerprint && (e.admittedAt === null || e.admittedAt === undefined)))),
+  };
+  const hostPressure = resourceWindow.some((_, i) => i >= 2 && resourceWindow.slice(i - 2, i + 1).every(o => o.hostCpuPercent >= 90 || o.hostFreeBytes < 1073741824));
+
+  // ---- the queue as Redis held it: samples describe it, every admittedAt is checked against R ----
+  const entries = dump.entries ?? [], rate = m.profile?.rate;
+  const offsetMs = stats(queueSamples.map(o => o.queue.redisTimeMs - o.queue.hostMidMs)).median; // Redis clock minus host clock
+  const loadSamples = queueSamples.filter(o => inside(o.at, start, loadEnd));
+  const held = (o, name) => Math.max(0, o.queue[name] - 1); // without the sentinel
+  const admittedTimes = entries.map(e => e.admittedAt).filter(Number.isFinite);
+  const maxPerSecond = rollingMax(admittedTimes);
+  let backlogMs = 0, promotionsInBacklog = 0;
+  loadSamples.forEach((o, i) => {
+    const next = loadSamples[i + 1];
+    if (!next || !held(o, 'waiting') || !held(next, 'waiting')) return;
+    backlogMs += next.queue.redisTimeMs - o.queue.redisTimeMs;
+    promotionsInBacklog += admittedTimes.filter(t => t >= o.queue.redisTimeMs && t < next.queue.redisTimeMs).length;
+  });
+  // Samples cannot prove that the capacity held, but one sample above C shows that it did not (v3.6).
+  const capacity = m.profile?.capacity, maxActiveSampled = Math.max(0, ...queueSamples.map(o => held(o, 'active')).filter(Number.isFinite));
+  const queue = { rate, capacity, maxActiveSampled, capacityHeldInSamples: !Number.isFinite(capacity) || maxActiveSampled <= capacity, redisClockOffsetMs: offsetMs,
+    samples: Object.fromEntries(['waiting', 'active', 'claims', 'window'].map(name => [name, stats(loadSamples.map(o => held(o, name)))])),
+    maxPromotionsPerRollingSecond: maxPerSecond, rateHeld: Number.isFinite(rate) && maxPerSecond <= rate,
+    // While two consecutive samples both saw somebody waiting: promotions against R times that time.
+    backlogSeconds: backlogMs / 1000, promotionsInBacklog, promotionAchievement: backlogMs && rate ? promotionsInBacklog / (rate * backlogMs / 1000) : null };
+
+  // ---- purchase writes ----
+  const cohortBuyer = buyer => buyer >= s.warmupSeconds * s.rate && buyer < s.users;
+  const buyerOf = p => Number(p.data.tags.buyer);
+  const purchases = answers.filter(p => PURCHASE_STAGES.includes(p.data.tags.stage) && p.data.tags.kind !== 'replay');
+  // The first request of a purchase: the reservation, or the checkout of a direct purchase. In a queue arm it consumes the admission.
+  const firstRequests = purchases.filter(p => p.data.tags.stage === 'reservation' || (p.data.tags.stage === 'checkout' && p.data.tags.flow === 'direct'));
+  const firstAttempts = firstRequests.filter(p => p.data.tags.kind === 'normal');
+  const purchase = { stages: PURCHASE_STAGES, all: share(purchases),
+    arrivalWindow: { attempts: w.nonReplayAttempts, failures: w.failureAttempts, fraction: w.failureFraction },
+    horizon: { attempts: whole.nonReplayAttempts, failures: whole.failureAttempts, fraction: whole.failureFraction },
+    measuredCohort: share(purchases.filter(p => cohortBuyer(buyerOf(p)))),
+    http500InternalError: purchases.filter(p => p.data.tags.status === '500' && p.data.tags.code === 'INTERNAL_ERROR').length,
+    http503: purchases.filter(p => p.data.tags.status === '503').length, unanswered: purchases.filter(p => p.data.tags.status === '0').length,
+    conflicts: Object.fromEntries(tally(purchases.filter(p => p.data.tags.status === '409'), p => p.data.tags.code)),
+    firstRequest: { firstAttempts: firstAttempts.length, firstAttemptFailures: firstAttempts.filter(failedAttempt).length,
+      firstAttemptFailureFraction: firstAttempts.length ? firstAttempts.filter(failedAttempt).length / firstAttempts.length : null, repeats: firstRequests.length - firstAttempts.length } };
+  const horizon = { start: w.start, endExclusive: new Date(horizonEnd).toISOString(), seconds: whole.seconds, confirmedPaid: whole.confirmedPaid, paidPerSecond: whole.paidPerSecond, warmupSpillover: whole.warmupSpillover };
+
+  // ---- the queue as the buyers saw it: one summary and the controller's trace per buyer ----
+  let admission = null, polling = null, recognition = null, trace = { complete: true, problems: 0, sample: [] };
+  if (queueArm) {
+    const problems = [], journeys = new Map();
+    for (const p of points.filter(p => p.metric === 'admission_journey')) {
+      const journey = recorded(p);
+      if (!journey || journeys.has(buyerOf(p))) problems.push(`buyer ${buyerOf(p)}: ${journey ? 'two summaries' : 'unreadable summary'}`);
+      else journeys.set(buyerOf(p), journey);
+    }
+    const events = points.filter(p => p.metric === 'admission_trace').map(p => ({ buyer: buyerOf(p), ...(recorded(p) ?? { type: 'unreadable' }) }));
+    const statusAnswers = answers.filter(p => p.data.tags.stage === 'status'), joinAnswers = answers.filter(p => p.data.tags.stage === 'join');
+    const tracesOf = tally(events, e => e.buyer), statusOf = tally(statusAnswers, buyerOf), joinsOf = tally(joinAnswers, buyerOf);
+    const entryOf = new Map(entries.map(e => [e.userId, e]));
+    // Redis holds the registrations of the fixture's buyers and nothing else (v3.9): one entry per user, no foreign user, no foreign join key.
+    const fixtureUsers = new Set(m.fixture.userIds), fixtureKeys = new Set(m.fixture.joinKeys ?? []);
+    const foreignEntries = entries.filter(e => !fixtureUsers.has(e.userId)).length, foreignJoins = Object.keys(dump.joins ?? {}).filter(key => !fixtureKeys.has(key)).length;
+    if (foreignEntries) problems.push(`${foreignEntries} entries of users outside the fixture`);
+    if (foreignJoins) problems.push(`${foreignJoins} join mappings outside the fixture`);
+    if (entryOf.size !== entries.length) problems.push(`${entries.length - entryOf.size} users with more than one entry`);
+    if (events.some(e => e.type === 'unreadable')) problems.push('unreadable trace events');
+    // The controller writes its mode on every poll (v3.11); the summary's mode only repeats the setting.
+    const otherMode = events.filter(e => e.type === 'poll' && e.mode !== ARM_MODES[m.arm]).length;
+    if (otherMode) problems.push(`${otherMode} polls in another mode than the arm's`);
+    for (let buyer = 0; buyer < s.users; buyer++) {
+      const journey = journeys.get(buyer), entry = entryOf.get(m.fixture.userIds[buyer]);
+      if (!journey) { problems.push(`buyer ${buyer}: no summary`); continue; }
+      if (journey.traceEvents !== (tracesOf.get(buyer) ?? 0)) problems.push(`buyer ${buyer}: ${tracesOf.get(buyer) ?? 0} of ${journey.traceEvents} trace events`);
+      if (journey.requests?.status !== (statusOf.get(buyer) ?? 0) || journey.requests?.join !== (joinsOf.get(buyer) ?? 0)) problems.push(`buyer ${buyer}: request counts differ from the summary`);
+      if (journey.joinKey !== m.fixture.joinKeys?.[buyer]) problems.push(`buyer ${buyer}: another join key`);
+      // An expired entry without a fingerprint may have expired while waiting, and then it has no admittedAt. When its own buyer
+      // saw it promoted, the dump must carry the instant (v3.10); a promotion nobody saw cannot be told from the dump alone.
+      if (entry && !Number.isFinite(entry.admittedAt) && (journey.admittedAt || journey.recognition || journey.purchase)) problems.push(`buyer ${buyer}: promoted by its own trace, without admittedAt in the dump`);
+      // The arm is its polling mode (v3.7).
+      if (journey.mode !== ARM_MODES[m.arm]) problems.push(`buyer ${buyer}: polling mode ${journey.mode} in arm ${m.arm}`);
+      // A recognition is a sample only with both bounds and its instant (v3.2).
+      if (journey.recognition && ![journey.recognition.lowerMs, journey.recognition.upperMs, journey.recognition.at].every(Number.isFinite)) problems.push(`buyer ${buyer}: a recognition without its delays`);
+      // An entry the buyer saw is the one Redis keeps for that user and that join key.
+      // A registration on either side must be the same one on both (v3.6).
+      const mapped = dump.joins?.[journey.joinKey];
+      if ((journey.admissionId || mapped || entry) && !(entry?.admissionId === journey.admissionId && mapped === journey.admissionId)) problems.push(`buyer ${buyer}: entry or join mapping differs`);
+    }
+    trace = { complete: problems.length === 0, problems: problems.length, sample: problems.slice(0, 5) };
+
+    // Promoted before the buyers' cutoff, on the Redis clock. A promotion after it had nobody left to see it.
+    const cutoff = start + s.cutoffSeconds * 1000 + (offsetMs ?? 0);
+    const promoted = entries.filter(e => Number.isFinite(e.admittedAt) && e.admittedAt <= cutoff);
+    const buyerIndex = new Map(m.fixture.userIds.map((id, i) => [id, i]));
+    // The recognition figures are those of the entries promoted before the cutoff (v3.8): a buyer whose entry falls behind it
+    // on the Redis clock is counted apart and is in no percentile.
+    const promotedIds = new Set(promoted.map(e => e.admissionId));
+    const all = [...journeys], recognized = all.filter(([, j]) => j.recognition && promotedIds.has(j.admissionId)), missed = all.filter(([, j]) => !j.recognition && j.missed && promotedIds.has(j.admissionId));
+    const recognizedAfterCutoff = all.filter(([, j]) => j.recognition && !promotedIds.has(j.admissionId)).length;
+    const missedAfterCutoff = all.filter(([, j]) => !j.recognition && j.missed && !promotedIds.has(j.admissionId)).length;
+    const seen = new Set([...recognized, ...missed].map(([buyer]) => buyer));
+    const paidAfter = recognized.filter(([, j]) => j.outcome === 'paid'), bought = recognized.filter(([, j]) => j.purchase);
+    // An upper bound of admittedAt → purchase answer, on the generator's clock alone.
+    const occupation = bought.map(([, j]) => j.recognition.upperMs + (j.purchase.lastRecvAt - j.recognition.at));
+    // Entries promoted before the cutoff that Redis kept as expired, whatever outcome their buyer was left with (v3.2).
+    const expired = promoted.filter(e => e.state === 'expired').map(e => journeys.get(buyerIndex.get(e.userId)));
+    admission = { registered: new Set(entries.map(e => e.userId)).size, promoted: promoted.length,
+      promotedAfterCutoff: entries.filter(e => Number.isFinite(e.admittedAt) && e.admittedAt > cutoff).length,
+      recognized: recognized.length, recognizedAfterCutoff, missed: missed.length, missedAfterCutoff, unrecognized: promoted.filter(e => !seen.has(buyerIndex.get(e.userId))).length,
+      queueWaitMs: stats(promoted.map(e => e.admittedAt - e.joinedAt)),
+      recognitionToPaidMs: stats(paidAfter.map(([, j]) => j.endedAt - j.recognition.at)),
+      measuredRecognitionToPaidMs: stats(paidAfter.filter(([buyer]) => cohortBuyer(buyer)).map(([, j]) => j.endedAt - j.recognition.at)),
+      admittedToPurchaseAnswerMs: stats(occupation), slotOccupationSeconds: occupation.length ? occupation.reduce((sum, ms) => sum + ms, 0) / occupation.length / 1000 : null,
+      foregroundExpired: all.filter(([, j]) => j.outcome === 'admission_expired' && !j.hidden).length,
+      expiredEntries: { foreground: expired.filter(j => !j?.hidden).length, hidden: expired.filter(j => j?.hidden).length, byOutcome: Object.fromEntries(tally(expired, j => j?.outcome ?? 'no summary')) },
+      entryStates: Object.fromEntries(tally(entries, e => `${e.state}/${e.phase}`)) };
+    const layer = name => { const list = recognized.map(([, j]) => j.recognition).filter(r => !name || r.layer === name);
+      return { count: list.length, lowerMs: stats(list.map(r => r.lowerMs)), upperMs: stats(list.map(r => r.upperMs)) }; };
+    recognition = { measuredBy: 'the controller in the generator; not a browser', promoted: admission.promoted, unrecognized: admission.unrecognized, missed: admission.missed,
+      all: layer(), foreground: layer('foreground'), hidden: layer('hidden'), reconnect: layer('reconnect') };
+    // admission-v1 §7: foreground p95 within 2 s, a goal that can be refuted.
+    recognition.withinTwoSeconds = recognition.foreground.upperMs.p95 !== null && recognition.foreground.upperMs.p95 <= 2000;
+    const polls = events.filter(e => e.type === 'poll'), timed = polls.filter(e => e.reason === 'timer' && Number.isFinite(e.plannedDelayMs) && Number.isFinite(e.actualDelayMs));
+    const registered = all.filter(([, j]) => j.admissionId);
+    polling = { statusRequests: statusAnswers.length, joinRequests: joinAnswers.length, registeredUsers: registered.length,
+      perRegisteredUser: stats(registered.map(([, j]) => j.requests.status)),
+      // Per second with at least one status request, by the second of its answer.
+      perSecond: stats([...tally(statusAnswers, p => Math.floor(epoch(p.data.time) / 1000)).values()]),
+      byReason: Object.fromEntries(tally(polls, e => e.reason)), outsideCadence: polls.filter(e => e.reason !== 'timer').length,
+      plannedDelayMs: stats(timed.map(e => e.plannedDelayMs)), actualDelayMs: stats(timed.map(e => e.actualDelayMs)), lateMs: stats(timed.map(e => e.actualDelayMs - e.plannedDelayMs)),
+      aborted: events.filter(e => e.type === 'poll-aborted').length, timedOut: polls.filter(e => e.timedOut).length, failures: statusAnswers.filter(failedAttempt).length };
+  }
+
+  const invalidReasons = [];
+  for (const [name, value] of Object.entries(evidence)) if (!(typeof value === 'object' ? value.complete : value)) invalidReasons.push(name);
+  if (a.dropped || a.started !== a.offered || a.duplicateStarts || a.duplicateCompletions) invalidReasons.push('arrival-delivery');
+  if (a.arrivalLagMs.max === null || a.arrivalLagMs.max > 250) invalidReasons.push('arrival-lag');
+  if (a.scriptFailures || a.protocolFailures) invalidReasons.push('script/protocol');
+  if (hostPressure) invalidReasons.push('host-pressure');
+  // A limiter that could not reach its Redis answers 503 RATE_LIMIT_UNAVAILABLE: the experiment failed, not a purchase (v3.7).
+  if (answers.some(p => ['401', '403'].includes(p.data.tags.status) || (p.data.tags.status === '429' && PURCHASE_STAGES.includes(p.data.tags.stage)) || p.data.tags.code === 'RATE_LIMIT_UNAVAILABLE')) invalidReasons.push('auth-or-limiter');
+  if (answers.some(p => (p.data.tags.status === '429' && QUEUE_STAGES.includes(p.data.tags.stage)) || ['ADMISSION_QUEUE_FULL', 'ADMISSION_RATE_LIMITED'].includes(p.data.tags.code))) invalidReasons.push('admission-limiter');
+  // An answer ADMISSION_RECOVERING says the queue was fenced during the load (v3.11).
+  if (!validity.policy || !validity.environment || (queueArm && (m.pollMode !== ARM_MODES[m.arm] || s.pollMode !== ARM_MODES[m.arm])) || answers.some(p => p.data.tags.code === 'ADMISSION_RECOVERING')) invalidReasons.push('policy');
+  if (!validity.redisProcess) invalidReasons.push('redis-restart');
+  if (!validity.redisConfig) invalidReasons.push('redis-config');
+  if (!trace.complete) invalidReasons.push('trace');
+  // A queue sample is a measurement only with both clocks and the four set sizes (v3.11); the control is judged with the policy.
+  if (!queueSamples.every(o => ['redisTimeMs', 'hostMidMs', 'waiting', 'active', 'claims', 'window'].every(name => Number.isFinite(o.queue[name]))) && !invalidReasons.includes('queue-observer')) invalidReasons.push('queue-observer');
+  // The verdict rests on every integrity check of the fixture, named and answered (v3.8); a subset is no evidence.
+  const names = verification.integrityNames;
+  if (!(Array.isArray(names) && names.length === V3_INTEGRITY_NAMES.length && V3_INTEGRITY_NAMES.every(name => names.includes(name) && typeof verification.checks?.[name] === 'boolean'))) invalidReasons.push('integrity-evidence');
+  // The comparison fixes preAllocatedVUs = maxVUs (v3.8).
+  // A run without --arm (armNamed false, from harness v3.6 on) is the fixture's default run with the P2 options, not a run of the comparison (v3.9).
+  if (s.armNamed !== false && s.preVus !== s.maxVus) invalidReasons.push('generator-allocation');
+  // A verification run proves its bounds only with a whole capture: begun on an empty admission keyspace, ended by the fixture (v3.3).
+  if (s.monitor && !(m.monitor && m.monitor.keysAtStart === 0 && m.monitor.endedEarly === false)) invalidReasons.push('monitor-capture');
+  // ... and with the replay of that capture (v3.4): every line read, under the run's own rate and capacity, as many promotions as the dump has.
+  const replay = s.monitor ? await read('monitor-replay.json').catch(() => null) : null;
+  const replaySets = replay?.sets && ['waiting', 'active', 'claims'].every(name => typeof replay.sets[name]?.equal === 'boolean') ? replay.sets : null;
+  const readable = Boolean(replay && replaySets && Array.isArray(replay.violations));
+  const replayed = readable && replay.unparsed === 0 && replay.lines === m.monitor?.lines
+    && replay.profile?.rate === m.profile?.rate && replay.profile?.capacity === m.profile?.capacity && replay.promotions === replay.promotedEntriesInDump
+    // From harness v3.4 on the replay ends at the mark of the dump (v3.7).
+    && (UNMARKED_REVISIONS.includes(m.revision) || replay.dumpMarker === true);
+  if (s.monitor && !replayed) invalidReasons.push('monitor-replay');
+  // A violation in the log, or final sets the log does not lead to, is a broken bound of the contract. It counts
+  // whenever the replay can be read, also when the replay is incomplete in another respect (v3.5).
+  const replayHeld = !readable || (replay.violations.length === 0 && Object.values(replaySets).every(set => set.equal));
+  // A deliberate replay that was not answered as the original (v3.5): a queue run with one is not valid. Arm a keeps the P2 rule.
+  if (queueArm && a.replayFailures) invalidReasons.push('replay');
+
+  const stable = a.replayFailures === 0 && c.completionFraction >= .99 && w.failureFraction !== null && w.failureFraction <= .01 && c.paidJourneyMs.p99 !== null && c.paidJourneyMs.p99 <= 2000
+    && Math.abs(w.firstHalfPaidPerSecond - w.secondHalfPaidPerSecond) / s.rate <= .2;
+  // Integrity: the P2 SQL checks, any row of admission-final.sql, a ledger mismatch, a paid answer SQL
+  // does not have, or more promotions in a rolling second than R. Unread evidence is invalid, not a defect.
+  // A check that is answered false is a defect; one that is missing or unanswered is `integrity-evidence` above, not a defect.
+  const sqlChecks = V3_INTEGRITY_NAMES.filter(name => !['admissionFinalSql', 'admissionLedger'].includes(name));
+  const integrity = sqlChecks.every(name => verification.checks?.[name] !== false)
+    && a.httpPaidWithoutSql === 0 && a.httpPaidIdentityMismatches === 0
+    && !(Array.isArray(final.rows) && final.rows.length) && !(Array.isArray(final.ledger) && final.ledger.length) && queue.rateHeld && queue.capacityHeldInSamples && replayHeld;
+  const classification = !integrity ? 'integrity-defect' : invalidReasons.length ? 'invalid-measurement'
+    : s.monitor ? 'valid-verification' : queueArm ? 'valid-queue' : classify({ integrity, valid: true, stable, stock: s.stock });
+  const logs = app.admissionLogs ?? [];
+  return { revision: m.revision, analysisRevision: ANALYSIS_REVISION, runId: m.runId, arm: m.arm, pollMode: m.pollMode ?? null, profile: m.profile ?? null, classification,
+    smokePassed: m.smokePassed ?? m.passed, k6ExitCode: m.k6ExitCode, invalidReasons, validity,
+    ...(s.monitor ? { monitorReplay: readable ? { lines: replay.lines, promotions: replay.promotions, violations: replay.violations.length,
+      byRule: Object.fromEntries(tally(replay.violations, v => v.rule)), setsEqual: Object.values(replaySets).every(set => set.equal),
+      dumpMarker: replay.dumpMarker === true, linesAfterDump: replay.linesAfterDump ?? 0 } : null } : {}),
+    // Product behaviour that is published with a run and does not make it invalid.
+    disclosures: { quiesce: m.quiesce ?? null, applicationStop: m.applicationStop ?? null, monitor: m.monitor ?? null, readyAfterMs: m.readyAfterMs ?? null, poolMaxGapMs: evidence.pool.maxGapMs },
+    // The numbers the pilot rules read. Thresholds are fixed in the protocol, not here.
+    criteria: { completionFraction: c.completionFraction, purchaseFailureFraction: purchase.measuredCohort.fraction,
+      paidP99AfterAdmissionMs: queueArm ? admission.measuredRecognitionToPaidMs.p99 : c.paidJourneyMs.p99, promotionAchievement: queue.promotionAchievement,
+      finalSqlRows: Array.isArray(final.rows) ? final.rows.length : null, ledgerMismatches: Array.isArray(final.ledger) ? final.ledger.length : null, stableByP2: queueArm ? null : stable },
+    evidence, ...analysis, horizon, purchase, admission, recognition, polling, queue, trace,
+    applicationLogs: Object.fromEntries(['transientPurchase', 'finalizationLeft', 'notReclaimed', 'iterationFailed'].map(kind => [kind, logs.filter(line => line.kind === kind).length])),
+    diagnostics: { window: 'from the measurement start to the end of the load', poolWaiting: stats(pools.map(o => o.waiting)), poolCheckedOut: stats(pools.map(o => o.checkedOut)),
+      lockWaiters: stats(observed.map(o => o.activity?.lock_waiters)), lockTypes: [...new Set(observed.flatMap(o => o.locks?.map(l => l.locktype) ?? []))],
+      redisObserverRttMs: stats(observed.map(o => o.redisPingRttMs)), retriesScheduledInWindow: app.retrySamples.filter(inLoad).length,
+      hostCpuPercent: stats(resourceWindow.map(o => o.hostCpuPercent)), hostFreeBytes: stats(resourceWindow.map(o => o.hostFreeBytes)),
+      containers: Object.fromEntries(['app', 'postgres', 'redis'].map(service => [service, {
+        cpuPercent: stats(resourceWindow.map(o => o.containers?.find(x => x.service === service)?.cpuPercent)),
+        memoryPercent: stats(resourceWindow.map(o => o.containers?.find(x => x.service === service)?.memoryPercent)),
       }])), generatorCpuSeconds: stats(resourceWindow.map(o => o.generator?.cpuSeconds)), generatorMemoryBytes: stats(resourceWindow.map(o => o.generator?.memoryBytes)) },
     sqlCounts: verification.counts, failedSmokeChecks: Object.entries(verification.checks).filter(([, v]) => !v).map(([k]) => k) };
 }
