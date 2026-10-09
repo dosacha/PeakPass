@@ -527,6 +527,10 @@ test('arm options are validated before provisioning', () => {
     assert.throws(() => parseOptions([...base, ...extra]), extra.join(' '));
   }
   assert.equal(parseOptions([...base, '--drain-seconds', '900']).drainSeconds, 900);
+  // A run of the comparison names its arm, and its generator allocates every VU before the load: preAllocatedVUs = maxVUs.
+  for (const arm of ['a', 'b', 'c']) assert.throws(() => parseOptions([...base, '--arm', arm, '--pre-vus', '24', '--max-vus', '30']), /--pre-vus/, arm);
+  assert.deepEqual([parseOptions([...base, '--arm', 'a', ...queueVUs]).preVus, parseOptions([...base, '--arm', 'a', ...queueVUs]).maxVus], [24, 24]);
+  assert.deepEqual([parseOptions(base).preVus, parseOptions(base).maxVus], [10, 20], 'the P2 defaults of a run without --arm stay');
   const layer = parseOptions([...base, '--arm', 'b', ...queueVUs, '--hidden-share', '20', '--monitor']);
   assert.deepEqual([layer.hiddenShare, layer.monitor], [20, true]);
 });
@@ -1058,6 +1062,7 @@ test('the monitor capture of a verification run keeps the admission writes only'
 // Buyer 0 pays through a reservation, buyer 1 through a direct checkout whose first answer is 503,
 // buyer 2 is promoted just before the cutoff and never sees it, buyer 3 is promoted and expires unseen.
 async function queueRun(check, { arm = 'b' } = {}) {
+  const { V3_INTEGRITY_NAMES } = await import('./flash-sale-analysis.mjs');
   const directory = await mkdtemp(join(tmpdir(), 'peakpass-v3-check-'));
   const start = Date.parse('2026-10-05T00:00:00Z'), queue = arm !== 'a', offset = 3; // Redis clock = host clock + 3 ms
   const settings = parseOptions(['--users', '4', '--rate', '2', '--arm', arm, '--pre-vus', '4', '--max-vus', '4']); // 2 s of arrival, cutoff at 17 s
@@ -1130,7 +1135,7 @@ async function queueRun(check, { arm = 'b' } = {}) {
   const dump = { eventId: 'event', epoch: 'epoch', control, entries: queue ? [entry(0, 10, 1000, 'consumed'), entry(1, 510, 1500, 'consumed'), entry(2, 1010, 16900, 'expired'), entry(3, 1510, 2000, 'expired')] : [],
     joins: queue ? { j0: 'a0', j1: 'a1', j2: 'a2', j3: 'a3' } : {}, waiting: [], active: [], claims: [], window: [] };
   const files = { 'sql-snapshot.json': { orders: paid.map(i => ({ id: `o${i}`, user_id: `u${i}`, status: 'paid' })), tickets: paid.map(i => ({ id: `t${i}`, order_id: `o${i}` })) },
-    'verification.json': { integrityPassed: true, integrityNames: ['checkoutPaymentIdentity', 'admissionFinalSql', 'admissionLedger'], counts: {}, checks: { checkoutPaymentIdentity: true, admissionFinalSql: true, admissionLedger: true } },
+    'verification.json': { integrityPassed: true, integrityNames: [...V3_INTEGRITY_NAMES], counts: {}, checks: Object.fromEntries(V3_INTEGRITY_NAMES.map(name => [name, true])) },
     'app-metrics.json': { poolSamples: samples, retrySamples: [], admissionLogs: queue ? [{ time: iso(2650), kind: 'transientPurchase' }] : [] }, 'cleanup.json': { passed: true },
     'negative-checks.json': { dataUnchanged: true, checks: [...[0, 1, 2].map(() => ({ status: 401, expected: 401 })), ...(queue ? [{ name: 'purchase-without-admission', status: 400, expected: 400, code: 'ADMISSION_INVALID_INPUT', expectedCode: 'ADMISSION_INVALID_INPUT' }] : [])] },
     'redis-admission.json': dump, 'admission-final.json': { rows: [], ledger: [] } };
@@ -1157,7 +1162,7 @@ test('a rolling second is (t - 1000, t]', async () => {
 test('a queue run keeps every scheduled buyer and keeps polling out of the purchase error share', async () => {
   await queueRun(async ({ analyze }) => {
     const r = await analyze();
-    assert.deepEqual([r.analysisRevision, r.arm, r.classification, r.invalidReasons], ['flash-sale-analysis-v3.7', 'b', 'valid-queue', []]);
+    assert.deepEqual([r.analysisRevision, r.arm, r.classification, r.invalidReasons], ['flash-sale-analysis-v3.8', 'b', 'valid-queue', []]);
     // Completion: paid with matching SQL identity over the whole scheduled cohort.
     assert.deepEqual([r.cohort.offered, r.cohort.confirmedPaid, r.cohort.completionFraction, r.cohort.unfinished], [4, 2, .5, 2]);
     assert.deepEqual(r.cohort.outcomes, { paid: 2, queue_waiting: 1, admission_expired: 1 });
@@ -1231,6 +1236,14 @@ test('a queue run is invalid when its arm, its Redis or its trace is not what it
   assert.ok(!(await reasons(({ dump }) => { dump.entries[3].fingerprint = 'sha256:claimed'; })).invalidReasons.includes('admission-evidence'), 'claimed, expired, with its instant');
   // An entry that expired while waiting was never promoted and has no such instant.
   assert.ok(!(await reasons(({ dump }) => { dump.entries[3].admittedAt = null; })).invalidReasons.includes('admission-evidence'));
+  // Every integrity check of the fixture is named and answered; a subset is no evidence, whatever it says.
+  await invalid('integrity-evidence', ({ files }) => { files['verification.json'].integrityNames = files['verification.json'].integrityNames.filter(name => name !== 'inventory'); });
+  await invalid('integrity-evidence', ({ files }) => { delete files['verification.json'].checks.ticketQuantity; });
+  await invalid('integrity-evidence', ({ files }) => { files['verification.json'].integrityNames = null; });
+  await invalid('integrity-evidence', ({ files }) => { files['verification.json'].integrityNames = files['verification.json'].integrityNames.filter(name => name !== 'admissionLedger'); }, { arm: 'a' });
+  // The generator allocated every VU before the load.
+  await invalid('generator-allocation', ({ manifest }) => { manifest.settings = { ...manifest.settings, preVus: 2 }; });
+  await invalid('generator-allocation', ({ manifest }) => { manifest.settings = { ...manifest.settings, maxVus: 8 }; }, { arm: 'a' });
   // The arm is its polling mode: every buyer's summary and the manifest say the mode of the arm.
   await invalid('trace', ({ points }) => journeyOf(points, 1, e => { e.mode = 'adaptive'; }));
   await invalid('trace', ({ points }) => journeyOf(points, 2, e => { delete e.mode; }));
@@ -1263,6 +1276,7 @@ test('a queue run is invalid when its arm, its Redis or its trace is not what it
   const full = await reasons(({ samples }) => { samples[3].queue.active = 9; });
   assert.deepEqual([full.classification, full.queue.capacity, full.queue.maxActiveSampled, full.queue.capacityHeldInSamples], ['valid-queue', 8, 8, true]);
   await defect(({ files }) => { files['sql-snapshot.json'].orders.pop(); });
+  await defect(({ files }) => { files['verification.json'].checks.inventory = false; });
   // A late reclamation and a slow exit are published, not invalid; a verification run is not a measurement.
   const late = await reasons(({ manifest }) => { manifest.quiesce = { limitMs: 60000, elapsedMs: 60010, reached: false, remaining: { waiting: 0, active: 1, claims: 1 } }; manifest.applicationStop.seconds = 73.4; });
   assert.deepEqual([late.classification, late.disclosures.quiesce.reached, late.disclosures.applicationStop.seconds], ['valid-queue', false, 73.4]);
@@ -1274,7 +1288,7 @@ test('a queue run is invalid when its arm, its Redis or its trace is not what it
   const verified = await verification(whole);
   assert.deepEqual([verified.classification, verified.invalidReasons, verified.monitorReplay], ['valid-verification', [], { lines: 12, promotions: 4, violations: 0, byRule: {}, setsEqual: true, dumpMarker: false, linesAfterDump: 0 }]);
   // From harness v3.4 on the dump marks the capture, and a replay without that mark did not end at the dump.
-  const current = (replay, monitor = whole) => reasons(({ manifest, files }) => { manifest.revision = harness.REVISION; manifest.settings = { ...manifest.settings, monitor: true }; manifest.monitor = monitor; files['monitor-replay.json'] = replay; });
+  const current = (replay, monitor = whole) => reasons(({ manifest, files }) => { manifest.revision = 'flash-sale-v3.4'; manifest.settings = { ...manifest.settings, monitor: true }; manifest.monitor = monitor; files['monitor-replay.json'] = replay; });
   assert.deepEqual((await current(replayed)).invalidReasons, ['monitor-replay']);
   const marked = await current({ ...replayed, dumpMarker: true, linesAfterDump: 3 });
   assert.deepEqual([marked.classification, marked.invalidReasons, marked.monitorReplay.dumpMarker, marked.monitorReplay.linesAfterDump], ['valid-verification', [], true, 3]);
@@ -1304,15 +1318,15 @@ test('a queue run is invalid when its arm, its Redis or its trace is not what it
 });
 
 test('a manifest of the first and of the current v3 harness revision is analysed as a v3 run', async () => {
-  assert.equal(harness.REVISION, 'flash-sale-v3.4');
+  assert.equal(harness.REVISION, 'flash-sale-v3.5');
   await queueRun(async ({ manifest, analyze }) => {
     assert.equal(manifest.revision, 'flash-sale-v3.0');
     const first = await analyze();
     manifest.revision = harness.REVISION;
     const current = await analyze();
-    assert.deepEqual([first.classification, current.classification, current.revision], ['valid-queue', 'valid-queue', 'flash-sale-v3.4']);
+    assert.deepEqual([first.classification, current.classification, current.revision], ['valid-queue', 'valid-queue', 'flash-sale-v3.5']);
     assert.deepEqual({ ...current, revision: first.revision }, first);
-    for (const earlier of ['flash-sale-v3.1', 'flash-sale-v3.2', 'flash-sale-v3.3']) { manifest.revision = earlier; assert.deepEqual({ ...(await analyze()), revision: first.revision }, first); }
+    for (const earlier of ['flash-sale-v3.1', 'flash-sale-v3.2', 'flash-sale-v3.3', 'flash-sale-v3.4']) { manifest.revision = earlier; assert.deepEqual({ ...(await analyze()), revision: first.revision }, first); }
   });
 });
 
@@ -1365,6 +1379,27 @@ test('a v2.6 run keeps the pool sample bound of 1,000 ms', async () => {
     await save('app-metrics.json', stored);
     const r = await analyzeRun(directory, manifest);
     assert.deepEqual([r.classification, r.invalidReasons, r.evidence.pool.maxGapMs], ['invalid-measurement', ['pool'], 1500]);
+  });
+});
+
+test('the integrity checks the analysis expects are those the fixture evaluates', async () => {
+  const { V3_INTEGRITY_NAMES } = await import('./flash-sale-analysis.mjs');
+  const source = await readFile(new URL('./flash-sale-fixture.mjs', import.meta.url), 'utf8');
+  const literal = /const integrityNames = \[([\s\S]*?)\];/.exec(source)[1];
+  assert.deepEqual([...literal.matchAll(/'(\w+)'/g)].map(match => match[1]), V3_INTEGRITY_NAMES);
+  assert.equal(V3_INTEGRITY_NAMES.length, 14);
+});
+
+test('a recognition of an entry promoted after the cutoff is outside the recognition figures', async () => {
+  await queueRun(async ({ dump, start, analyze }) => {
+    const before = await analyze();
+    assert.deepEqual([before.admission.recognized, before.admission.recognizedAfterCutoff, before.recognition.foreground.count, before.admission.measuredRecognitionToPaidMs.count], [2, 0, 2, 2]);
+    // Buyer 1 saw its entry and paid; on the Redis clock the promotion falls 0.5 s behind the cutoff of 17 s.
+    dump.entries[1].admittedAt = start + 17500;
+    const r = await analyze();
+    assert.deepEqual([r.admission.promoted, r.admission.promotedAfterCutoff, r.admission.recognized, r.admission.recognizedAfterCutoff], [3, 1, 1, 1]);
+    assert.deepEqual([r.recognition.all.count, r.recognition.foreground.count, r.recognition.foreground.upperMs.max, r.admission.recognitionToPaidMs.count, r.admission.measuredRecognitionToPaidMs.count, r.admission.admittedToPurchaseAnswerMs.count], [1, 1, 500, 1, 1, 1]);
+    assert.ok(r.admission.recognized <= r.admission.promoted);
   });
 });
 

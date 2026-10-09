@@ -7,7 +7,10 @@ import { join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { createHash } from 'node:crypto';
 
-export const ANALYSIS_REVISION = 'flash-sale-analysis-v3.7';
+export const ANALYSIS_REVISION = 'flash-sale-analysis-v3.8';
+// Every integrity check verifySnapshot of the fixture evaluates for a v3 run; a check of flash-sale-check.mjs pins the list to the fixture.
+export const V3_INTEGRITY_NAMES = ['inventory', 'singleOrderPerBuyer', 'singleReservationPerBuyer', 'orderIdentity', 'reservationIdentity', 'reservationConversion',
+  'ticketOwnership', 'ticketQuantity', 'checkoutPaymentIdentity', 'settlementIdentity', 'noExtraSettlementFacts', 'callbackIdentity', 'admissionFinalSql', 'admissionLedger'];
 const ARM_MODES = { b: 'fixed', c: 'adaptive' };
 // The v3 harness revisions whose Redis dump leaves no mark in a MONITOR capture.
 const UNMARKED_REVISIONS = ['flash-sale-v3.0', 'flash-sale-v3.1', 'flash-sale-v3.2', 'flash-sale-v3.3'];
@@ -161,7 +164,7 @@ export async function analyzeRun(directory, suppliedManifest) {
   const m = suppliedManifest ?? await read('manifest.json');
   if (!suppliedManifest) await verifyArtifacts(directory, m);
   // A v3 run has arms and a queue; everything below this line is the v2.6 analysis, unchanged.
-  if ([...UNMARKED_REVISIONS, 'flash-sale-v3.4'].includes(m.revision)) return analyzeV3(directory, m, read);
+  if ([...UNMARKED_REVISIONS, 'flash-sale-v3.4', 'flash-sale-v3.5'].includes(m.revision)) return analyzeV3(directory, m, read);
   const requiredMetrics = new Set(['scenario_start_ms', 'buyers_started', 'buyers_completed', 'journey_outcomes', 'journey_duration',
     'api_responses', 'api_duration', 'arrival_lag_ms', 'active_vus_at_arrival', 'dropped_iterations', 'script_failures', 'protocol_failures', 'replay_failures']);
   const [points, sql, verification, observations, app, resources, cleanup, negatives, summary] = await Promise.all([
@@ -372,7 +375,11 @@ async function analyzeV3(directory, m, read) {
     const cutoff = start + s.cutoffSeconds * 1000 + (offsetMs ?? 0);
     const promoted = entries.filter(e => Number.isFinite(e.admittedAt) && e.admittedAt <= cutoff);
     const buyerIndex = new Map(m.fixture.userIds.map((id, i) => [id, i]));
-    const all = [...journeys], recognized = all.filter(([, j]) => j.recognition), missed = all.filter(([, j]) => !j.recognition && j.missed);
+    // The recognition figures are those of the entries promoted before the cutoff (v3.8): a buyer whose entry falls behind it
+    // on the Redis clock is counted apart and is in no percentile.
+    const promotedIds = new Set(promoted.map(e => e.admissionId));
+    const all = [...journeys], recognized = all.filter(([, j]) => j.recognition && promotedIds.has(j.admissionId)), missed = all.filter(([, j]) => !j.recognition && j.missed);
+    const recognizedAfterCutoff = all.filter(([, j]) => j.recognition && !promotedIds.has(j.admissionId)).length;
     const seen = new Set([...recognized, ...missed].map(([buyer]) => buyer));
     const paidAfter = recognized.filter(([, j]) => j.outcome === 'paid'), bought = recognized.filter(([, j]) => j.purchase);
     // An upper bound of admittedAt → purchase answer, on the generator's clock alone.
@@ -381,7 +388,7 @@ async function analyzeV3(directory, m, read) {
     const expired = promoted.filter(e => e.state === 'expired').map(e => journeys.get(buyerIndex.get(e.userId)));
     admission = { registered: new Set(entries.map(e => e.userId)).size, promoted: promoted.length,
       promotedAfterCutoff: entries.filter(e => Number.isFinite(e.admittedAt) && e.admittedAt > cutoff).length,
-      recognized: recognized.length, missed: missed.length, unrecognized: promoted.filter(e => !seen.has(buyerIndex.get(e.userId))).length,
+      recognized: recognized.length, recognizedAfterCutoff, missed: missed.length, unrecognized: promoted.filter(e => !seen.has(buyerIndex.get(e.userId))).length,
       queueWaitMs: stats(promoted.map(e => e.admittedAt - e.joinedAt)),
       recognitionToPaidMs: stats(paidAfter.map(([, j]) => j.endedAt - j.recognition.at)),
       measuredRecognitionToPaidMs: stats(paidAfter.filter(([buyer]) => cohortBuyer(buyer)).map(([, j]) => j.endedAt - j.recognition.at)),
@@ -419,6 +426,11 @@ async function analyzeV3(directory, m, read) {
   if (!validity.redisProcess) invalidReasons.push('redis-restart');
   if (!validity.redisConfig) invalidReasons.push('redis-config');
   if (!trace.complete) invalidReasons.push('trace');
+  // The verdict rests on every integrity check of the fixture, named and answered (v3.8); a subset is no evidence.
+  const names = verification.integrityNames;
+  if (!(Array.isArray(names) && names.length === V3_INTEGRITY_NAMES.length && V3_INTEGRITY_NAMES.every(name => names.includes(name) && typeof verification.checks?.[name] === 'boolean'))) invalidReasons.push('integrity-evidence');
+  // The comparison fixes preAllocatedVUs = maxVUs (v3.8).
+  if (s.preVus !== s.maxVus) invalidReasons.push('generator-allocation');
   // A verification run proves its bounds only with a whole capture: begun on an empty admission keyspace, ended by the fixture (v3.3).
   if (s.monitor && !(m.monitor && m.monitor.keysAtStart === 0 && m.monitor.endedEarly === false)) invalidReasons.push('monitor-capture');
   // ... and with the replay of that capture (v3.4): every line read, under the run's own rate and capacity, as many promotions as the dump has.
@@ -440,8 +452,9 @@ async function analyzeV3(directory, m, read) {
     && Math.abs(w.firstHalfPaidPerSecond - w.secondHalfPaidPerSecond) / s.rate <= .2;
   // Integrity: the P2 SQL checks, any row of admission-final.sql, a ledger mismatch, a paid answer SQL
   // does not have, or more promotions in a rolling second than R. Unread evidence is invalid, not a defect.
-  const sqlChecks = (verification.integrityNames ?? []).filter(name => !['admissionFinalSql', 'admissionLedger'].includes(name));
-  const integrity = Array.isArray(verification.integrityNames) && sqlChecks.every(name => verification.checks?.[name] === true)
+  // A check that is answered false is a defect; one that is missing or unanswered is `integrity-evidence` above, not a defect.
+  const sqlChecks = V3_INTEGRITY_NAMES.filter(name => !['admissionFinalSql', 'admissionLedger'].includes(name));
+  const integrity = sqlChecks.every(name => verification.checks?.[name] !== false)
     && a.httpPaidWithoutSql === 0 && a.httpPaidIdentityMismatches === 0
     && !(Array.isArray(final.rows) && final.rows.length) && !(Array.isArray(final.ledger) && final.ledger.length) && queue.rateHeld && queue.capacityHeldInSamples && replayHeld;
   const classification = !integrity ? 'integrity-defect' : invalidReasons.length ? 'invalid-measurement'

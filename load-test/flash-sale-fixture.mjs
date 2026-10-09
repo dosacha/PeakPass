@@ -19,7 +19,7 @@ import { createClient } from 'redis';
 import { analyzeRun } from './flash-sale-analysis.mjs';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
-export const REVISION = 'flash-sale-v3.4';
+export const REVISION = 'flash-sale-v3.5';
 const defaults = { users: 12, rate: 2, 'think-ms': 20, retries: 1, 'retry-delay-ms': 100, 'replay-every': 3, quantity: 2, 'pre-vus': 10, 'max-vus': 20, 'pool-max': 10, 'sample-ms': 250, 'warmup-seconds': 0, 'drain-seconds': 30, 'limiter-max': 1000000, 'hidden-share': 0 };
 // The longest request of a journey is 10 s. A buyer starts nothing new this long before k6's drain ends.
 const CUTOFF_MARGIN_SECONDS = 15;
@@ -180,6 +180,8 @@ export function parseOptions(args) {
   s.pollMode = { a: null, b: 'fixed', c: 'adaptive' }[s.arm];
   s.monitor = values.monitor === true;
   assert.ok(!s.monitor || s.arm === 'b', '--monitor is the verification run of arm b');
+  // The comparison fixes preAllocatedVUs = maxVUs, so that k6 allocates no VU during the load. A run without --arm keeps the P2 options.
+  assert.ok(values.arm === undefined || s.preVus === s.maxVus, 'A run that names its arm needs --pre-vus equal to --max-vus');
   s.cutoffSeconds = s.durationSeconds + s.drainSeconds - CUTOFF_MARGIN_SECONDS;
   assert.ok(s.hiddenShare <= 100 && (s.arm !== 'a' || s.hiddenShare === 0), '--hidden-share is 0–100 and needs a queue arm');
   // A waiting buyer keeps its VU, so a queue arm needs one per buyer and a drain longer than the cutoff margin.
