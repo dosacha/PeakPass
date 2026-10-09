@@ -7,7 +7,7 @@ import { join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { createHash } from 'node:crypto';
 
-export const ANALYSIS_REVISION = 'flash-sale-analysis-v3.10';
+export const ANALYSIS_REVISION = 'flash-sale-analysis-v3.11';
 // Every integrity check verifySnapshot of the fixture evaluates for a v3 run; a check of flash-sale-check.mjs pins the list to the fixture.
 export const V3_INTEGRITY_NAMES = ['inventory', 'singleOrderPerBuyer', 'singleReservationPerBuyer', 'orderIdentity', 'reservationIdentity', 'reservationConversion',
   'ticketOwnership', 'ticketQuantity', 'checkoutPaymentIdentity', 'settlementIdentity', 'noExtraSettlementFacts', 'callbackIdentity', 'admissionFinalSql', 'admissionLedger'];
@@ -235,7 +235,8 @@ export function rollingMax(times, windowMs = 1000) {
 export function admissionValidity(m, observations) {
   const queueArm = m.arm === 'b' || m.arm === 'c';
   const { before, after } = m.policy ?? {}, { before: first, after: last } = m.control ?? {};
-  const same = (x, y) => !!x && !!y && x.generation === y.generation && x.epoch === y.epoch;
+  // One generation and epoch, and no marker of a script that failed half-way (v3.11: `dirty` fences the queue while the mode still reads ready).
+  const same = (x, y) => !!x && !!y && x.generation === y.generation && x.epoch === y.epoch && x.dirty === undefined && y.dirty === undefined;
   const sampled = observations.map(o => o.queue?.control).filter(control => control !== undefined);
   const policy = queueArm
     ? before?.protected === true && after?.protected === true && before.phase === 'open' && after.phase === 'open' && same(before, after)
@@ -361,6 +362,9 @@ async function analyzeV3(directory, m, read) {
     if (foreignJoins) problems.push(`${foreignJoins} join mappings outside the fixture`);
     if (entryOf.size !== entries.length) problems.push(`${entries.length - entryOf.size} users with more than one entry`);
     if (events.some(e => e.type === 'unreadable')) problems.push('unreadable trace events');
+    // The controller writes its mode on every poll (v3.11); the summary's mode only repeats the setting.
+    const otherMode = events.filter(e => e.type === 'poll' && e.mode !== ARM_MODES[m.arm]).length;
+    if (otherMode) problems.push(`${otherMode} polls in another mode than the arm's`);
     for (let buyer = 0; buyer < s.users; buyer++) {
       const journey = journeys.get(buyer), entry = entryOf.get(m.fixture.userIds[buyer]);
       if (!journey) { problems.push(`buyer ${buyer}: no summary`); continue; }
@@ -433,10 +437,13 @@ async function analyzeV3(directory, m, read) {
   // A limiter that could not reach its Redis answers 503 RATE_LIMIT_UNAVAILABLE: the experiment failed, not a purchase (v3.7).
   if (answers.some(p => ['401', '403'].includes(p.data.tags.status) || (p.data.tags.status === '429' && PURCHASE_STAGES.includes(p.data.tags.stage)) || p.data.tags.code === 'RATE_LIMIT_UNAVAILABLE')) invalidReasons.push('auth-or-limiter');
   if (answers.some(p => (p.data.tags.status === '429' && QUEUE_STAGES.includes(p.data.tags.stage)) || ['ADMISSION_QUEUE_FULL', 'ADMISSION_RATE_LIMITED'].includes(p.data.tags.code))) invalidReasons.push('admission-limiter');
-  if (!validity.policy || !validity.environment || (queueArm && (m.pollMode !== ARM_MODES[m.arm] || s.pollMode !== ARM_MODES[m.arm]))) invalidReasons.push('policy');
+  // An answer ADMISSION_RECOVERING says the queue was fenced during the load (v3.11).
+  if (!validity.policy || !validity.environment || (queueArm && (m.pollMode !== ARM_MODES[m.arm] || s.pollMode !== ARM_MODES[m.arm])) || answers.some(p => p.data.tags.code === 'ADMISSION_RECOVERING')) invalidReasons.push('policy');
   if (!validity.redisProcess) invalidReasons.push('redis-restart');
   if (!validity.redisConfig) invalidReasons.push('redis-config');
   if (!trace.complete) invalidReasons.push('trace');
+  // A queue sample is a measurement only with both clocks and the four set sizes (v3.11); the control is judged with the policy.
+  if (!queueSamples.every(o => ['redisTimeMs', 'hostMidMs', 'waiting', 'active', 'claims', 'window'].every(name => Number.isFinite(o.queue[name]))) && !invalidReasons.includes('queue-observer')) invalidReasons.push('queue-observer');
   // The verdict rests on every integrity check of the fixture, named and answered (v3.8); a subset is no evidence.
   const names = verification.integrityNames;
   if (!(Array.isArray(names) && names.length === V3_INTEGRITY_NAMES.length && V3_INTEGRITY_NAMES.every(name => names.includes(name) && typeof verification.checks?.[name] === 'boolean'))) invalidReasons.push('integrity-evidence');

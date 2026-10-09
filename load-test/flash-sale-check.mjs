@@ -1170,7 +1170,7 @@ test('a rolling second is (t - 1000, t]', async () => {
 test('a queue run keeps every scheduled buyer and keeps polling out of the purchase error share', async () => {
   await queueRun(async ({ analyze }) => {
     const r = await analyze();
-    assert.deepEqual([r.analysisRevision, r.arm, r.classification, r.invalidReasons], ['flash-sale-analysis-v3.10', 'b', 'valid-queue', []]);
+    assert.deepEqual([r.analysisRevision, r.arm, r.classification, r.invalidReasons], ['flash-sale-analysis-v3.11', 'b', 'valid-queue', []]);
     // Completion: paid with matching SQL identity over the whole scheduled cohort.
     assert.deepEqual([r.cohort.offered, r.cohort.confirmedPaid, r.cohort.completionFraction, r.cohort.unfinished], [4, 2, .5, 2]);
     assert.deepEqual(r.cohort.outcomes, { paid: 2, queue_waiting: 1, admission_expired: 1 });
@@ -1270,6 +1270,22 @@ test('a queue run is invalid when its arm, its Redis or its trace is not what it
   await invalid('trace', ({ dump }) => { dump.entries.push({ ...dump.entries[0], admissionId: 'foreign', userId: 'somebody-else', sequence: '9', state: 'waiting', admittedAt: null }); });
   await invalid('trace', ({ dump }) => { dump.joins.unknown = 'a0'; });
   await invalid('trace', ({ dump }) => { dump.entries.push({ ...dump.entries[0], admissionId: 'second-entry', sequence: '9', state: 'waiting', admittedAt: null }); });
+  // The mode the controller itself wrote on each poll is the arm's; the summary's field alone repeats the setting.
+  const traceOf = (points, buyer, type, change) => { const p = points.find(p => p.metric === 'admission_trace' && p.data.tags.buyer === String(buyer) && p.data.tags.type === type), e = JSON.parse(p.data.metadata.e); change(e); p.data.metadata.e = JSON.stringify(e); };
+  await invalid('trace', ({ points }) => traceOf(points, 2, 'poll', e => { e.mode = 'adaptive'; }));
+  await invalid('trace', ({ points }) => traceOf(points, 0, 'poll', e => { delete e.mode; }));
+  // A queue sample is a measurement only with its clocks, its four set sizes and the control the arm has.
+  for (const field of ['redisTimeMs', 'hostMidMs', 'waiting', 'active', 'claims', 'window']) {
+    await invalid('queue-observer', ({ samples }) => { samples[4].queue[field] = null; });
+    await invalid('queue-observer', ({ samples }) => { delete samples[2].queue[field]; }, { arm: 'a' });
+  }
+  await invalid('queue-observer', ({ samples }) => { samples[4].queue = {}; });
+  // A control a failed script left dirty fences the queue: the run is not one of an open queue, nor is one that was answered "recovering".
+  await invalid('policy', ({ manifest }) => { manifest.control.after.dirty = '1'; });
+  await invalid('policy', ({ manifest }) => { manifest.control.before.dirty = '1'; });
+  await invalid('policy', ({ samples }) => { samples[7].queue.control.dirty = '1'; });
+  await invalid('policy', ({ call }) => call(2, 3000, 'status', 503, 'normal', 'ADMISSION_RECOVERING'));
+  await invalid('policy', ({ call }) => call(1, 3100, 'checkout', 503, 'retry', 'ADMISSION_RECOVERING'));
   // The arm is its polling mode: every buyer's summary and the manifest say the mode of the arm.
   await invalid('trace', ({ points }) => journeyOf(points, 1, e => { e.mode = 'adaptive'; }));
   await invalid('trace', ({ points }) => journeyOf(points, 2, e => { delete e.mode; }));
