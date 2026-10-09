@@ -919,7 +919,7 @@ test('the capture of a verification run is replayed into an artifact the analysi
   const { fileURLToPath } = await import('node:url');
   const cli = createRequire(import.meta.url).resolve('tsx/cli'), script = fileURLToPath(new URL('./flash-sale-monitor-replay.mts', import.meta.url));
   // tsx needs the esbuild binary of this platform; where node_modules were installed for another one the replay cannot run.
-  if (spawnSync(process.execPath, [cli, '--version']).status !== 0) return t.skip('tsx cannot run here');
+  if (spawnSync(process.execPath, [cli, '-e', 'const probe: number = 1; void probe;']).status !== 0) return t.skip('tsx cannot transform here: node_modules of another platform');
   const dir = await mkdtemp(join(tmpdir(), 'peakpass-replay-check-'));
   try {
     const event = '22222222-2222-4222-8222-222222222222', key = name => `peakpass:admission:${event}:${QUEUE_EPOCH}:${name}`;
