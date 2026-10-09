@@ -9211,6 +9211,54 @@
       }
     },
     {
+      "runId": "p8-pre-b-05",
+      "kind": "preflight",
+      "arm": "b",
+      "commit": "9918537a734139779807f9dbc013cd536eb14c75",
+      "profile": {
+        "revision": "admission-v1-seed",
+        "rate": 2,
+        "capacity": 8,
+        "ttlMs": 30000,
+        "claimMs": 15000,
+        "tickMs": 250,
+        "batch": 2,
+        "cleanup": 100,
+        "reclaim": 8,
+        "leaseMs": 120000,
+        "maxWaiting": 1000,
+        "maxEntries": 10000,
+        "epochMs": 86400000
+      },
+      "classification": "valid-verification",
+      "invalidReasons": [],
+      "analysisRevision": "flash-sale-analysis-v3.7",
+      "settings": {
+        "users": 24,
+        "rate": 2,
+        "durationSeconds": 12,
+        "warmupSeconds": 0,
+        "drainSeconds": 30,
+        "maxVus": 24,
+        "hiddenShare": 0,
+        "monitor": true
+      },
+      "localOnly": {
+        "k6-raw.jsonl": {
+          "bytes": 739469,
+          "sha256": "fc9bb45edb8ce0057da3401ed599fcba4c1a1b90948976b4e692ee3f01ad76ae"
+        },
+        "app.jsonl": {
+          "bytes": 215312,
+          "sha256": "b2317ee0191ae27b3435fd7fc7e6f51f4a3939e41acc1f58fe3b8ea861909153"
+        },
+        "redis-monitor.txt": {
+          "bytes": 83025,
+          "sha256": "c4284293018e633bf9415b94959bf542c840e16885207d216743126eeecb37f9"
+        }
+      }
+    },
+    {
       "runId": "p8-pre-c-01",
       "kind": "preflight",
       "arm": "c",
@@ -9433,6 +9481,50 @@
         "app.jsonl": {
           "bytes": 216980,
           "sha256": "b0d86c16aa5a4769a054baef3261fa787ba8a357abfde78252f08cd4d247db71"
+        }
+      }
+    },
+    {
+      "runId": "p8-pre-c-06",
+      "kind": "preflight",
+      "arm": "c",
+      "commit": "9918537a734139779807f9dbc013cd536eb14c75",
+      "profile": {
+        "revision": "admission-v1-seed",
+        "rate": 2,
+        "capacity": 8,
+        "ttlMs": 30000,
+        "claimMs": 15000,
+        "tickMs": 250,
+        "batch": 2,
+        "cleanup": 100,
+        "reclaim": 8,
+        "leaseMs": 120000,
+        "maxWaiting": 1000,
+        "maxEntries": 10000,
+        "epochMs": 86400000
+      },
+      "classification": "valid-queue",
+      "invalidReasons": [],
+      "analysisRevision": "flash-sale-analysis-v3.7",
+      "settings": {
+        "users": 24,
+        "rate": 2,
+        "durationSeconds": 12,
+        "warmupSeconds": 0,
+        "drainSeconds": 30,
+        "maxVus": 24,
+        "hiddenShare": 0,
+        "monitor": false
+      },
+      "localOnly": {
+        "k6-raw.jsonl": {
+          "bytes": 740416,
+          "sha256": "199d7d6be6197dc862e8ee4f631608607e811901ebd531015d37eeae9e1d2b2a"
+        },
+        "app.jsonl": {
+          "bytes": 215148,
+          "sha256": "377bc29531d1a4cbf8d2a5211a4d8f2d15d0d82340b59526e3da5a1dad093a9b"
         }
       }
     },
