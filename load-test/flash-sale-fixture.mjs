@@ -18,7 +18,7 @@ import { createClient } from 'redis';
 import { analyzeRun } from './flash-sale-analysis.mjs';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
-export const REVISION = 'flash-sale-v3.1';
+export const REVISION = 'flash-sale-v3.2';
 const defaults = { users: 12, rate: 2, 'think-ms': 20, retries: 1, 'retry-delay-ms': 100, 'replay-every': 3, quantity: 2, 'pre-vus': 10, 'max-vus': 20, 'pool-max': 10, 'sample-ms': 250, 'warmup-seconds': 0, 'drain-seconds': 30, 'limiter-max': 1000000, 'hidden-share': 0 };
 // The longest request of a journey is 10 s. A buyer starts nothing new this long before k6's drain ends.
 const CUTOFF_MARGIN_SECONDS = 15;
@@ -75,14 +75,15 @@ export const monitorKeeps = line => {
 };
 // KEYS and MONITOR travel in one write and Redis runs them back to back, so a capture that saw no
 // admission key holds every later write.
-function monitorAdmission(port, path) {
+export function monitorAdmission(port, path) {
   return new Promise((resolve, reject) => {
     const socket = connect(port, '127.0.0.1'), file = createWriteStream(path);
     const state = { keysAtStart: null, lines: 0, endedEarly: false };
     let text = '', streaming = false, detached = false;
     socket.setEncoding('latin1');
     socket.on('error', error => { if (!streaming) reject(error); });
-    socket.on('close', () => { if (streaming && !detached) state.endedEarly = true; });
+    // Closed before the capture began: the setup fails. Closed afterwards without the fixture: the capture is not whole.
+    socket.on('close', () => { if (!streaming) reject(new Error('Redis closed the MONITOR connection before the capture began')); else if (!detached) state.endedEarly = true; });
     socket.once('connect', () => socket.write('*2\r\n$4\r\nKEYS\r\n$20\r\npeakpass:admission:*\r\n*1\r\n$7\r\nMONITOR\r\n'));
     socket.on('data', chunk => {
       text += chunk;

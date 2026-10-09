@@ -644,8 +644,8 @@ async function runQueue({ arm = 'b', iteration = 0, options = [], faults = [], a
   const order = { id: 'order', status: 'paid', userId: user.id, eventId: 'event', quantity: settings.quantity, tierId: 'standard', reservationId: iteration === 0 ? 'reservation' : null };
   const tickets = Array.from({ length: settings.quantity }, (_, i) => ({ id: `ticket-${i}`, orderId: 'order', userId: user.id, eventId: 'event', status: 'active' }));
   function answer(stage, kind, input) {
-    if (stage === 'status') return [200, shape(admissionBody())];
-    if (stage === 'join') { entry ??= { state: 'waiting', joined: clock.now(), key: input.joinRequestId }; return [201, admissionBody()]; }
+    if (stage === 'status') return [200, shape(admissionBody(), 'status')];
+    if (stage === 'join') { entry ??= { state: 'waiting', joined: clock.now(), key: input.joinRequestId }; return [201, shape(admissionBody(), 'join')]; }
     if (input.admissionId && entry.state === 'admitted') entry.state = 'consumed';
     if (stage === 'reservation') return [201, { id: 'reservation', userId: user.id, eventId: 'event', quantity: settings.quantity, tierId: 'standard', status: 'active' }];
     if (stage === 'checkout') return [201, kind === 'replay' ? { order, tickets } : { order: { ...order, status: 'pending' }, tickets: [] }];
@@ -879,6 +879,40 @@ test('a status answer without the times the recognition needs is a protocol fail
   ]) assert.ok(failures(await runQueue({ shape })).includes('status'), name);
 });
 
+test('a queue answer that is not an admission-v1 response is a protocol failure', async () => {
+  const failures = run => run.metrics.filter(m => m.name === 'protocol_failures' && m.value === 1).map(m => m.tags.stage);
+  const entry = (change, when = () => true) => (body, stage) => { if (body.admission && when(body, stage)) change(body.admission, body); return body; };
+  for (const [name, stage, shape] of [
+    ['a state the contract does not have', 'status', entry(a => { a.state = 'queued'; }, (_, stage) => stage === 'status')],
+    ['a phase the contract does not have', 'status', entry(a => { a.phase = 'busy'; }, (_, stage) => stage === 'status')],
+    ['no sequence', 'status', entry(a => { delete a.sequence; }, (_, stage) => stage === 'status')],
+    ['no joinedAt', 'status', entry(a => { delete a.joinedAt; }, (_, stage) => stage === 'status')],
+    ['a position that is no number', 'status', entry(a => { a.position = 'first'; }, (body, stage) => stage === 'status' && body.admission.state === 'waiting')],
+    ['an expiresAt that is no time', 'status', entry(a => { a.expiresAt = 'later'; }, (body, stage) => stage === 'status' && body.admission.state === 'waiting')],
+    ['another queue mode', 'status', (body, stage) => { if (stage === 'status') body.queue.mode = 'paused'; return body; }],
+    ['a nextPollAfterMs that is no number', 'status', (body, stage) => { if (stage === 'status' && body.admission) body.nextPollAfterMs = '1000'; return body; }],
+    ['a join answered without an entry', 'join', (body, stage) => { if (stage === 'join') body.admission = null; return body; }],
+    ['a join answered with a broken entry', 'join', entry(a => { delete a.joinedAt; }, (_, stage) => stage === 'join')],
+  ]) assert.ok(failures(await runQueue({ shape })).includes(stage), name);
+});
+
+test('a MONITOR connection that Redis closes fails the setup, or marks the capture as ended early', async () => {
+  const { createServer } = await import('node:net');
+  const dir = await mkdtemp(join(tmpdir(), 'peakpass-monitor-check-'));
+  const servers = [], serve = handler => new Promise(resolve => { const server = createServer(handler); servers.push(server); server.listen(0, '127.0.0.1', () => resolve(server)); });
+  const within = (promise, ms) => { let timer; return Promise.race([promise, new Promise((_, reject) => { timer = setTimeout(() => reject(new Error('still pending')), ms); })]).finally(() => clearTimeout(timer)); };
+  try {
+    // Closed before the answer to KEYS and MONITOR: the setup fails instead of waiting for ever.
+    const closing = await serve(socket => socket.once('data', () => socket.destroy()));
+    await assert.rejects(within(harness.monitorAdmission(closing.address().port, join(dir, 'a.txt')), 2000), /closed the MONITOR connection/);
+    // Closed while streaming: the capture says so.
+    const streaming = await serve(socket => socket.once('data', () => { socket.write('*0\r\n+OK\r\n'); setTimeout(() => socket.destroy(), 50); }));
+    const capture = await within(harness.monitorAdmission(streaming.address().port, join(dir, 'b.txt')), 2000);
+    await new Promise(resolve => setTimeout(resolve, 200));
+    assert.deepEqual(await capture.detach(), { keysAtStart: 0, lines: 0, endedEarly: true });
+  } finally { for (const server of servers) server.close(); await rm(dir, { recursive: true, force: true }); }
+});
+
 test('the queue path judges purchase answers as the A path does', async () => {
   const signature = metrics => ({ completed: metrics.filter(m => m.name === 'buyers_completed').length,
     protocol: metrics.filter(m => m.name === 'protocol_failures' && m.value === 1).length, replay: metrics.filter(m => m.name === 'replay_failures' && m.value === 1).length,
@@ -1060,7 +1094,7 @@ test('a rolling second is (t - 1000, t]', async () => {
 test('a queue run keeps every scheduled buyer and keeps polling out of the purchase error share', async () => {
   await queueRun(async ({ analyze }) => {
     const r = await analyze();
-    assert.deepEqual([r.analysisRevision, r.arm, r.classification, r.invalidReasons], ['flash-sale-analysis-v3.2', 'b', 'valid-queue', []]);
+    assert.deepEqual([r.analysisRevision, r.arm, r.classification, r.invalidReasons], ['flash-sale-analysis-v3.3', 'b', 'valid-queue', []]);
     // Completion: paid with matching SQL identity over the whole scheduled cohort.
     assert.deepEqual([r.cohort.offered, r.cohort.confirmedPaid, r.cohort.completionFraction, r.cohort.unfinished], [4, 2, .5, 2]);
     assert.deepEqual(r.cohort.outcomes, { paid: 2, queue_waiting: 1, admission_expired: 1 });
@@ -1138,18 +1172,26 @@ test('a queue run is invalid when its arm, its Redis or its trace is not what it
   // A late reclamation and a slow exit are published, not invalid; a verification run is not a measurement.
   const late = await reasons(({ manifest }) => { manifest.quiesce = { limitMs: 60000, elapsedMs: 60010, reached: false, remaining: { waiting: 0, active: 1, claims: 1 } }; manifest.applicationStop.seconds = 73.4; });
   assert.deepEqual([late.classification, late.disclosures.quiesce.reached, late.disclosures.applicationStop.seconds], ['valid-queue', false, 73.4]);
-  assert.equal((await reasons(({ manifest }) => { manifest.settings = { ...manifest.settings, monitor: true }; })).classification, 'valid-verification');
+  // A verification run is no measurement, and it is one only with a whole capture: begun on an empty keyspace and ended by the fixture.
+  const verification = monitor => reasons(({ manifest }) => { manifest.settings = { ...manifest.settings, monitor: true }; if (monitor) manifest.monitor = monitor; });
+  assert.equal((await verification({ keysAtStart: 0, lines: 12, endedEarly: false })).classification, 'valid-verification');
+  for (const monitor of [{ keysAtStart: 0, lines: 12, endedEarly: true }, { keysAtStart: 3, lines: 12, endedEarly: false }, { keysAtStart: null, lines: 0, endedEarly: false }, null]) {
+    const r = await verification(monitor);
+    assert.deepEqual([r.classification, r.invalidReasons], ['invalid-measurement', ['monitor-capture']], JSON.stringify(monitor));
+  }
 });
 
 test('a manifest of the first and of the current v3 harness revision is analysed as a v3 run', async () => {
-  assert.equal(harness.REVISION, 'flash-sale-v3.1');
+  assert.equal(harness.REVISION, 'flash-sale-v3.2');
   await queueRun(async ({ manifest, analyze }) => {
     assert.equal(manifest.revision, 'flash-sale-v3.0');
     const first = await analyze();
     manifest.revision = harness.REVISION;
     const current = await analyze();
-    assert.deepEqual([first.classification, current.classification, current.revision], ['valid-queue', 'valid-queue', 'flash-sale-v3.1']);
+    assert.deepEqual([first.classification, current.classification, current.revision], ['valid-queue', 'valid-queue', 'flash-sale-v3.2']);
     assert.deepEqual({ ...current, revision: first.revision }, first);
+    manifest.revision = 'flash-sale-v3.1';
+    assert.deepEqual({ ...(await analyze()), revision: first.revision }, first);
   });
 });
 

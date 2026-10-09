@@ -151,7 +151,7 @@ function purchase() {
   }
 }
 
-// ---- Arms b and c: the queue journey (flash-sale-v3.0; v3.1 checks the times of a status answer and the cutoff before each replay) ----
+// ---- Arms b and c: the queue journey (flash-sale-v3.0; v3.1 checks the times of a status answer and the cutoff before each replay; v3.2 the whole queue answer) ----
 // One iteration is one buyer with one tab: one controller of frontend/admission-polling.js with its
 // transport, clock, timers and visibility injected. k6 has no AbortController and cannot cancel a
 // request, so a request ends by its timeout. Nothing here blocks the VU's event loop, and every timer
@@ -215,12 +215,18 @@ function admissionRequest(user, method, path, body, note) {
   note.requests[stage]++;
   return http.asyncRequest(method, `${__ENV.FS_BASE_URL}${path}`, payload, { headers, tags, timeout: admission.POLICY.timeoutMs }).then(response => {
     const result = json(response);
-    // The recognition is computed from serverTime and, once admitted, from admittedAt and expiresAt: an answer without them is no success.
+    // A success is the whole AdmissionResponse of admission-v1 (src/core/models/admission.ts), with the times the recognition
+    // is computed from, and a join answers with an entry. Anything else is a protocol failure.
     const time = value => typeof value === 'string' && Number.isFinite(Date.parse(value));
-    const valid = (response.status === 200 || response.status === 201) && result.contractRevision === 'admission-v1' && time(result.serverTime)
-      && result.queue?.eventId === fixture.eventId && typeof result.queue.epoch === 'string'
-      && (result.admission === null || (result.admission?.epoch === result.queue.epoch && typeof result.admission.admissionId === 'string'
-        && (result.admission.state !== 'admitted' || (time(result.admission.admittedAt) && time(result.admission.expiresAt)))));
+    const entry = result.admission;
+    const snapshot = entry === null || (typeof entry === 'object' && typeof entry.admissionId === 'string' && entry.epoch === result.queue?.epoch
+      && ['waiting', 'admitted', 'consumed', 'cancelled', 'expired'].includes(entry.state) && ['idle', 'processing', 'reconciling'].includes(entry.phase)
+      && typeof entry.sequence === 'string' && (entry.position === null || typeof entry.position === 'number') && time(entry.joinedAt)
+      && (entry.admittedAt === null || time(entry.admittedAt)) && (entry.expiresAt === null || time(entry.expiresAt))
+      && (entry.state !== 'admitted' || (time(entry.admittedAt) && time(entry.expiresAt))));
+    const valid = (response.status === 200 || (response.status === 201 && stage === 'join')) && result.contractRevision === 'admission-v1' && time(result.serverTime)
+      && result.queue?.eventId === fixture.eventId && typeof result.queue.epoch === 'string' && result.queue.mode === 'open'
+      && (result.nextPollAfterMs === null || typeof result.nextPollAfterMs === 'number') && snapshot && (stage !== 'join' || entry !== null);
     const metricTags = { ...tags, status: String(response.status), error_code: String(response.error_code || 0), code: result.error?.code ?? 'none', business: valid ? 'success' : 'failure' };
     responses.add(1, metricTags);
     apiDuration.add(response.timings.duration, metricTags);

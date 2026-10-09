@@ -7,7 +7,7 @@ import { join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { createHash } from 'node:crypto';
 
-export const ANALYSIS_REVISION = 'flash-sale-analysis-v3.2';
+export const ANALYSIS_REVISION = 'flash-sale-analysis-v3.3';
 
 export function stats(values) {
   const a = values.filter(Number.isFinite).sort((x, y) => x - y);
@@ -158,7 +158,7 @@ export async function analyzeRun(directory, suppliedManifest) {
   const m = suppliedManifest ?? await read('manifest.json');
   if (!suppliedManifest) await verifyArtifacts(directory, m);
   // A v3 run has arms and a queue; everything below this line is the v2.6 analysis, unchanged.
-  if (['flash-sale-v3.0', 'flash-sale-v3.1'].includes(m.revision)) return analyzeV3(directory, m, read);
+  if (['flash-sale-v3.0', 'flash-sale-v3.1', 'flash-sale-v3.2'].includes(m.revision)) return analyzeV3(directory, m, read);
   const requiredMetrics = new Set(['scenario_start_ms', 'buyers_started', 'buyers_completed', 'journey_outcomes', 'journey_duration',
     'api_responses', 'api_duration', 'arrival_lag_ms', 'active_vus_at_arrival', 'dropped_iterations', 'script_failures', 'protocol_failures', 'replay_failures']);
   const [points, sql, verification, observations, app, resources, cleanup, negatives, summary] = await Promise.all([
@@ -406,6 +406,8 @@ async function analyzeV3(directory, m, read) {
   if (!validity.redisProcess) invalidReasons.push('redis-restart');
   if (!validity.redisConfig) invalidReasons.push('redis-config');
   if (!trace.complete) invalidReasons.push('trace');
+  // A verification run proves its bounds only with a whole capture: begun on an empty admission keyspace, ended by the fixture (v3.3).
+  if (s.monitor && !(m.monitor && m.monitor.keysAtStart === 0 && m.monitor.endedEarly === false)) invalidReasons.push('monitor-capture');
 
   const stable = a.replayFailures === 0 && c.completionFraction >= .99 && w.failureFraction !== null && w.failureFraction <= .01 && c.paidJourneyMs.p99 !== null && c.paidJourneyMs.p99 <= 2000
     && Math.abs(w.firstHalfPaidPerSecond - w.secondHalfPaidPerSecond) / s.rate <= .2;
