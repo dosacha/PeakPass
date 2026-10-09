@@ -7,7 +7,7 @@ import { join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { createHash } from 'node:crypto';
 
-export const ANALYSIS_REVISION = 'flash-sale-analysis-v3.4';
+export const ANALYSIS_REVISION = 'flash-sale-analysis-v3.5';
 
 export function stats(values) {
   const a = values.filter(Number.isFinite).sort((x, y) => x - y);
@@ -411,11 +411,15 @@ async function analyzeV3(directory, m, read) {
   // ... and with the replay of that capture (v3.4): every line read, under the run's own rate and capacity, as many promotions as the dump has.
   const replay = s.monitor ? await read('monitor-replay.json').catch(() => null) : null;
   const replaySets = replay?.sets && ['waiting', 'active', 'claims'].every(name => typeof replay.sets[name]?.equal === 'boolean') ? replay.sets : null;
-  const replayed = Boolean(replay && replaySets && Array.isArray(replay.violations) && replay.unparsed === 0 && replay.lines === m.monitor?.lines
-    && replay.profile?.rate === m.profile?.rate && replay.profile?.capacity === m.profile?.capacity && replay.promotions === replay.promotedEntriesInDump);
+  const readable = Boolean(replay && replaySets && Array.isArray(replay.violations));
+  const replayed = readable && replay.unparsed === 0 && replay.lines === m.monitor?.lines
+    && replay.profile?.rate === m.profile?.rate && replay.profile?.capacity === m.profile?.capacity && replay.promotions === replay.promotedEntriesInDump;
   if (s.monitor && !replayed) invalidReasons.push('monitor-replay');
-  // A violation in the log, or final sets the log does not lead to, is a broken bound of the contract.
-  const replayHeld = !replayed || (replay.violations.length === 0 && Object.values(replaySets).every(set => set.equal));
+  // A violation in the log, or final sets the log does not lead to, is a broken bound of the contract. It counts
+  // whenever the replay can be read, also when the replay is incomplete in another respect (v3.5).
+  const replayHeld = !readable || (replay.violations.length === 0 && Object.values(replaySets).every(set => set.equal));
+  // A deliberate replay that was not answered as the original (v3.5): a queue run with one is not valid. Arm a keeps the P2 rule.
+  if (queueArm && a.replayFailures) invalidReasons.push('replay');
 
   const stable = a.replayFailures === 0 && c.completionFraction >= .99 && w.failureFraction !== null && w.failureFraction <= .01 && c.paidJourneyMs.p99 !== null && c.paidJourneyMs.p99 <= 2000
     && Math.abs(w.firstHalfPaidPerSecond - w.secondHalfPaidPerSecond) / s.rate <= .2;
@@ -430,7 +434,7 @@ async function analyzeV3(directory, m, read) {
   const logs = app.admissionLogs ?? [];
   return { revision: m.revision, analysisRevision: ANALYSIS_REVISION, runId: m.runId, arm: m.arm, pollMode: m.pollMode ?? null, profile: m.profile ?? null, classification,
     smokePassed: m.smokePassed ?? m.passed, k6ExitCode: m.k6ExitCode, invalidReasons, validity,
-    ...(s.monitor ? { monitorReplay: replayed ? { lines: replay.lines, promotions: replay.promotions, violations: replay.violations.length,
+    ...(s.monitor ? { monitorReplay: readable ? { lines: replay.lines, promotions: replay.promotions, violations: replay.violations.length,
       byRule: Object.fromEntries(tally(replay.violations, v => v.rule)), setsEqual: Object.values(replaySets).every(set => set.equal) } : null } : {}),
     // Product behaviour that is published with a run and does not make it invalid.
     disclosures: { quiesce: m.quiesce ?? null, applicationStop: m.applicationStop ?? null, monitor: m.monitor ?? null, readyAfterMs: m.readyAfterMs ?? null, poolMaxGapMs: evidence.pool.maxGapMs },

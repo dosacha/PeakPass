@@ -1145,7 +1145,7 @@ test('a rolling second is (t - 1000, t]', async () => {
 test('a queue run keeps every scheduled buyer and keeps polling out of the purchase error share', async () => {
   await queueRun(async ({ analyze }) => {
     const r = await analyze();
-    assert.deepEqual([r.analysisRevision, r.arm, r.classification, r.invalidReasons], ['flash-sale-analysis-v3.4', 'b', 'valid-queue', []]);
+    assert.deepEqual([r.analysisRevision, r.arm, r.classification, r.invalidReasons], ['flash-sale-analysis-v3.5', 'b', 'valid-queue', []]);
     // Completion: paid with matching SQL identity over the whole scheduled cohort.
     assert.deepEqual([r.cohort.offered, r.cohort.confirmedPaid, r.cohort.completionFraction, r.cohort.unfinished], [4, 2, .5, 2]);
     assert.deepEqual(r.cohort.outcomes, { paid: 2, queue_waiting: 1, admission_expired: 1 });
@@ -1209,6 +1209,9 @@ test('a queue run is invalid when its arm, its Redis or its trace is not what it
   await invalid('trace', ({ points }) => journeyOf(points, 1, e => { e.recognition.lowerMs = null; }));
   await invalid('trace', ({ points }) => journeyOf(points, 1, e => { delete e.recognition.at; }));
   await invalid('admission-evidence', ({ files }) => { files['admission-final.json'].ledger = null; });
+  // A deliberate replay that was not answered as the original: the queue run is not a valid one.
+  await invalid('replay', ({ point }) => point('replay_failures', 0, 1800, 1));
+  assert.ok(!(await reasons(({ point }) => point('replay_failures', 0, 1800, 1), { arm: 'a' })).invalidReasons.includes('replay'), 'arm a keeps the P2 rule: not stable');
   await invalid('queue-observer', ({ samples }) => { for (const sample of samples.slice(5, 9)) delete sample.queue; });
   await invalid('auth', ({ files }) => { files['negative-checks.json'].checks.pop(); });
   // Arm a must stay unprotected and has no control.
@@ -1246,6 +1249,11 @@ test('a queue run is invalid when its arm, its Redis or its trace is not what it
   const broken = await verification(whole, { ...replayed, violations: [{ rule: 'capacity', detail: '9 entries in use', time: 1 }, { rule: 'capacity', detail: '9 entries in use', time: 2 }] });
   assert.deepEqual([broken.classification, broken.monitorReplay.violations, broken.monitorReplay.byRule], ['integrity-defect', 2, { capacity: 2 }]);
   assert.equal((await verification(whole, { ...replayed, sets: { ...replayed.sets, active: { replayed: 8, dumped: 7, equal: false } } })).classification, 'integrity-defect');
+  // A violation is not hidden by a replay that is incomplete in another respect: a repromotion alone makes the promotions differ from the dump.
+  const repromoted = await verification(whole, { ...replayed, promotions: 5, violations: [{ rule: 'repromotion', detail: 'a0 entered active again', time: 1 }] });
+  assert.deepEqual([repromoted.classification, repromoted.invalidReasons, repromoted.monitorReplay.violations, repromoted.monitorReplay.byRule], ['integrity-defect', ['monitor-replay'], 1, { repromotion: 1 }]);
+  const partial = await verification(whole, { ...replayed, lines: 11, unparsed: 1, sets: { ...replayed.sets, claims: { replayed: 1, dumped: 0, equal: false } } });
+  assert.deepEqual([partial.classification, partial.monitorReplay.setsEqual], ['integrity-defect', false]);
   // A run without --monitor has no such field and needs no replay.
   assert.equal('monitorReplay' in (await reasons(() => {})), false);
 });
