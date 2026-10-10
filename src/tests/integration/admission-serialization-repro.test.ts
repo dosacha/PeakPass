@@ -138,7 +138,8 @@ reproSuite(
       base = `http://127.0.0.1:${(app.server.address() as { port: number }).port}`;
     });
     afterEach(async () => {
-      // The inventory invariant of the fixture: seats available, held and ordered add up.
+      // The fixture's final checks: seats available, held and ordered add up to the total, and
+      // every consumed admission result matches the reservation or order of its request.
       try {
         for (const fixture of fixtures) await fixture.verify();
       } finally {
