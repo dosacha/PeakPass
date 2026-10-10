@@ -1,7 +1,7 @@
 # GraphQL 예시
 
 현재 GraphQL 엔드포인트는 `POST /graphql`입니다.
-개발 환경에서는 `GET /graphql`로 Apollo Sandbox HTML 진입도 가능합니다.
+`NODE_ENV`가 `production`이 아니면 `GET /graphql` route도 등록되어 Apollo Sandbox를 불러오는 HTML을 응답합니다. 브라우저에서 Sandbox가 실제로 뜨는지는 확인하지 않았습니다.
 
 ## 이벤트 목록
 

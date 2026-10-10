@@ -26,10 +26,11 @@ import {
  * during a wave is recorded with its message, its reason and the statement it interrupted. The
  * waves go through the real routes on loopback HTTP. Product code is not changed.
  *
- * The counts depend on timing and are printed, not asserted. Each assertion is explained where it
- * is made. Those of the form "at least one failure of this kind" record what every run on the
- * host that wrote this file showed many times over; they need the requests of a wave to overlap,
- * so a very different host can miss them. They are not properties of the product.
+ * The counts depend on timing and are printed, not asserted. An assertion that is not plain from
+ * its line is explained where it is made. Those of the form "at least one failure of this kind"
+ * record what every run on the host that wrote this file showed many times over; they need the
+ * requests of a wave to overlap, so a very different host can miss them. They are not properties
+ * of the product.
  *
  * The kinds are told apart by the server's message text, so the server must answer in English
  * (`lc_messages`). A 40001 with another text is counted as `unrecognized40001`, keeps its message
@@ -92,7 +93,8 @@ reproSuite(
     // Every serialization failure and deadlock the server returns to this process.
     const failures: Failure[] = [];
     // The error behind each "failed transiently" log line of an admission purchase: a
-    // serialization failure after the last attempt, or another transient error (`code:`).
+    // serialization failure or deadlock after the last attempt, or another transient error
+    // (`code:`).
     const endedTransiently: Failure[] = [];
     const originalQuery = Client.prototype.query;
     const expectRecognized = (recorded: Failure[]) =>
@@ -136,6 +138,7 @@ reproSuite(
       base = `http://127.0.0.1:${(app.server.address() as { port: number }).port}`;
     });
     afterEach(async () => {
+      // The inventory invariant of the fixture: seats available, held and ordered add up.
       try {
         for (const fixture of fixtures) await fixture.verify();
       } finally {
@@ -331,8 +334,8 @@ reproSuite(
       for (const item of sent)
         if (item.type === 'direct' || item.type === 'reserve')
           expect([201, 503]).toContain(item.status);
-      // An expectation of this fixture, not an invariant of `purchaseTransaction`: with Redis up,
-      // the feature on and the limiter raised, the only 503 of an admission purchase is the one
+      // An expectation of this fixture, not an invariant of `purchaseTransaction`: with Redis up
+      // and the feature on, the only 503 of an admission purchase is the one
       // that follows the "failed transiently" log line, which is written once per such purchase.
       // A 503 from elsewhere (Redis or the admission state in trouble) makes the counts differ.
       const unavailable = sent.filter(
