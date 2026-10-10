@@ -67,6 +67,10 @@ PeakPass는 고트래픽 워크숍과 세미나 예약을 다루는 백엔드 �
 - k6 부하 시나리오 재실행과 수치 보고서 갱신 (2026-06-03,
   [PERFORMANCE_REPORT.md](./PERFORMANCE_REPORT.md) — 로컬 단일 노드 micro-benchmark 한정)
 
+- 입장 대기열·입장량 제한·적응형 polling 추가와 같은 조건의 A/B/C 부하 비교 (2026-10,
+  [ADMISSION_DESIGN_AND_OPERATIONS.md](./ADMISSION_DESIGN_AND_OPERATIONS.md),
+  [PERFORMANCE_REPORT.md](./PERFORMANCE_REPORT.md) — 로컬 단일 인스턴스 측정 한정)
+
 현재 남아 있는 과제는 다음과 같습니다.
 
 - 사용자용 명시적 예약 취소(release) HTTP route는 미구현 (서비스 메서드만 존재)

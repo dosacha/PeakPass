@@ -7,6 +7,7 @@ PeakPass는 읽기 트래픽과 쓰기 트래픽의 성격이 다릅니다.
 
 - 최신 측정 결과: [PERFORMANCE_REPORT.md](./PERFORMANCE_REPORT.md)
 - 본 문서는 시나리오 설계 기준을 설명합니다.
+- 아래 "시나리오" 1–6은 시나리오별 micro-benchmark입니다. 서로 다른 구매자가 한 이벤트에 몰리는 쓰기 부하는 맨 아래 "flash-sale 하네스"가 다룹니다.
 
 ## 시나리오
 
@@ -150,3 +151,22 @@ npm run load-test:sustained
 - 스크립트는 현재 REST write-side와 GraphQL read-side 구조에 맞춰 갱신했습니다.
 - baseline / spike / callbacks / rate-limit 측정 흐름을 분리했습니다.
 - 측정 결과 해석은 `docs/PERFORMANCE_REPORT.md`의 "측정 결과" 섹션을 참조합니다.
+
+## flash-sale 하네스 (인증된 쓰기 부하)
+
+위 시나리오는 한 사용자가 한 행을 반복해 두드립니다. 실제 판매 개시는 서로 다른 구매자가 정해진 속도로 도착해 예약 → checkout → 정산까지 가는 흐름이라, 별도 하네스로 측정합니다.
+
+- **구성.** `load-test/flash-sale-fixture.mjs`가 실행마다 자체 PostgreSQL 16, Redis 7, 현재 코드로 빌드한 production 앱을 `docker-compose.flash-sale.yml`로 띄우고, 구매자와 JWT를 만들고, k6(`load-test/flash-sale.js`)를 돌린 뒤 SQL 증거를 저장하고 그 실행의 자원만 지웁니다. `load-test/flash-sale-analysis.mjs`가 결과를 판정합니다.
+- **부하 모델.** VU 수가 아니라 도착률로 정합니다(초당 N명이 M초 동안 도착). 처음 몇 초의 구매자는 warmup이고 나머지가 측정 cohort입니다. 도착이 끝난 뒤 drain 시간 동안 진행 중인 구매를 기다립니다.
+- **세 arm.** `--arm a`는 대기열 없음, `b`는 대기열과 fixed polling, `c`는 같은 대기열과 adaptive polling입니다. 세 arm은 같은 commit, 같은 Compose 파일을 쓰고 이벤트의 보호 여부와 polling 방식만 다릅니다. 대기열 arm의 구매자는 페이지가 쓰는 `frontend/admission-polling.js`를 수정 없이 실행합니다.
+- **분모.** 도착한 구매자는 결과가 무엇이든 분모에서 빠지지 않습니다. 구매 시도 실패율은 예약·checkout·정산 요청 가운데 하네스가 일부러 보내는 replay를 뺀 것만 세고, 대기열 조회와 등록은 따로 셉니다.
+- **유효성.** 측정이 성립하지 않은 실행(발생기 지연, 표본 누락, 환경 불일치 등)은 invalid로 남기고 통계에서 뺍니다. 기준을 못 맞춘 것은 invalid가 아니라 결과입니다. 수량이나 원장이 어긋나면 integrity defect입니다.
+- **반복.** arm당 3회를 번갈아 실행하고 중앙값과 최소–최대를 냅니다. percentile을 실행 사이에 합치지 않습니다.
+
+```bash
+npm run build
+npm run test:flash-sale
+npm run load-test:flash-sale -- --run-id my-run-01 --arm c --users 1000 --rate 50 --warmup-seconds 5 --pre-vus 1000 --max-vus 1000 --drain-seconds 900
+```
+
+입력과 산출 파일, 판정 규칙의 원문은 [FLASH_SALE_EVIDENCE.md](./FLASH_SALE_EVIDENCE.md), 기준선은 [FLASH_SALE_BASELINE.md](./FLASH_SALE_BASELINE.md), A/B/C 비교의 프로토콜과 결과는 [ISSUE_17_VALIDATION.md](./ISSUE_17_VALIDATION.md)에 있습니다.

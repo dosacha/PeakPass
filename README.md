@@ -9,6 +9,8 @@
 
 PeakPass는 이런 환경에서 **재고 정합성과 결제 멱등성을 보장하는 백엔드**가 어떻게 동작해야 하는지를 직접 구현하고, 부하 테스트와 문서까지 함께 검증한 백엔드 프로젝트입니다.
 
+구매자가 한꺼번에 몰릴 때는 **Redis 대기열과 입장량 제한, 적응형 polling**으로 구매 경로에 들어오는 사람 수를 조절합니다. 재고와 주문의 기준은 그때도 PostgreSQL입니다.
+
 Node.js 백엔드 운영, PostgreSQL 트랜잭션, Redis 실사용, GraphQL read-side, k6 부하 테스트까지 — 한 도메인 안에서 백엔드의 핵심 요소를 일관되게 설명할 수 있도록 구성했습니다.
 
 ## 🔗 배포 링크
@@ -51,9 +53,10 @@ curl -X POST http://localhost:3000/graphql \
 - Node.js + TypeScript 기반 백엔드 서비스 구현
 - Fastify 기반 **REST write-side**와 **GraphQL read-side** 분리
 - PostgreSQL을 **source of truth**로 유지
-- Redis를 hold TTL · rate limit · idempotency · cache에 **운영 용도로** 사용
+- Redis를 hold TTL · rate limit · idempotency 결과 캐시 · 입장 대기열에 **운영 용도로** 사용
 - 동시성 하에서 oversell을 막는 트랜잭션 흐름 구현
-- k6 기반 부하 테스트 시나리오 제공
+- 구매가 몰릴 때 유입을 제어하는 입장 대기열과 polling 구현
+- k6 기반 부하 테스트 시나리오와 같은 조건의 비교 측정 제공
 
 ## ⚙️ 기술 스택
 
@@ -98,6 +101,7 @@ PeakPass는 **상태를 바꾸는 명령**과 **데이터를 읽는 조회**를 
 - rate limiting
 - command(checkout / payment-settlement)별로 분리된 idempotency 결과 캐시
 - command별 in-flight idempotency lock
+- 입장 대기열의 순서, 입장 자격, 입장 예산 (기능을 켠 경우. 전용 Redis 필요)
 
 > Redis는 빠른 조회와 보조 역할을 맡지만, **source of truth는 아닙니다.** 부작용은 가능한 한 commit 이후에만 반영하며, Redis가 중단돼도 정합성 판단은 PostgreSQL(advisory lock, UNIQUE·CHECK 제약)에서 이뤄집니다. 이벤트/재고에 대한 read-through 캐시는 현재 구현되어 있지 않습니다.
 
@@ -131,13 +135,19 @@ GraphQL로 이벤트 목록과 상세 정보를 조회할 수 있습니다. 필�
 
 Redis sliding window 기반 rate limit으로 write 경로(reservation/checkout/webhook)와 GraphQL read 경로를 서로 다른 한도로 보호합니다. Redis 장애 시에는 fail-closed(503)가 기본값입니다.
 
+### ✅ 입장 제어 (대기열 · 입장량 제한 · polling)
+
+보호하도록 지정한 이벤트는 구매 전에 대기열을 거칩니다. Redis가 등록 순서대로 초당 정해진 수만 입장시키고 동시에 입장해 있는 수를 제한하며, 입장 하나는 PostgreSQL 원장 한 행으로 예약 또는 주문 하나에만 쓰입니다. 대기 화면은 polling으로 상태를 읽고, 순번이 먼 사용자는 조회 간격을 늘립니다. Redis에 닿지 않으면 신규 입장과 신규 구매는 닫히고(fail-closed), 이미 만들어진 예약과 주문은 입장 자격을 다시 요구하지 않습니다.
+
+기능은 기본으로 꺼져 있고(`ENABLE_ADMISSION=false`), 동시에 보호하는 이벤트는 1개입니다. 로컬 측정 조건(초당 50명 × 20초, 1,000명)에서 warmup 250명을 제외한 측정 cohort 750명을 기준으로, 대기열이 없으면 16.00%만 결제했고, 대기열과 적응형 polling을 두면 750명 전원이 결제하는 대신 도착부터 결제 완료까지 걸린 시간의 중앙값이 306.8초였습니다(같은 대기열에 고정 간격 polling을 쓰면 503.8초, 모두 3회 중앙값). 운영 성과가 아닌 로컬 단일 인스턴스 측정이며, 조건과 한계는 [성능 보고서](docs/PERFORMANCE_REPORT.md)에, 설계 선택과 운영 절차는 [ADMISSION_DESIGN_AND_OPERATIONS.md](docs/ADMISSION_DESIGN_AND_OPERATIONS.md)에 있습니다.
+
 ### ✅ 내 주문 / 내 티켓 조회
 
 GraphQL `myOrders`, `myTickets`, `ticketByCode`로 사용자가 본인의 주문과 티켓을 자유롭게 조회할 수 있습니다. JWT 인증 기반입니다.
 
 ### ✅ 부하 테스트 시나리오 (k6)
 
-실제 서비스 트래픽 패턴을 가정한 4개의 시나리오를 제공합니다.
+시나리오별 micro-benchmark와 flash-sale 하네스 두 종류가 있습니다. 아래 4개는 micro-benchmark이고, rate limit 전용 시나리오 2개가 더 있습니다.
 
 | 시나리오 | 대상 | 목적 |
 | --- | --- | --- |
@@ -147,6 +157,8 @@ GraphQL `myOrders`, `myTickets`, `ticketByCode`로 사용자가 본인의 주문
 | `callbacks` | `POST /webhooks/payments/settlement` | duplicate webhook에도 티켓 중복 발급이 없는지 |
 
 성능 보고서의 write 측정은 단일 user / 단일 event / 단일 tier를 공유하는 micro-benchmark입니다. 같은 row에 대한 lock 경합과 rate limit 동작을 보기 위한 결과이며, 실서비스 flash-sale RPS로 일반화하지 않습니다.
+
+서로 다른 구매자가 한 이벤트에 몰리는 쓰기 부하는 flash-sale 하네스(`npm run load-test:flash-sale`)로 측정합니다. 실행마다 전용 PostgreSQL·Redis·앱을 띄우고, 대기열 없음 / 대기열 + fixed polling / 대기열 + adaptive polling을 같은 조건에서 비교할 수 있습니다. 실행 방법은 [load-test/README.md](load-test/README.md)에 있습니다.
 
 ## 🔒 핵심 정합성 포인트
 
@@ -228,7 +240,7 @@ SQL 파일은 컴파일된 실행기 옆에 포함됩니다. 이미 적용한 �
 재실행 시 건너뜁니다. `down`은 아직 구현되지 않았으므로 롤백 명령으로
 사용하지 마세요. 개발 소스의 `npm run migrate:up`은 기존대로 사용합니다.
 
-CI는 전용 빈 DB에서 운영 이미지의 001–007 적용, 재실행 이력 불변,
+CI는 전용 빈 DB에서 운영 이미지의 001–013 적용, 재실행 이력 불변,
 `/ready`, 서명된 인증 요청을 확인합니다. 같은 검증은 DB/Redis 환경 변수를
 설정한 뒤 실행할 수 있습니다. 이 명령은 기존 테이블을 삭제하지 않으며
 이미 마이그레이션을 적용한 DB를 거부합니다.
@@ -391,6 +403,8 @@ npm run load-test:rate-limit:reservations:report
 2. `docs/TRANSACTION_CONSISTENCY.md` — oversell·중복 발급 방어 로직
 3. `docs/REDIS_STRATEGY.md` — Redis 사용 의도와 한계
 4. `docs/GRAPHQL_RATIONALE.md` — write / read 분리 이유
+5. `docs/ADMISSION_DESIGN_AND_OPERATIONS.md` — 입장 제어의 설계 선택, 설정, 장애 때의 동작, 재현 절차
+6. `docs/PERFORMANCE_REPORT.md` — 측정 조건, 결과, 한계
 
 ## 🗺️ 코드 읽는 순서 (추천)
 
