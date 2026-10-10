@@ -15,14 +15,14 @@ Node.js 백엔드 운영, PostgreSQL 트랜잭션, Redis 실사용, GraphQL read
 
 ## 🔗 배포 링크
 
-**Live API** — <https://peak-pass.com>
+공개 데모 서버(`peak-pass.com`)는 비용 때문에 운영하지 않습니다(2026-10-10 기준). 아래 엔드포인트는 로컬에서 띄운 서버(`http://localhost:3000`)의 경로입니다.
 
-| 엔드포인트 | URL |
+| 엔드포인트 | 경로 |
 | --- | --- |
-| Health Check | <https://peak-pass.com/health> |
-| Readiness Check | <https://peak-pass.com/ready> |
-| REST (write-side) | `https://peak-pass.com/reservations`, `/checkouts`, `/webhooks/payments/settlement` |
-| GraphQL (read-side) | `POST https://peak-pass.com/graphql` |
+| Health Check | `GET /health` |
+| Readiness Check | `GET /ready` |
+| REST (write-side) | `POST /reservations`, `POST /checkouts`, `POST /webhooks/payments/settlement` |
+| GraphQL (read-side) | `POST /graphql` |
 
 ### Live demo sessions
 
@@ -38,7 +38,7 @@ owned order ID to exercise the same settlement domain service without exposing
 the webhook signing secret. The actual `/webhooks/payments/settlement` endpoint
 continues to require its HMAC signature.
 
-> 이 문서의 `curl` 명령에서 `http://localhost:3000`을 `https://peak-pass.com`으로 바꾸면 라이브 서버가 떠 있는 동안 **로컬 세팅 없이** 인증이 필요 없는 조회(health·ready, 바로 아래의 `events` GraphQL 쿼리, 데모 시나리오 1)의 이벤트 목록)를 호출해볼 수 있습니다. `myOrders`·`myTickets`는 어디서든 JWT가 필요하고, production 설정은 예약·checkout에도 JWT를, settlement webhook에 HMAC 서명을 요구합니다.
+> 이 문서의 `curl` 명령은 로컬 서버(`http://localhost:3000`) 기준입니다. `myOrders`·`myTickets`는 JWT가 필요하고, production 설정은 예약·checkout에도 JWT를, settlement webhook에 HMAC 서명을 요구합니다.
 
 GraphQL 엔드포인트는 POST 전용 API입니다.
 
