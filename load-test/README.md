@@ -1,6 +1,8 @@
 # 부하 테스트 가이드
 
-PeakPass 시스템의 성능과 안정성을 검증하기 위한 k6 기반 부하 테스트 스크립트들입니다.
+PeakPass의 k6 기반 부하 테스트 스크립트와 실행 방법입니다. 시나리오의 설계 기준은 [docs/LOAD_TEST_STRATEGY.md](../docs/LOAD_TEST_STRATEGY.md), 측정 결과는 [docs/PERFORMANCE_REPORT.md](../docs/PERFORMANCE_REPORT.md)에 있습니다.
+
+모든 스크립트는 로컬 환경을 대상으로 합니다. 공개 데모 서버를 포함해 자신이 운영하지 않는 주소에는 실행하지 마세요.
 
 ## 설치
 
@@ -21,20 +23,25 @@ winget install k6.k6
 npm install
 ```
 
-## 테스트 시나리오
+## 스크립트 두 종류
 
-### 시나리오 구분
+| 종류 | 파일 | 환경 |
+| --- | --- | --- |
+| 시나리오별 micro-benchmark | `baseline.js`, `spike.js`, `sustained.js`, `payment-callback.js`, `graphql-rate-limit.js`, `reservation-rate-limit.js` | 직접 띄운 `docker compose` 앱 |
+| flash-sale 하네스 | `flash-sale-fixture.mjs`, `flash-sale.js`, `flash-sale-analysis.mjs`, `flash-sale-monitor-replay.mts`, 검사 `flash-sale-check.mjs` | 하네스가 실행마다 띄우고 지우는 전용 Compose |
+
+## micro-benchmark
 
 순수 성능 측정과 rate limit 동작 측정은 분리해서 실행합니다.
 
 - 순수 성능: `baseline.js`, `spike.js`
-  - 목적: 정상 200 응답의 p95/p99, DB/API 처리량 확인
-  - 권장: 테스트 환경에서 `GRAPHQL_RATE_LIMIT_MAX_REQUESTS`를 충분히 크게 설정
+  - 목적: 정상 200 응답의 p95/p99 확인
+  - 테스트 환경에서 rate limit을 충분히 크게 설정합니다(`docker-compose.perf.yml`).
 - Rate limit 측정: `graphql-rate-limit.js`, `reservation-rate-limit.js`
   - 목적: 429 발생 여부, 차단 비율, 차단 시 latency 확인
-  - 권장: 기본 rate limit 설정을 유지
+  - 기본 rate limit 설정을 유지합니다.
 - 예약 경합/방어 흐름: `sustained.js`, `payment-callback.js`
-  - 목적: 예약 경합, 중복 webhook, idempotency 방어 확인
+  - 목적: 같은 행에 대한 예약 경합, 중복 webhook, idempotency 방어 확인
 
 순수 성능 측정용 예시:
 
@@ -60,93 +67,58 @@ LOAD_TEST_TIER_ID=TIER_ID \
 npm run load-test:rate-limit:reservations
 ```
 
-### 1. Baseline (기본 부하)
-**목적**: 정상 트래픽 상황에서의 성능 측정
+아래 부하 프로필과 threshold는 각 스크립트의 `options`에 있는 값입니다. threshold는 k6가 실행을 통과로 볼 조건이며, 측정된 결과가 아닙니다.
 
-**부하 프로필**:
-- 0min-1min: 10 VU로 워밍업
-- 1min-4min: 50 VU로 점진적 증가
-- 4min-9min: 50 VU 유지 (안정 상태)
-- 9min-10min: 0 VU로 회복
+### 1. Baseline (`baseline.js`)
 
-**주요 메트릭**:
-- p95 응답 시간 < 1000ms
-- p99 응답 시간 < 2000ms
-- 에러율 < 5%
+일반 조회 트래픽의 기준선입니다. 대상은 `/health`, GraphQL `events`, GraphQL `event`입니다.
 
-**실행**:
+| 구간 | VU |
+| --- | --- |
+| 1분 | 10까지 |
+| 3분 | 50까지 |
+| 5분 | 50 유지 |
+| 1분 | 0까지 |
+
+threshold: `browse_latency_ms` p95 < 800ms, p99 < 1500ms, `browse_errors` < 3%.
+
 ```bash
-k6 run load-test/baseline.js
-
-# 또는 원격 서버 테스트
-BASE_URL=https://peak-pass.com k6 run load-test/baseline.js
+npm run load-test:baseline
 ```
 
-**분석**:
-- 시스템이 50명의 동시 사용자를 안정적으로 처리할 수 있는지 확인
-- 정상 상태에서의 응답 시간 기준선 설정
-- 데이터베이스 커넥션 풀 설정이 적절한지 검증
+### 2. Spike (`spike.js`)
 
----
+이벤트 상세 조회가 갑자기 몰릴 때의 tail latency입니다. 대상은 GraphQL `event`입니다.
 
-### 2. Spike (스파이크 부하)
-**목적**: 갑작스러운 트래픽 급증 시 시스템 대응 능력 검증
+| 구간 | VU |
+| --- | --- |
+| 30초 | 10까지 |
+| 5초 | 200까지 |
+| 30초 | 200 유지 |
+| 10초 | 0까지 |
 
-**부하 프로필**:
-- 0sec-30sec: 10 VU 워밍업
-- 30sec-35sec: **10 VU → 200 VU로 급증** (5초 내 20배 증가)
-- 35sec-65sec: 200 VU 유지 (스파이크 상황 지속)
-- 65sec-75sec: 0 VU로 회복
+threshold: `event_detail_spike_latency_ms` p95 < 1200ms, p99 < 2000ms, `event_detail_spike_errors` < 5%.
 
-**주요 메트릭**:
-- p99 응답 시간 < 2000ms (여유 있게 설정)
-- 에러율 < 10% (부분적 실패 허용)
-
-**실행**:
 ```bash
-k6 run load-test/spike.js
+npm run load-test:spike
 ```
 
-**분석 포인트**:
-- 갑작스러운 요청 급증 시 큐 대기 시간 증가 여부
-- 에러 메시지 타입 분석 (타임아웃 vs 리소스 부족)
-- 시스템 회복 시간 (200 VU → 0 VU 후 정상화까지 걸리는 시간)
+### 3. Sustained (`sustained.js`)
 
----
+`POST /reservations`에 대한 예약 부하입니다. 여러 VU가 `LOAD_TEST_USER_ID` 하나를 함께 쓰므로 같은 행에 대한 lock 경합과 rate limit을 보는 시나리오입니다. 서로 다른 구매자가 몰리는 부하는 아래 flash-sale 하네스가 다룹니다.
 
-### 3. Sustained Load (지속 부하)
-**목적**: 고부하 상태에서 시스템이 얼마나 오래 안정적으로 운영되는지 확인
+| 구간 | VU |
+| --- | --- |
+| 30초 | 20까지 |
+| 30초 | 150까지 |
+| 2분 | 150 유지 |
+| 20초 | 0까지 |
 
-**부하 프로필**:
-- 0min-2min: 50 VU로 워밍업 및 안정화
-- 2min-10min: **100 VU 지속 부하** (메인 테스트 - 8분)
-- 10min-12min: 100 VU 유지 (피크 유지)
-- 12min-13min: 0 VU로 회복
+threshold: `flash_sale_reservation_latency_ms` p95 < 1000ms, p99 < 2000ms, `flash_sale_reservation_errors` < 10%.
 
-**주요 메트릭**:
-- p50 응답 시간 < 300ms (중간값)
-- p95 응답 시간 < 800ms
-- p99 응답 시간 < 1500ms
-- 에러율 < 2%
-
-**실행**:
 ```bash
-k6 run load-test/sustained.js
-
-# 요약 모드
-k6 run --quiet load-test/sustained.js
-
-# 결과를 JSON으로 저장
-k6 run --out json=results.json load-test/sustained.js
+npm run load-test:sustained
 ```
-
-**분석 포인트**:
-- 메모리 누수 여부 (시간이 지날수록 응답 시간 악화되는가)
-- 연결 풀 고갈 여부 (특정 시점 이후 에러 급증하는가)
-- 데이터베이스 성능 저하 (타임스탬프 분석으로 특정 시점에 급악화되는가)
-- 캐시 효율성 (시간이 지날수록 응답 시간 개선되는가)
-
----
 
 ### Payment callback 재실행 확인
 
@@ -164,53 +136,41 @@ k6 run --vus 1 --iterations 6 load-test/payment-callback.js
 API 연결과 `LOAD_TEST_USER_ID`, `LOAD_TEST_EVENT_ID`, `LOAD_TEST_TIER_ID` 설정은
 필요합니다. provider transaction ID를 직접 지정하면 재실행마다 새 값으로 바꾸세요.
 
-## 실행 결과 해석
+## flash-sale 하네스
 
-### 성공 기준
-```
-✓ Baseline 스크립트:
-  - p95 < 1000ms: ✅
-  - p99 < 2000ms: ✅
-  - Error rate < 5%: ✅
+서로 다른 구매자가 정해진 속도로 도착해 예약 → checkout → 정산까지 가는 쓰기 부하를 측정합니다. JWT와 webhook 서명을 실제로 보냅니다. 실행마다 자체 PostgreSQL 16, Redis 7, 현재 코드로 빌드한 production 앱을 `docker-compose.flash-sale.yml`로 띄우고, 끝나면 그 실행의 자원만 지웁니다. 기존 Compose, `.env`의 연결 설정, 공유 DB는 쓰지 않습니다.
 
-✓ Spike 스크립트:
-  - 200 VU 급증 시 처리 가능: ✅
-  - 에러율 < 10%: ✅
+Node 18 이상, Docker Compose v2, k6, `npm ci`가 필요합니다. 저장소 루트에서 실행합니다.
 
-✓ Sustained 스크립트:
-  - 100 VU × 8분 지속: ✅
-  - 메모리 누수 없음: ✅
-  - 진행 중 에러율 증가 없음: ✅
+```bash
+npm run build
+npm run test:flash-sale
+
+# 대기열 없는 기준 여정
+npm run load-test:flash-sale -- --run-id my-ample-01
+
+# A/B/C 비교에 쓴 조건 (arm은 a, b, c 중 하나)
+npm run load-test:flash-sale -- --run-id my-c-01 --arm c --users 1000 --rate 50 --warmup-seconds 5 --pre-vus 1000 --max-vus 1000 --drain-seconds 900
 ```
 
-### 일반적인 병목 현상
+- `--arm a`는 대기열 없음, `b`는 대기열과 fixed polling, `c`는 같은 대기열과 adaptive polling입니다.
+- run id는 매번 새로 씁니다. 같은 id의 결과 폴더나 Compose 자원이 있으면 실행을 거부합니다.
+- 결과는 `load-test/results/flash-sale/<run id>/`에 생기고 git이 무시합니다. `analysis.json`의 `classification`이 판정입니다.
+- 위 A/B/C 조건은 실행 하나의 부하 구간이 최대 920초이고 VU 1,000을 미리 만듭니다. 다른 부하가 없는 host에서 실행하세요.
+- `--monitor`는 Redis `MONITOR`를 붙이는 검증 전용 실행입니다. Redis를 느리게 하므로 그 실행의 수치는 측정으로 쓰지 않습니다.
 
-| 증상 | 원인 | 해결책 |
-|------|------|--------|
-| p95 > 1000ms | 데이터베이스 쿼리 느림 | 인덱스 추가, 쿼리 최적화 |
-| 시간이 지날수록 느려짐 | 메모리 누수 | 좀비 연결 정리, 캐시 만료 |
-| 200 VU에서 갑자기 많은 에러 | 커넥션 풀 부족 | pool_size 증가 |
-| 특정 엔드포인트만 느림 | DataLoader 미적용 N+1 쿼리 | DataLoader 배치 처리 확인 |
-| 에러: "429 Too Many Requests" | 레이트 리미터 작동 | window_ms / limit 조정 |
+입력 전체, 산출 파일, 판정 규칙은 [docs/FLASH_SALE_EVIDENCE.md](../docs/FLASH_SALE_EVIDENCE.md)에 있습니다.
 
----
+### 저장된 증거
 
-## 애플리케이션 성능 최적화 체크리스트
+| 폴더 | 내용 |
+| --- | --- |
+| `results/flash-sale-abc-v3/` | P8 A/B/C 비교. `index.json`(run 46개의 목록, 정식 9회와 층 관측 2회의 분석 전체)과 ZIP 11개 |
+| `results/flash-sale-reference/` | P1 하네스의 reference run 증거(`p1-reference-*`) |
+| `results/flash-sale-baseline-v261/` | P2 쓰기 기준선의 인덱스(analysis v2.6.1. 수용한 정식 12회와 정식에서 제외한 preflight 2회, run 14개), 정식 run 가운데 `p2-v26-limited-02`·`p2-v26-limited-03`의 ZIP, 재분석·검증 파일. 나머지 정식 run 10회와 preflight 2회의 ZIP은 `flash-sale-baseline-v26/`에 있다 |
+| `results/flash-sale-baseline/`, `results/flash-sale-baseline-v24/`–`v26/` | P2 쓰기 기준선의 run별 ZIP과 이전 revision의 기록. 읽는 법은 [docs/FLASH_SALE_BASELINE.md](../docs/FLASH_SALE_BASELINE.md) |
 
-### 데이터베이스
-- [ ] 연결 풀 크기 (현재: max 20)
-- [ ] 인덱스 설정 (events.date, checkouts.userId, tickets.eventId)
-- [ ] 쿼리 실행 계획 검토
-
-### 캐싱
-- [ ] Redis 응답 시간 (< 10ms 목표)
-- [ ] DataLoader 배치 크기 (현재: 최대 100개)
-- [ ] TTL 설정 검토 (이벤트: 5분, 사용자: 10분)
-
-### 애플리케이션
-- [ ] GraphQL 쿼리 복잡도 제한 (현재: 5000 포인트)
-- [ ] 응답 압축 (gzip) 활성화
-- [ ] 요청 타임아웃 설정 (현재: 30초)
+`flash-sale-abc-v3/`의 ZIP 11개에는 `k6-raw.jsonl`과 `app.jsonl`이 없습니다. 두 파일은 크기와 SHA256만 그 폴더의 index(`localOnly`)에 있고, `npm run test:flash-sale`의 검사 하나가 이 폴더의 ZIP을 index와 대조합니다. P1·P2 폴더의 run ZIP에는 두 파일이 들어 있습니다.
 
 ## 참고 자료
 

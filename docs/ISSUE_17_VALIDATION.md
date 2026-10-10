@@ -645,3 +645,13 @@ CI succeeded on `bbacfb3`. The auto-review of that commit made three comments, a
 The checks failed before the change (2 of 61) and pass with it; script and fixture are unchanged (harness `flash-sale-v3.6`).
 
 Effect on the recorded results: none on a valid run. All 46 kept runs were analysed again by v3.11 (`run/reanalysis/<run-id>.v3.11.json`): 45 keep verdict and reasons, among them the nine formal runs, the two layer runs (their hidden buyers' polls carry the arm's mode too) and every pilot that decided something. `p8-pilot-b-r10-01`, the run of the host incident of 2026-10-05 that has been invalid since then, gains `policy`: the queue answered `ADMISSION_RECOVERING` or its control was dirty while the host had no memory left. `npm run test:flash-sale` 61/61 on the host, `npm run build`, `npm run lint` 0 errors, the v2.6 archives 14 of 14, product diff empty.
+
+## Auto-review of PR #33, round 10, and the merge (added 2026-10-09 with the P9 documents; facts only)
+
+The record of round 9 was pushed as `419d4c4`, the tenth and last head of the PR. CI succeeded on it and the auto-review of that head made no comment. In rounds 1 to 9 the auto-review made 26 comments, all worked on and all on the validation done by the harness and the analysis; none changed a formal result.
+
+PR #33 was merged on the maintainer's instruction on 2026-10-09 at 20:38:30 KST as main `5529898ffa702146ac5a2cd9261c1c3f05c4aa0c`, a merge commit whose tree equals the head `419d4c4506727f37245f7c6a1486dc124c3322a4`. What was left open is recorded in [#34](https://github.com/dosacha/PeakPass/issues/34).
+
+At close-out the images `peakpass:fs-p8-*`, which "Verification of the final state" above says are kept until then, were removed. The raw k6 output and the application logs of the runs stay in the ignored result folder of the work tree, as "Evidence" above describes.
+
+Correction to "What the comparison shows" (found by the review of the P9 documents on 2026-10-10; the sentence above is left as it was written). It says of the 503 answers of B that the controller's repeat with the same identity succeeded every time. That holds per purchase, not per request: in `p8-b-01` and `p8-b-02` two repeats each were answered 503 again (`all.responses`, key `checkout/retry/direct/503/1503/ADMISSION_UNAVAILABLE/failure`: 2, 2, absent in `p8-b-03`), and the 15, 26 and 10 answers counted there are the 13, 24 and 10 first attempts plus those repeats. Each of these purchases succeeded at a later repeat, and no buyer ended with a 503: all 1,000 buyers paid in each of the six queue runs (`all.httpPaid` and `all.sqlPaid` 1,000; the cohort's outcome is paid 750). In arm C every repeat succeeded (1, 0, 1).
