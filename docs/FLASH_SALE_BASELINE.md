@@ -1,5 +1,7 @@
 # P2 A baseline — protocol and results (2026-10-01 KST)
 
+2026-10-10 추가: 이 기준선은 PR #20으로 main에 병합됐고(2026-10-02, `c1d88bd`), 이를 입력으로 쓴 #12와 #17을 포함해 총괄 #9와 단계 Issue #10–#18은 모두 닫혔다. P8은 A arm을 같은 통합 SHA에서 다른 조건으로 다시 측정했고 이 기준선과의 개선·회귀는 판정하지 않았다([PERFORMANCE_REPORT.md](PERFORMANCE_REPORT.md)). 바로 아래 "현재 gate"와 그 밑의 ready·blocked·미병합 표현은 2026-10-01–02 당시의 기록이다.
+
 현재 gate: **v2.6 + analysis-v2.6.1 정식12회 tuple을 최종 검토 후 수용했다.** preflight2회는 정식에서 제외한다. ample2·10/s는 각3회 안정,25/s는 과부하2회·안정1회이며 최대처리량은 미입증이다. #12는 새tuple 소비로 ready(계약미작성), #17은 A입력만 valid이고 P3/P6/P7 대기로 blocked다. 실제 후행 착수 때 수용SHA/동등코드 포함을 재확인한다. [수용 인덱스](../load-test/results/flash-sale-baseline-v261/index.json)에 측정·분석SHA,12run IDs,원본해시를 고정했다. 아래 이전수용·중단기록은 당시이력이다.
 
 ## Input gate and scope

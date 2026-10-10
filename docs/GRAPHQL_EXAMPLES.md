@@ -71,7 +71,6 @@ query MyOrders($limit: Int, $offset: Int) {
     totalAmount
     status
     paymentStatus
-    idempotencyKey
   }
 }
 ```
@@ -121,7 +120,7 @@ query TicketByCode($code: String!) {
 
 ## curl 예시
 
-> 아래 명령은 로컬(`http://localhost:3000`) 기준입니다. `http://localhost:3000`을 `https://peak-pass.com`으로 바꾸면 라이브 API에 그대로 적용할 수 있습니다.
+> 아래 명령은 로컬(`http://localhost:3000`) 기준입니다. `http://localhost:3000`을 `https://peak-pass.com`으로 바꾸면 라이브 서버가 떠 있는 동안 같은 명령을 쓸 수 있습니다. `Authorization` 헤더가 붙은 명령(`myOrders`, `myTickets` 등)은 어느 쪽에서든 JWT가 필요합니다.
 
 이벤트 목록:
 

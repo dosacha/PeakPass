@@ -1,5 +1,7 @@
 # Issue #13 / P4 새 세션 인수인계
 
+2026-10-10 추가: P4는 PR #24로 병합됐고(main `678ac7c`, 2026-10-02) 구현·검증 결과는 [ISSUE_13_VALIDATION.md](ISSUE_13_VALIDATION.md)에 있다. 아래의 '현재'는 2026-10-02 착수 전 기준이다. 지금 migration은 013까지 있고 production image 검사는 001–013을 확인하며, Redis 장애 fixture의 고정 컨테이너·포트 63532 조건은 P7(`a284459`)에서 소유 확인으로 바뀌었다.
+
 작성일: 2026-10-02 KST. 대상: [P4 #13 — Redis 대기열 API와 원자적 입장 승격 구현](https://github.com/dosacha/PeakPass/issues/13). 이 문서는 **착수 절차와 구현 설계의 입력**이며 P4 구현·검증 결과가 아니다. 규범은 [ADMISSION_CONTRACT.md](ADMISSION_CONTRACT.md)의 `admission-v1`, 수용 상태의 단일 기준은 [총괄 #9](https://github.com/dosacha/PeakPass/issues/9)다.
 
 ## 1. 새 세션의 첫 작업: 조사 후 설계 설명

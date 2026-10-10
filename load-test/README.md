@@ -138,7 +138,7 @@ API 연결과 `LOAD_TEST_USER_ID`, `LOAD_TEST_EVENT_ID`, `LOAD_TEST_TIER_ID` 설
 
 ## flash-sale 하네스
 
-서로 다른 구매자가 정해진 속도로 도착해 예약 → checkout → 정산까지 가는 쓰기 부하를 측정합니다. JWT와 webhook 서명을 실제로 보냅니다. 실행마다 자체 PostgreSQL 16, Redis 7, 현재 코드로 빌드한 production 앱을 `docker-compose.flash-sale.yml`로 띄우고, 끝나면 그 실행의 자원만 지웁니다. 기존 Compose, `.env`의 연결 설정, 공유 DB는 쓰지 않습니다.
+서로 다른 구매자가 정해진 속도로 도착해 예약 → checkout → 정산까지 가는 쓰기 부하를 측정합니다. JWT와 webhook 서명을 실제로 보냅니다. 실행마다 자체 PostgreSQL 16, Redis 7, 현재 코드로 빌드한 production 앱을 `docker-compose.flash-sale.yml`로 띄우고, 끝나면 그 실행의 자원만 지웁니다. 빌드한 이미지(`peakpass:fs-<run id>`)와 결과 폴더는 남습니다. 기존 Compose, `.env`의 연결 설정, 공유 DB는 쓰지 않습니다.
 
 Node 18 이상, Docker Compose v2, k6, `npm ci`가 필요합니다. 저장소 루트에서 실행합니다.
 
@@ -157,7 +157,7 @@ npm run load-test:flash-sale -- --run-id my-c-01 --arm c --users 1000 --rate 50 
 - run id는 매번 새로 씁니다. 같은 id의 결과 폴더나 Compose 자원이 있으면 실행을 거부합니다.
 - 결과는 `load-test/results/flash-sale/<run id>/`에 생기고 git이 무시합니다. `analysis.json`의 `classification`이 판정입니다.
 - 위 A/B/C 조건은 실행 하나의 부하 구간이 최대 920초이고 VU 1,000을 미리 만듭니다. 다른 부하가 없는 host에서 실행하세요.
-- `--monitor`는 Redis `MONITOR`를 붙이는 검증 전용 실행입니다. Redis를 느리게 하므로 그 실행의 수치는 측정으로 쓰지 않습니다.
+- `--monitor`는 Redis `MONITOR`를 붙이는 검증 전용 실행이고 `--arm b`에서만 받습니다. Redis를 느리게 하므로 그 실행의 수치는 측정으로 쓰지 않습니다.
 
 입력 전체, 산출 파일, 판정 규칙은 [docs/FLASH_SALE_EVIDENCE.md](../docs/FLASH_SALE_EVIDENCE.md)에 있습니다.
 

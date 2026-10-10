@@ -1,5 +1,7 @@
 # P3 / Issue #12 새 세션 인수인계
 
+2026-10-10 추가: P3는 PR #22로 병합됐고(main `c2fd058`, 2026-10-02) 확정 계약은 [ADMISSION_CONTRACT.md](ADMISSION_CONTRACT.md)의 `admission-v1`이다. 아래의 '현재'·'아직'은 2026-10-02 착수 전 기준의 기록이다.
+
 작성 기준: 2026-10-02 KST. 대상은 [P3 #12: 대기열·입장권·용량·실패 정책 계약](https://github.com/dosacha/PeakPass/issues/12)이다. **이 문서는 착수 기준이며 admission 설계의 확정 계약이 아니다.** 이번 작업에서는 P3 제품 코드·DB migration·부하 실험·`ADMISSION_CONTRACT.md`를 만들지 않았다.
 
 ## 1. 새 세션이 가장 먼저 할 일

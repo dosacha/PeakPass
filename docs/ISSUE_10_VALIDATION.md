@@ -1,5 +1,7 @@
 # Issue #10 구현·검증 기록
 
+2026-10-10 추가: 이 구현은 PR #19로 병합됐다(main `8f64539`, 2026-10-01). 맨 아래의 '아직 측정하지 않았다'는 그때의 기록이다. 과부하 구간은 이후 P2([FLASH_SALE_BASELINE.md](FLASH_SALE_BASELINE.md))가, 같은 조건의 A/B/C 비교는 P8([ISSUE_17_VALIDATION.md](ISSUE_17_VALIDATION.md))이 측정했다.
+
 구현 branch: `codex/issue-10-write-load-harness`
 
 기준 main: `79a0b5ed381b9c8be72e30fa7b0c61f8c56acfd0`

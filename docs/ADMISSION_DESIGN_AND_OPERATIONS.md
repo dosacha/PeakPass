@@ -2,7 +2,7 @@
 
 이 문서는 PeakPass의 입장 제어(대기열, 입장량 제한, polling)를 왜 이렇게 만들었는지와 어떻게 켜고 끄고 재현하는지를 한곳에 모은다. 규칙의 원문은 [입장 제어 계약 admission-v1](ADMISSION_CONTRACT.md)이고, 이 문서가 계약과 다르면 계약이 맞다.
 
-기준: main `5529898`(2026-10-09). 제품 코드·계약·migration은 main `1bb2796`과 같다. 여기 적은 수치는 모두 로컬 단일 host에서 한 측정이며 운영 성과가 아니다.
+기준: main `5529898`(2026-10-09, P8 병합)의 코드와 증거. 제품 코드·계약·migration은 main `1bb2796`과 같고, 그 뒤 2026-10-10까지의 병합은 문서만 바꿨다. 여기 적은 수치는 모두 로컬 단일 host에서 한 측정이며 운영 성과가 아니다.
 
 ## 무엇을 풀려고 했나
 
@@ -83,16 +83,16 @@ seed 값은 처음에 고정한 실험 가정이다. 운영 권고값이 아니�
 ## 알려진 한계
 
 - 동시에 보호하는 이벤트는 1개다. Redis 하나는 PostgreSQL DB 하나에만 붙어야 한다.
-- 보호를 해제한 직후 최대 1 tick 동안 이전 상태가 응답될 수 있다.
+- 보호를 해제한 직후 다음 scheduler tick(250ms)과 배타 gate를 기다리는 동안 이전 상태가 응답될 수 있다.
 - Redis 반영이 실패한 구매의 슬롯은 회수될 때까지 사용 중으로 남고, 그 시간에 상한이 없다.
 - 데모 페이지는 프로세스마다 고정 사용자 1명이다. 스크린리더, 다른 브라우저, 모바일은 확인하지 않았다.
 - seed profile에서 대기는 분 단위다. 받아들일 만한지는 제품 판단이며 정하지 않았다.
 
-단계별로 남긴 항목은 [#25](https://github.com/dosacha/PeakPass/issues/25)(P4), [#27](https://github.com/dosacha/PeakPass/issues/27)(P5), [#29](https://github.com/dosacha/PeakPass/issues/29)(P6), [#32](https://github.com/dosacha/PeakPass/issues/32)(P7), [#34](https://github.com/dosacha/PeakPass/issues/34)(P8)에 있다.
+단계별로 남긴 항목은 [#25](https://github.com/dosacha/PeakPass/issues/25)(P4), [#27](https://github.com/dosacha/PeakPass/issues/27)(P5), [#29](https://github.com/dosacha/PeakPass/issues/29)(P6), [#32](https://github.com/dosacha/PeakPass/issues/32)(P7), [#34](https://github.com/dosacha/PeakPass/issues/34)(P8), [#36](https://github.com/dosacha/PeakPass/issues/36)(P9)에 있다.
 
 ## 실험 재현
 
-Node 18 이상, Docker Compose v2, k6, `npm ci`가 필요하다. 저장소 루트에서 실행한다. 실행마다 자체 PostgreSQL 16, Redis 7, 현재 코드로 빌드한 앱을 띄우고 끝나면 그 실행의 자원만 지운다.
+Node 18 이상, Docker Compose v2, k6, `npm ci`가 필요하다. 저장소 루트에서 실행한다. 실행마다 자체 PostgreSQL 16, Redis 7, 현재 코드로 빌드한 앱을 띄우고 끝나면 그 실행의 자원만 지운다. 빌드한 이미지(`peakpass:fs-<run id>`)와 결과 폴더는 남는다.
 
 ```sh
 npm run build

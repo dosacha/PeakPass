@@ -37,7 +37,7 @@
 | 구매 시도 실패율 (cohort의 시도) | 61.75% [59.32–62.34] | 0.32% [0.21–0.37] | 0% (0/1,875 ×3) |
 | 500 `INTERNAL_ERROR` 응답 수 (전체 시도) | 1,975 [1,907–1,977] | 0 [0–1] | 0 |
 | 503 응답 수 (전체 시도) | 0 | 15 [10–26] | 1 [0–1] |
-| 인지 뒤 paid p99 (cohort의 결제자. B·C는 controller가 입장을 인지한 시각→결제 완료. A는 대기열이 없어 도착→결제 완료이며 아래 p99 행과 같은 값) | 2,362ms [1,353–3,024] | 804ms [780–941] | 134ms [131–136] |
+| 입장 인지 뒤 paid p99 (cohort의 결제자. B·C는 controller가 입장을 인지한 시각→결제 완료. A는 대기열이 없어 도착→결제 완료이며 아래 p99 행과 같은 값) | 2,362ms [1,353–3,024] | 804ms [780–941] | 134ms [131–136] |
 | 도착→결제 완료 시간 p50 (cohort의 결제자) | 1.1초 [0.4–1.7] | 503.8초 [503.5–504.5] | 306.8초 [306.3–307.1] |
 | 도착→결제 완료 시간 p99 (cohort의 결제자) | 2.4초 [1.4–3.0] | 711.1초 [710.2–711.1] | 485.9초 [485.7–486.4] |
 | 승격 달성률 (전체 1,000명의 대기열. 대기자가 있는 동안의 승격 수 ÷ R이 허용한 수. 사람 수의 비율이 아님) | – | 67.92% [67.92–68.02] | 98.01% [97.98–98.12] |
@@ -46,7 +46,7 @@
 | 1초 동안의 status 요청 최대 (전체 1,000명) | – | 971 [958–975] | 232 [222–236] |
 | 결제 수 ÷ horizon 920초 (cohort 750명) | 0.130/s [0.120–0.161] | 0.815/s | 0.815/s |
 
-분모는 행마다 괄호에 적었습니다. "cohort"는 warmup 250명을 제외한 측정 cohort 750명이고, "전체"는 warmup을 포함한 1,000명입니다. 시도를 세는 행(구매 시도 실패율, 500·503 응답 수)은 예약·checkout·정산 요청 가운데 하네스가 일부러 보내는 replay를 뺀 것만 셉니다. 결제 완료, 구매 시도 실패율, 인지 뒤 paid, 도착→결제 완료 시간, 결제 수 ÷ horizon이 cohort 값입니다. warmup을 포함한 1,000명 전체로는 A의 결제자가 125명(12.50%) [113–156]이고, C의 구매 시도 실패는 세 run에서 1, 0, 1건(2,501 / 2,500 / 2,501건 중)입니다. 500·503 응답 수, 승격 달성률, 입장 인지 지연, status 요청 수와 그 1초 최대는 전체의 값입니다.
+분모는 행마다 괄호에 적었습니다. "cohort"는 warmup 250명을 제외한 측정 cohort 750명이고, "전체"는 warmup을 포함한 1,000명입니다. 시도를 세는 행(구매 시도 실패율, 500·503 응답 수)은 예약·checkout·정산 요청 가운데 하네스가 일부러 보내는 replay를 뺀 것만 셉니다. 결제 완료, 구매 시도 실패율, 입장 인지 뒤 paid, 도착→결제 완료 시간, 결제 수 ÷ horizon이 cohort 값입니다. warmup을 포함한 1,000명 전체로는 A의 결제자가 125명(12.50%) [113–156]이고, C의 구매 시도 실패는 세 run에서 1, 0, 1건(2,501 / 2,500 / 2,501건 중)입니다. 500·503 응답 수, 승격 달성률, 입장 인지 지연, status 요청 수와 그 1초 최대는 전체의 값입니다. 결제 수 ÷ horizon의 920초는 scenario 시작부터의 도착 20초 + drain 900초입니다(index의 `condition.horizonSeconds`). index의 `analysis.horizon`은 warmup 5초 뒤부터의 915초이고 warmup 구매자의 결제까지 세므로 다른 값입니다.
 
 11회 모두 최종 SQL 검사가 0행이고, 원장과 Redis가 일치하며, 어느 1초에도 승격이 R을 넘지 않았습니다.
 
@@ -56,7 +56,7 @@
 - **대기열은 실패를 대기로 바꿨습니다.** B와 C는 cohort 전원이 결제했습니다. 대신 R 2/s로 1,000명을 받으려면 최소 500초가 걸리고, cohort의 도착→결제 완료 시간 중앙값이 C 306.8초, B 503.8초입니다. 이 값은 대기열에서 기다린 시간에 입장 인지 지연과 구매·정산 시간을 더한 것입니다.
 - **대기열이 처리량을 늘린 것은 아닙니다.** B와 C의 cohort 결제 수 ÷ horizon은 0.815/s로 같습니다. 이 값은 "750명이 920초 안에 모두 결제했다"는 뜻일 뿐이고 두 arm을 구분하지 못합니다.
 - **B와 C의 차이는 polling 방식 하나입니다.** fixed polling의 status 요청이 같은 1 CPU 인스턴스의 scheduler를 늦춘 것으로 읽습니다(승격 달성률 67.92% 대 98.01%). tick 간격 자체는 재지 않았습니다.
-- **B의 503**(전체 시도 기준 15건 [10–26])은 입장 필드가 있는 구매가 직렬화 재시도를 다 쓰고 받은 응답입니다([#27](https://github.com/dosacha/PeakPass/issues/27)). controller가 같은 identity로 다시 보냈고 503으로 끝난 구매자는 없습니다. 다시 보낸 요청이 한 번 더 503을 받은 경우가 `p8-b-01`과 `p8-b-02`에서 2건씩 있었고(위 15건, 26건에 포함), 그 구매도 이후 재전송에서 성공했습니다. cohort의 실패 0.32%(중앙값 run `p8-b-01`의 6/1,881)가 응답 코드별로 어떻게 나뉘는지는 index에 없습니다. 그 run에는 전체 시도 기준으로 503 15건과 500 1건이 있었습니다.
+- **B의 503**(전체 시도 기준 15건 [10–26])은 입장 필드가 있는 구매가 직렬화 재시도를 다 쓰고 받은 응답입니다([#27](https://github.com/dosacha/PeakPass/issues/27)). controller가 같은 identity로 다시 보냈고 503으로 끝난 구매자는 없습니다. 다시 보낸 요청이 한 번 더 503을 받은 경우가 `p8-b-01`과 `p8-b-02`에서 2건씩 있었고(위 15건, 26건에 포함. 두 run 모두 구매 2건의 것이고 네 건 다 warmup cohort), 그 구매도 이후 재전송에서 성공했습니다. cohort의 실패 0.32%(중앙값 run `p8-b-01`의 6/1,881)의 응답 코드별 구성은 index에 없어 로컬 원본 `k6-raw.jsonl`에서 세었습니다(2026-10-10, 분석기의 `purchase.measuredCohort`와 같은 규칙. 이 파일은 저장소에 없고 크기와 SHA256만 index의 `localOnly`에 있습니다): 503 `ADMISSION_UNAVAILABLE` 5건(직접 checkout의 첫 요청)과 500 `INTERNAL_ERROR` 1건(예약 경로의 checkout. 입장 필드가 없는 기존 요청)이고, 서로 다른 구매자 6명의 것이며 여섯 건 모두 바로 다음 재전송에서 성공했습니다. 그 run에는 전체 시도 기준으로 503 15건과 500 1건이 있었습니다.
 
 ### 한계
 
@@ -119,7 +119,7 @@
 - 조회 성능: GraphQL `events`, `event`
 - 예약 성능: `POST /reservations`
 - 결제 재시도 안정성: `POST /webhooks/payments/settlement`
-- 방어 장치: Redis rate limit, command별 idempotency result cache (event/inventory read-through cache는 미구현)
+- 방어 장치: Redis rate limit, settlement webhook의 idempotency 결과 캐시와 command별 in-flight lock (event/inventory read-through cache는 미구현)
 
 ## 관찰할 메트릭
 
@@ -209,18 +209,20 @@ docker compose exec redis redis-cli FLUSHDB
 
 | 시나리오 | 결과 파일 | 부하 모델 | rate limit | RPS | p95 latency | 에러율 |
 |---|---|---|---|---|---|---|
-| read baseline (50 VU 10분) | `baseline-summary.json` | GraphQL `events` / `event` mix + `/health` | perf override | 107.3 HTTP req/s | `browse_latency_ms` p95 29.2 ms | `browse_errors` 0.00% |
-| read spike (200 VU) | `spike-summary.json` | GraphQL `event` 단일 id 반복 | perf override | 663.6 HTTP req/s | `event_detail_spike_latency_ms` p95 5.7 ms | `event_detail_spike_errors` 0.00% |
+| read baseline (50 VU 10분) | `baseline-summary.json` | GraphQL `events` / `event` mix + `/health` | perf override | 106.4 HTTP req/s | `browse_latency_ms` p95 34.5 ms | `browse_errors` 0.02% (15/63,930. 15건 모두 `detail latency < 600ms` check 실패이고 HTTP 실패는 0) |
+| read spike (200 VU) | `spike-summary.json` | GraphQL `event` 단일 id 반복 | perf override | 607.6 HTTP req/s | `event_detail_spike_latency_ms` p95 59.1 ms | `event_detail_spike_errors` 0.00% |
 | payment callback duplicate retry (50 VU) | console output | 단일 order에 settlement webhook 반복 | perf override | 271.6 HTTP req/s | `payment_callback_latency_ms` p95 5.0 ms | `payment_callback_errors` 0.00% |
-| GraphQL rate limit | console output | GraphQL `events` 반복 | default | 197.5 HTTP req/s | `graphql_rate_limit_latency_ms` p95 4.0 ms | `graphql_unexpected_errors` 0.00%, 99.13% rate-limited |
-| reservation rate limit | console output | 단일 user → 단일 event / tier reservation 반복 | default | 240.3 HTTP req/s | `reservation_rate_limit_latency_ms` p95 3.3 ms | `reservation_unexpected_errors` 0.00%, 99.94% rate-limited |
+| GraphQL rate limit | `graphql-rate-limit-summary.json` | GraphQL `events` 반복 | default | 193.6 HTTP req/s | `graphql_rate_limit_latency_ms` p95 5.5 ms | `graphql_unexpected_errors` 0.00%, 99.12% rate-limited |
+| reservation rate limit | `reservation-rate-limit-summary.json` | 단일 user → 단일 event / tier reservation 반복 | default | 235.1 HTTP req/s | `reservation_rate_limit_latency_ms` p95 4.8 ms | `reservation_unexpected_errors` 0.00%, 99.93% rate-limited |
+
+2026-10-10 대조: baseline, spike, 두 rate limit 행은 저장소의 summary 파일(`load-test/results/*-summary.json`, 2026-06-03 21:35 commit `219d8f7`) 값이다. baseline과 spike의 이전 값(107.3 req/s·29.2 ms·오류 0.00%, 663.6 req/s·5.7 ms)은 같은 날 앞선 실행의 summary 파일(commit `5349a8e`) 값이었고 그 파일은 덮어써졌다. 두 rate limit 행의 이전 값(197.5 req/s·4.0 ms·99.13%, 240.3 req/s·3.3 ms·99.94%)은 저장되지 않은 console 출력이었다. payment callback 행은 저장된 파일이 없어 console 출력 값 그대로다.
 
 ### 해석
 
-- **read 경로**: rate limit을 높인 perf 환경에서 baseline과 200 VU spike 모두 0% 오류로 통과함. spike p95 5.7 ms로 hot event detail read가 안정적으로 처리됨
+- **read 경로**: rate limit을 높인 perf 환경에서 baseline은 `browse_errors` 0.02%(15/63,930. 15건 모두 600 ms를 넘긴 detail 응답이고 HTTP 실패는 0), 200 VU spike는 0%로 통과함. spike p95는 59.1 ms였음
 - **payment callback**: 단일 order에 settlement webhook을 반복해도 대부분 duplicate로 안정 처리됨. `payment_callback_duplicates=19055`, `payment_callback_errors=0.00%`
-- **GraphQL rate limit**: 기본 설정에서 99.13%가 rate-limited 되었고, 예기치 않은 오류는 0%임. read limiter가 fail-fast로 동작함
-- **reservation rate limit**: 기본 설정에서 99.94%가 rate-limited 되었고, 예기치 않은 오류는 0%임. write limiter가 fail-fast로 동작함
+- **GraphQL rate limit**: 기본 설정에서 99.12%가 rate-limited 되었고, 예기치 않은 오류는 0%임. read limiter가 fail-fast로 동작함
+- **reservation rate limit**: 기본 설정에서 99.93%가 rate-limited 되었고, 예기치 않은 오류는 0%임. write limiter가 fail-fast로 동작함
 - **HTTP failed 해석**: rate limit 시나리오에서 `http_req_failed`가 99%대로 나오는 것은 429가 k6의 HTTP failed response로 집계되기 때문이며, 성공 기준은 커스텀 unexpected error 지표임
 
 ### 본 측정의 한계 (정직한 disclaimer)
@@ -228,4 +230,4 @@ docker compose exec redis redis-cli FLUSHDB
 1. 단일 user 부하 모델이라 *서로 다른 user가 같은 event에 몰리는* 실제 flash-sale의 lock 분포와 다름. 진짜 oversell 방어 검증은 `src/tests/integration/concurrency.test.ts`에서 5명의 distinct user로 수행함
 2. `ENFORCE_AUTH_USER_MATCH=false`로 측정함. 권장값(`true`)에서는 JWT 발급 흐름이 추가되며 이는 현 부하 스크립트가 모델링하지 않음
 3. 단일 노드 Docker Compose 환경. 분산 환경의 cold connection, cross-region latency, DB 연결 풀 동작 등은 측정 범위 밖
-4. PostgreSQL / Redis 자체의 메모리·디스크 한계는 시나리오 길이(최대 3분 20초)로는 의미 있게 드러나지 않음
+4. PostgreSQL / Redis 자체의 메모리·디스크 한계는 시나리오 길이(최대 10분)로는 의미 있게 드러나지 않음

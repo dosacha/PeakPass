@@ -1,7 +1,7 @@
 # Redis 전략
 
 PeakPass에서 Redis는 성능과 편의성을 높이기 위한 보조 계층입니다.
-정합성 기준은 PostgreSQL이며, Redis를 잃어도 DB 기준으로 복구 가능한 구조를 유지합니다.
+정합성 기준은 PostgreSQL이며, Redis를 잃어도 DB 기준으로 복구 가능한 구조를 유지합니다(입장 대기열의 순번은 예외입니다. 아래 "실패 시 동작 원칙" 참조).
 
 ## 사용 목적
 
@@ -9,9 +9,10 @@ PeakPass에서 Redis는 성능과 편의성을 높이기 위한 보조 계층입
 
 1. 예약 hold TTL 관리 (조회 가속)
 2. rate limiting
-3. command별 멱등성 결과 cache와 in-flight lock
+3. 멱등성: settlement webhook의 결과 cache와 command별 in-flight lock
+4. 입장 대기열의 순서·입장 자격·입장 예산 (`ENABLE_ADMISSION=true`일 때)
 
-관련 코드는 [commands.ts](../src/infra/redis/commands.ts)에 모여 있습니다.
+1~3의 코드는 [commands.ts](../src/infra/redis/commands.ts)에, 4는 [admission.ts](../src/infra/redis/admission.ts)에 있습니다. 4는 persistence를 끄고 `noeviction`으로 둔 Redis가 필요하며, 설계와 운영은 [ADMISSION_DESIGN_AND_OPERATIONS.md](./ADMISSION_DESIGN_AND_OPERATIONS.md)를 따릅니다.
 
 ## 1. 예약 hold TTL
 
@@ -33,7 +34,7 @@ PeakPass에서 Redis는 성능과 편의성을 높이기 위한 보조 계층입
 
 ## 2. rate limiting
 
-- 대상: `reservation`, `checkout`, `settlement webhook`
+- 대상: `reservation`, `checkout`, `settlement webhook`(write 한도 `RATE_LIMIT_*`), GraphQL(별도 한도 `GRAPHQL_RATE_LIMIT_*`), 데모 세션·데모 정산(각자의 한도)
 - 기준: 인증 사용자 ID 우선, 없으면 IP fallback
 - 구현 방식: Redis sorted set 기반 sliding window
 
@@ -50,8 +51,8 @@ PeakPass에서 Redis는 성능과 편의성을 높이기 위한 보조 계층입
 
 ## 3. 멱등성 결과 cache
 
-- 키 예시: `idempotency:{scope}:{key}` — scope는 `checkout` 또는 `payment-settlement`
-- 저장 시점: checkout 또는 settlement webhook 성공 응답 이후
+- 키 예시: `idempotency:{scope}:{key}` — 결과를 저장하는 scope는 `payment-settlement`
+- 저장 시점: settlement webhook 성공 응답 이후. checkout은 결과를 캐시하지 않는다(2026-09-28부터): 같은 키의 재시도는 PostgreSQL의 기존 주문을 payload와 대조해 그대로 반환하고, Redis에는 in-flight lock만 둔다
 - 목적: 동일 요청 재시도 시 빠른 응답 재사용
 - scope를 두는 이유: 두 command가 같은 middleware를 공유하고 응답 shape가
   다르므로, 같은 raw `Idempotency-Key`가 command 경계를 넘어 재생되면 안 된다
@@ -90,10 +91,11 @@ write 경로가 없으므로 이는 향후 캐시 도입을 대비한 무효화 
 - Redis 읽기 실패는 경고 로그와 함께 가능한 범위에서 계속 진행
 - rate limiting은 `RATE_LIMIT_FAIL_MODE`에 따라 동작 (default `closed` = 503 반환)
 - Redis cache 손실은 성능 저하로 이어질 수 있지만 주문 정합성은 깨지지 않음
+- 예외: 입장 제어는 fail-closed다. Redis에 닿지 않으면 대기열 등록·조회와 보호 이벤트의 신규 구매가 503으로 닫히고, Redis의 대기열 상태를 잃으면 대기 순번은 복원되지 않아 새 epoch에서 다시 등록한다. 입장 소비 결과는 PostgreSQL `admission_results`에 남는다
 
 ## 설계 원칙 요약
 
 - Redis를 source of truth로 두지 않음
-- TTL hold, rate limiting, command별 idempotency cache/lock을 실제 사용 패턴으로 설명 가능
-- 모든 Redis 부작용을 DB commit 이후 경계에 맞춰 두려고 했음
+- TTL hold, rate limiting, 멱등성 cache/lock, 입장 대기열을 실제 사용 패턴으로 설명 가능
+- Redis 부작용은 가능한 한 DB commit 이후 경계에 맞춤. 예외는 입장 제어다: 계약 §5·§6이 정한 순서대로 PostgreSQL 트랜잭션 안에서 Redis를 쓰는 단계가 있다(예: 구매의 입장 자격 claim, epoch 복구의 초기화·공개). 구매의 입장 결과 반영은 commit 뒤에 함
 - rate limit은 fail-closed가 default. 결제 경로의 폭주 방어 layer를 잃은 상태로 트래픽을 받는 것을 막음

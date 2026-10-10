@@ -124,6 +124,8 @@ The final SQL of contract §8 runs after every purchase test: `available + activ
 
 ### Not verified
 
+Added on 2026-10-10 (facts only): P7 (PR #31, `a284459`) replaced the fixed container and port 63532 of the Redis-outage fixture by an ownership check and ran the ten cases that this record lists as skipped (32/32 in their three files; [ISSUE_16_VALIDATION.md](ISSUE_16_VALIDATION.md)). What P5 left open is in #27.
+
 - Real Redis pause, stop, restart and empty state with purchase writers (A10): P7. The ten legacy Redis-outage cases stay skipped for the reason recorded in P4.
 - More than one application process buying at once. The product-process tests use one process; the reclaimer and consumption races were exercised inside one test process, one child consumer and one product process.
 - `statement_timeout` and `idle_in_transaction_session_timeout` firing by their own timers. `lock_timeout` fired for real, and a session ended by the server while idle in a transaction was produced with `pg_terminate_backend`; a statement timeout was an injected error code.

@@ -38,7 +38,7 @@ owned order ID to exercise the same settlement domain service without exposing
 the webhook signing secret. The actual `/webhooks/payments/settlement` endpoint
 continues to require its HMAC signature.
 
-> 아래 데모 시나리오의 `curl` 명령에서 `http://localhost:3000` 부분을 `https://peak-pass.com`으로 바꾸면 **로컬 세팅 없이 바로** 라이브 API를 호출해볼 수 있습니다.
+> 이 문서의 `curl` 명령에서 `http://localhost:3000`을 `https://peak-pass.com`으로 바꾸면 라이브 서버가 떠 있는 동안 **로컬 세팅 없이** 인증이 필요 없는 조회(health·ready, 바로 아래의 `events` GraphQL 쿼리, 데모 시나리오 1)의 이벤트 목록)를 호출해볼 수 있습니다. `myOrders`·`myTickets`는 어디서든 JWT가 필요하고, production 설정은 예약·checkout에도 JWT를, settlement webhook에 HMAC 서명을 요구합니다.
 
 GraphQL 엔드포인트는 POST 전용 API입니다.
 
@@ -53,7 +53,7 @@ curl -X POST http://localhost:3000/graphql \
 - Node.js + TypeScript 기반 백엔드 서비스 구현
 - Fastify 기반 **REST write-side**와 **GraphQL read-side** 분리
 - PostgreSQL을 **source of truth**로 유지
-- Redis를 hold TTL · rate limit · idempotency 결과 캐시 · 입장 대기열에 **운영 용도로** 사용
+- Redis를 hold TTL · rate limit · idempotency lock과 webhook 결과 캐시 · 입장 대기열에 **운영 용도로** 사용
 - 동시성 하에서 oversell을 막는 트랜잭션 흐름 구현
 - 구매가 몰릴 때 유입을 제어하는 입장 대기열과 polling 구현
 - k6 기반 부하 테스트 시나리오와 같은 조건의 비교 측정 제공
@@ -99,7 +99,7 @@ PeakPass는 **상태를 바꾸는 명령**과 **데이터를 읽는 조회**를 
 
 - 예약 hold 조회 가속과 만료 시각 표시 (TTL)
 - rate limiting
-- command(checkout / payment-settlement)별로 분리된 idempotency 결과 캐시
+- settlement webhook의 idempotency 결과 캐시 (checkout 재시도는 캐시 없이 PostgreSQL의 기존 주문을 반환)
 - command별 in-flight idempotency lock
 - 입장 대기열의 순서, 입장 자격, 입장 예산 (기능을 켠 경우. 전용 Redis 필요)
 
@@ -129,7 +129,7 @@ GraphQL로 이벤트 목록과 상세 정보를 조회할 수 있습니다. 필�
 
 ### ✅ 동시성 제어 (Oversell 방지)
 
-`SERIALIZABLE` 트랜잭션과 `SELECT ... FOR UPDATE`로 이벤트 재고 행을 잠그고, `available_seats`는 DB CHECK로 하한(`>= 0`)과 상한(`<= total_seats`)이 함께 강제됩니다. **동시 예약·checkout 요청이 몰려도 한 자리가 두 명에게 팔리지 않는 것은 통합 테스트로 검증**했으며, k6 시나리오는 같은 행에 대한 lock 경합과 rate limit 동작을 관찰하는 용도입니다.
+`SELECT ... FOR UPDATE`로 이벤트 재고 행을 잠그고(checkout·settlement와 입장 필드가 있는 예약은 `SERIALIZABLE`, 입장 필드가 없는 예약은 READ COMMITTED), `available_seats`는 DB CHECK로 하한(`>= 0`)과 상한(`<= total_seats`)이 함께 강제됩니다. **동시 예약·checkout 요청이 몰려도 한 자리가 두 명에게 팔리지 않는 것은 통합 테스트로 검증**했으며, k6 시나리오는 같은 행에 대한 lock 경합과 rate limit 동작을 관찰하는 용도입니다.
 
 ### ✅ Rate Limiting
 
@@ -143,7 +143,7 @@ Redis sliding window 기반 rate limit으로 write 경로(reservation/checkout/w
 
 ### ✅ 내 주문 / 내 티켓 조회
 
-GraphQL `myOrders`, `myTickets`, `ticketByCode`로 사용자가 본인의 주문과 티켓을 자유롭게 조회할 수 있습니다. JWT 인증 기반입니다.
+GraphQL `myOrders`, `myTickets`로 사용자가 본인의 주문과 티켓을 조회할 수 있습니다(JWT 인증 기반). `ticketByCode`는 인증 없이 티켓 코드로 게이트 검증용 공개 DTO만 반환합니다.
 
 ### ✅ 부하 테스트 시나리오 (k6)
 
@@ -164,9 +164,9 @@ GraphQL `myOrders`, `myTickets`, `ticketByCode`로 사용자가 본인의 주문
 
 PeakPass에서 절대 양보하지 않은 규칙들입니다.
 
-- `Idempotency-Key` 기반 **중복 재시도 방어** — Redis 캐시·lock은 command(checkout / payment-settlement)별 namespace로 분리
+- `Idempotency-Key` 기반 **중복 재시도 방어** — Redis in-flight lock은 command(checkout / payment-settlement)별 namespace로 분리하고, 결과 캐시는 settlement webhook에만 사용
 - Redis가 중단돼도 `pg_advisory_xact_lock` + `orders.idempotency_key UNIQUE`로 **PostgreSQL이 최종 멱등성을 보장**
-- `SERIALIZABLE` 트랜잭션 격리 수준 사용
+- checkout·settlement와 입장 필드가 있는 예약은 `SERIALIZABLE`, 입장 필드가 없는 예약은 READ COMMITTED + 행 잠금
 - `SELECT ... FOR UPDATE` 기반 이벤트 재고 **행 잠금**
 - `available_seats`는 DB CHECK로 **0 미만·`total_seats` 초과가 모두 차단**됨 (상한은 defense-in-depth)
 - `payment_records.idempotency_key`는 **record 종류(checkout pending / settlement terminal)별 partial UNIQUE**
@@ -256,7 +256,7 @@ node .github/scripts/production-image-check.mjs peakpass:latest
 
 ## 🎬 데모 시나리오
 
-아래 명령들은 로컬(`http://localhost:3000`)을 기준으로 작성되어 있습니다. **`http://localhost:3000`을 `https://peak-pass.com`으로 바꾸면 라이브 API에 그대로 적용**할 수 있습니다.
+아래 명령들은 로컬(`http://localhost:3000`)을 기준으로 작성되어 있습니다. 로컬 Compose는 데모 편의를 위해 `ENFORCE_AUTH_USER_MATCH=false`로 띄우므로 2)·3)의 예약·checkout은 JWT 없이 동작하고, `WEBHOOK_SIGNING_SECRET`을 두지 않아 4)·5)의 settlement webhook은 서명 검증을 건너뜁니다. 6)의 `myOrders`·`myTickets`는 로컬에서도 JWT가 필요합니다. production 설정의 서버에서는 1)의 조회만 주소를 바꿔 그대로 쓸 수 있고, 예약·checkout과 6)의 조회에는 JWT가, settlement webhook에는 HMAC 서명이 필요합니다.
 
 ### 1) 이벤트 목록 조회
 
