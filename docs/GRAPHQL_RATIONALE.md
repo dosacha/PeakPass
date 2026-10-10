@@ -74,7 +74,7 @@ GraphQL은 클라이언트가 필요한 필드를 직접 고를 수 있어서 �
 
 - query complexity 제한은 Apollo plugin으로 `didResolveOperation` 단계에 연결되어 있습니다. (`server.ts`의 `createComplexityPlugin({ max: config.GRAPHQL_MAX_COMPLEXITY })`)
 - resolver 진입 전에 query cost를 계산하고, `GRAPHQL_MAX_COMPLEXITY` (default 5000)를 초과하면 요청을 거부합니다.
-- `graphql-complexity.test.ts`의 12개 단위 테스트로 임계값과 합산 로직을 회귀 가드합니다.
+- `graphql-complexity.test.ts`의 단위 테스트로 임계값과 합산 로직을 회귀 가드합니다.
 
 제약은 다음과 같습니다.
 

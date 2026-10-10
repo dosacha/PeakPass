@@ -16,7 +16,7 @@
 동작:
 
 - `/health`: 프로세스 생존 확인
-- `/ready`: PostgreSQL, Redis ping 확인 후 준비 상태 반환
+- `/ready`: PostgreSQL·Redis ping과, `ENABLE_ADMISSION=true`일 때 입장 제어의 준비 상태를 확인하고 하나라도 실패하면 503 `not_ready` 반환
 
 ### 구조화된 로그
 
@@ -37,8 +37,14 @@
 ### graceful shutdown
 
 - `SIGINT`, `SIGTERM` 처리
-- HTTP 서버 종료
-- PostgreSQL, Redis 연결 정리
+- Redis 연결 종료를 먼저 시작하고 order sweeper·admission scheduler에 정지 요청
+- reservation sweeper 정지 → HTTP 서버 종료 → order sweeper·admission scheduler 종료 대기 → PostgreSQL 연결 종료
+- 순서의 이유와 장애 때의 동작은 [ADMISSION_DESIGN_AND_OPERATIONS.md](./ADMISSION_DESIGN_AND_OPERATIONS.md)의 "시작, 보호 켜기와 끄기, 종료"
+
+### 시작 시 확인
+
+- `admission_results`(migration 013)가 없는 DB에서는 시작 실패
+- `ENABLE_ADMISSION=true`이면 Redis 설정이 `appendonly no`, `save ""`, `maxmemory-policy noeviction`이 아닐 때 시작 실패
 
 ### 환경 변수 검증
 
@@ -74,4 +80,5 @@
 
 ## 아직 남은 과제
 
-- payment-callback 부하 테스트 결과 고정
+- payment-callback 부하 테스트 결과 고정 (수치는 [PERFORMANCE_REPORT.md](./PERFORMANCE_REPORT.md)에 있으나 저장된 summary 파일이 없음)
+- 입장 제어 각 단계가 고치지 않고 남긴 한계와 미실시 검증 (follow-up Issue #25, #27, #29, #32, #34, #36)

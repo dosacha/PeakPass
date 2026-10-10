@@ -14,7 +14,7 @@
 
 - 최종 기준 저장소: PostgreSQL
 - 보조 계층: Redis
-- Redis 역할: 조회 가속, TTL hold, 레이트 리미트, 멱등성 응답 캐시
+- Redis 역할: 조회 가속, TTL hold, 레이트 리미트, settlement webhook의 멱등성 응답 캐시와 command별 in-flight lock, 입장 대기열(기능을 켠 경우)
 
 ## 체크아웃 흐름
 
@@ -52,11 +52,12 @@ FOR UPDATE
 - reservation이 없으면 `events.available_seats = available_seats - quantity`
 - reservation이 있으면 이미 soft hold로 차감된 좌석을 order 점유로 이전
 - `payment_records` INSERT with `pending`
+- reservation 없는 신규 점유는 Idempotency-Key 잠금보다 먼저 event gate와 `admission_events` 정책을 확인한다(계약 §5의 잠금 순서: event gate → policy → admission → checkout-key → 기존 row). 보호 이벤트면 입장 자격을 Redis에서 claim하고 같은 트랜잭션에 `admission_results`를 기록한다 ([ADMISSION_DESIGN_AND_OPERATIONS.md](./ADMISSION_DESIGN_AND_OPERATIONS.md))
 
 ### 5. 커밋 이후 외부 부작용
 
 - reservation hold 삭제
-- 멱등성 성공 결과 캐시 저장 (checkout scope)
+- 보호 이벤트의 신규 점유는 입장 결과를 Redis에 반영 (실패해도 결과는 PostgreSQL 원장에 남고 나중에 회수됨)
 - 이벤트 관련 캐시 키 방어적 삭제 (read-through cache는 현재 미구현 — [REDIS_STRATEGY.md](./REDIS_STRATEGY.md) 참조)
 
 checkout 시점에는 티켓을 발급하지 않습니다.
@@ -95,6 +96,7 @@ checkout 시점에는 티켓을 발급하지 않습니다.
 핵심 코드는 [reservation.service.ts](../src/core/services/reservation.service.ts)에 있습니다.
 
 - 예약 생성은 DB 트랜잭션으로 먼저 저장
+- 생성 트랜잭션은 먼저 event gate와 `admission_events` 정책을 확인한다. 보호 이벤트의 예약은 입장 필드가 있어야 하고, 그 예약은 `SERIALIZABLE`로 실행되며 같은 트랜잭션에 `admission_results`를 기록한다
 - 생성 트랜잭션에서 `events.available_seats`를 즉시 차감해 soft hold를 잡음
 - 커밋 이후 `setReservationHold()`로 Redis TTL hold 저장
 - Redis hold는 `GET /reservations/:id` 응답 가속과 만료 시각 표시를 위한 보조 캐시
@@ -108,7 +110,7 @@ checkout 시점에는 티켓을 발급하지 않습니다.
 
 ## DB 제약과 모델링
 
-실제 제약은 [001_init_schema.sql](../src/infra/migrations/001_init_schema.sql), [002_ticket_number_sequence.sql](../src/infra/migrations/002_ticket_number_sequence.sql), [003_payment_provider_transaction_unique.sql](../src/infra/migrations/003_payment_provider_transaction_unique.sql), [005_payment_record_idempotency_scopes.sql](../src/infra/migrations/005_payment_record_idempotency_scopes.sql), [006_status_constraints.sql](../src/infra/migrations/006_status_constraints.sql), [007_available_seats_ceiling.sql](../src/infra/migrations/007_available_seats_ceiling.sql)에 있습니다.
+실제 제약은 [001_init_schema.sql](../src/infra/migrations/001_init_schema.sql), [002_ticket_number_sequence.sql](../src/infra/migrations/002_ticket_number_sequence.sql), [003_payment_provider_transaction_unique.sql](../src/infra/migrations/003_payment_provider_transaction_unique.sql), [005_payment_record_idempotency_scopes.sql](../src/infra/migrations/005_payment_record_idempotency_scopes.sql), [006_status_constraints.sql](../src/infra/migrations/006_status_constraints.sql), [007_available_seats_ceiling.sql](../src/infra/migrations/007_available_seats_ceiling.sql), [012_admission_events.sql](../src/infra/migrations/012_admission_events.sql), [013_admission_results.sql](../src/infra/migrations/013_admission_results.sql)에 있습니다. migration은 001–013까지 있고, 여기 나열하지 않은 004는 payment 조회 인덱스와 ticket 정리, 008–011은 주문 결제 기한과 payment callback key에 관한 변경입니다.
 
 대표 예시는 다음과 같습니다.
 
@@ -123,11 +125,12 @@ checkout 시점에는 티켓을 발급하지 않습니다.
 - 모든 status 컬럼의 허용 값 집합 CHECK (`*_status_allowed_check`) —
   애플리케이션 zod 모델과 집합 동등성이 테스트로 고정됨
 - `ticket_number_seq` 기반 전역 티켓 번호 생성
+- `admission_results`: 입장 하나에 결과 한 행(`admission_id` PK), `reservation_id`·`order_id` UNIQUE, UPDATE 금지 trigger — 입장 하나가 예약 또는 주문 하나에만 소비됨
 
 주의: CHECK 제약은 **허용 값 집합**만 강제합니다. 상태 **전이 순서**(예:
 pending→paid)는 DB state machine이 아니라 애플리케이션 트랜잭션과 행 잠금이
 책임집니다. seat 상한 역시 재현된 이중 복구 버그의 수정이 아니라, 향후 새 복구
-경로를 대비한 defense-in-depth입니다. clean install(001→007)과 순차 upgrade가
+경로를 대비한 defense-in-depth입니다. clean install(001→007, 이 문단을 쓴 때의 범위. 현재 migration은 013까지)과 순차 upgrade가
 격리 DB 테스트로 검증되어 있으며, schema drift가 있으면 migration이 조용히
 넘어가지 않고 실패합니다.
 
@@ -135,7 +138,7 @@ pending→paid)는 DB state machine이 아니라 애플리케이션 트랜잭션
 
 - Redis는 빠르지만 source of truth가 아님
 - oversell 방지의 핵심은 Redis 락이 아니라 PostgreSQL 트랜잭션과 행 잠금
-- 멱등성은 헤더, DB 고유 키, Redis 응답 캐시를 함께 사용
+- 멱등성은 헤더, DB 고유 키와 advisory lock, Redis in-flight lock을 함께 사용 (Redis 응답 캐시는 settlement webhook만)
 - 티켓은 checkout 직후가 아니라 settlement 이후에만 발급
 - duplicate webhook에도 티켓이 늘지 않도록 방어함
 

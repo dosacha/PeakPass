@@ -51,7 +51,7 @@ v2.5는 모든 성공 정산 응답(normal/retry/replay 및 expired ACK)의 `dup
 
 v2.6은 최초 `normal` 정산(만료 ACK 포함)에 `duplicate:false`를 요구하며 retry/replay의 boolean 양쪽은 유지한다. paid 응답은 fixture tier와 일치해야 하고, SQL provider 정산 fact의 `reconciliation_required`는 paid일 때 false, expired일 때 true여야 한다. `buyers_completed`에 최초 정산의 `order_id`와 정렬한 티켓 ID 배열 JSON인 `ticket_ids`를 보존한다. 분석은 fixture buyer→paid SQL 주문→그 주문의 정확한 티켓 집합을 모두 대조한 완료만 분자에 포함한다. 태그 누락/파싱 불가/중복 ID는 관측 불완전으로 invalid, 정상 형식이지만 SQL identity와 다르면 integrity-defect다.
 
-분석 `flash-sale-analysis-v2.6.1`은 위 관측에 더해 명시적으로 빈 workingTree와 start/terminal의 정확한 offered buyer 범위(0부터 users-1까지 canonical 문자열, 각1개)를 요구한다. 분석 invalid/예외는 analysisError와 실패 종료로 전달하며 strict manifest.passed/smokePassed를 덮어쓰지 않는다. 이 보강은 저장된 v2.6 원본의 별도 재분석으로 검증하고 원본 판정을 수정하지 않는다. v2.3/v2.4 raw에 최초 HTTP 티켓 ID가 없어 소급 수용하지 않는다. v2.5는 메모리 시작 조건에 미달해 부하0회였으며 v2.6 전체12회 계획으로 대체했다. v2.6은 ample9회·limited3회와 preflight2회를 완료했다. 기존12회는 원본을 보존한 별도 v2.6.1 재분석에서 수치·판정이 같았고, limited02/03은 2026-10-02 같은 조건으로 재개했다. 별도 최종 검토 No findings 뒤 새 정식12회 tuple을 수용했다. #12는 새tuple 소비로 ready(계약미작성), #17은 A입력만 valid이고 P3/P6/P7 대기로 blocked다. 실제후행착수시 수용SHA/동등코드포함을 재확인한다. 현재 상태·고정 행렬·원본은 [FLASH_SALE_BASELINE.md](FLASH_SALE_BASELINE.md)를 따른다.
+분석 `flash-sale-analysis-v2.6.1`은 위 관측에 더해 명시적으로 빈 workingTree와 start/terminal의 정확한 offered buyer 범위(0부터 users-1까지 canonical 문자열, 각1개)를 요구한다. 분석 invalid/예외는 analysisError와 실패 종료로 전달하며 strict manifest.passed/smokePassed를 덮어쓰지 않는다. 이 보강은 저장된 v2.6 원본의 별도 재분석으로 검증하고 원본 판정을 수정하지 않는다. v2.3/v2.4 raw에 최초 HTTP 티켓 ID가 없어 소급 수용하지 않는다. v2.5는 메모리 시작 조건에 미달해 부하0회였으며 v2.6 전체12회 계획으로 대체했다. v2.6은 ample9회·limited3회와 preflight2회를 완료했다. 기존12회는 원본을 보존한 별도 v2.6.1 재분석에서 수치·판정이 같았고, limited02/03은 2026-10-02 같은 조건으로 재개했다. 별도 최종 검토 No findings 뒤 새 정식12회 tuple을 수용했다. #12는 새tuple 소비로 ready(계약미작성), #17은 A입력만 valid이고 P3/P6/P7 대기로 blocked다(2026-10-02 당시 상태. #12와 #17은 이후 끝나 2026-10-10에 닫혔다). 실제후행착수시 수용SHA/동등코드포함을 재확인한다. 현재 상태·고정 행렬·원본은 [FLASH_SALE_BASELINE.md](FLASH_SALE_BASELINE.md)를 따른다.
 
 ## v2 변경 계약
 
@@ -75,7 +75,7 @@ P2의 실행 전 프로토콜·분모·중단 기준·결과는 [FLASH_SALE_BASE
 
 [Issue #10](https://github.com/dosacha/PeakPass/issues/10)의 산출물이다. 기존 예매 계약을 호출하는 측정 도구이며 대기열·캐시 재고 차감·처리량 개선 구현은 포함하지 않는다. 아래 작은 실행은 하네스 정합성 증거다. 서비스의 최대 처리량이나 성능 개선 수치로 사용하지 않는다.
 
-새 세션에서 P2를 시작할 때는 [Issue #11 인수인계](ISSUE_11_HANDOFF.md)의 착수 gate·측정 보완 사항·후행 영향 기준을 먼저 확인한다.
+P2(#11)는 끝났다. 착수 당시의 gate·측정 보완 사항·후행 영향 기준은 [Issue #11 인수인계](ISSUE_11_HANDOFF.md)에 기록으로 남아 있다.
 
 ## 실행
 
@@ -142,5 +142,7 @@ SQL 재고식은 `available + active reservation 수량 + pending/paid/delivered
 - k6·Docker를 같은 PC에서 실행하므로 부하 생성기의 CPU/메모리 및 VU 한계도 영향을 준다. raw JSON 기록·observer·info 로그 설정을 모든 비교군에서 동일하게 고정한다. 하네스는 단일 호스트 실행용이다. 1000명/초 이상에는 1ms 종료 경계와 도착 모델을 먼저 재검증해야 한다. `maxObservedVUs`는 k6 주기 표본과 도착 시점 표본의 최대값이며 정확한 순간 peak는 아니다.
 - 재시도 코드의 timeout/5xx 분기는 VM 경계 테스트이고, 저부하 정상 smoke의 replay는 실제 HTTP다. 강제 네트워크 장애·고부하 한계는 P1에서 측정했다고 주장하지 않는다.
 - 앱 코드 변경은 기본값 0인 `DB_POOL_SAMPLE_INTERVAL_MS` 계측뿐이다. 일반 실행에는 타이머가 없으며 close 때 제거한다.
+
+아래는 P1을 넘길 때 적은 P2 인수 조건의 기록이다. P2 #11은 2026-10-02에, 총괄 #9는 2026-10-10에 닫혔다.
 
 P2/Astra는 시작할 때 [총괄 #9](https://github.com/dosacha/PeakPass/issues/9)의 dependency gate를 적용한다. 승인한 **구현 SHA + `flash-sale-v1` + source hashes + accepted run IDs**를 #11에 고정하고, 환경·모델·성공 판정·계측이 바뀌면 먼저 #10 산출물 revision과 영향 범위를 갱신한다. 기존 결과를 새 조건의 결과처럼 재사용하지 않는다. 고부하에서 비정상 종료해도 원본과 SQL 스냅샷을 보존하며 `passed=false`는 하네스의 정상 smoke 승인 실패이지 측정 파일 부재를 뜻하지 않는다.
