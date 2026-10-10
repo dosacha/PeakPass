@@ -20,20 +20,20 @@ import {
 
 /**
  * Follow-up #27: which serialization failures do real, overlapping purchases of different buyers
- * produce, and how many requests use up the three attempts?
+ * produce, and how many admission purchases end in the 503 of contract §5?
  *
  * Nothing is injected. Every 40001/40P01 that PostgreSQL returns to the application's own pool
  * during a wave is recorded with its message, its reason and the statement it interrupted. The
  * waves go through the real routes on loopback HTTP. Product code is not changed.
  *
- * The counts depend on timing and are printed, not asserted. Asserted are the inventory
- * invariant of the fixture, that every 503 is a purchase that used up its transaction, and "at
- * least one failure of this kind" where every run on the host that wrote this file had many. That
- * last kind of assertion needs the requests of a wave to overlap, so a very different host can
- * miss it; it is a record of an observation, not a property of the product.
+ * The counts depend on timing and are printed, not asserted. Each assertion is explained where it
+ * is made. Those of the form "at least one failure of this kind" record what every run on the
+ * host that wrote this file showed many times over; they need the requests of a wave to overlap,
+ * so a very different host can miss them. They are not properties of the product.
  *
- * The kinds are told apart by the server's message text, which is English only with the default
- * `lc_messages`. A 40001 with another text is counted as `unrecognized40001` and fails the test.
+ * The kinds are told apart by the server's message text, so the server must answer in English
+ * (`lc_messages`). A 40001 with another text is counted as `unrecognized40001`, keeps its message
+ * as the reason, and fails the test.
  *
  * Opt-in (ADMISSION_SERIALIZATION_REPRO=1): a measurement of about two minutes whose counts
  * follow the host's timing, so it is skipped in the default integration run and in CI.
@@ -91,12 +91,18 @@ reproSuite(
 
     // Every serialization failure and deadlock the server returns to this process.
     const failures: Failure[] = [];
-    // The last error of an admission purchase that used up its attempts (the 503 of contract §5).
-    const exhausted: Failure[] = [];
+    // The error behind each "failed transiently" log line of an admission purchase: a
+    // serialization failure after the last attempt, or another transient error (`code:`).
+    const endedTransiently: Failure[] = [];
     const originalQuery = Client.prototype.query;
+    const expectRecognized = (recorded: Failure[]) =>
+      expect(recorded.filter((failure) => failure.kind === 'unrecognized40001')).toEqual([]);
     const describeFailure = (error: Json, statement: unknown): Failure => ({
       kind: kindOf(error),
-      reason: String(error.detail ?? '').replace(/^Reason code: /, ''),
+      reason:
+        kindOf(error) === 'unrecognized40001'
+          ? String(error.message)
+          : String(error.detail ?? '').replace(/^Reason code: /, ''),
       statement: String(statement).replace(/\s+/g, ' ').trim().slice(0, 40),
     });
 
@@ -117,7 +123,7 @@ reproSuite(
       jest.spyOn(logger, 'warn').mockImplementation(((...args: unknown[]) => {
         const fields = args[0] as Json;
         if (String(args[1]).startsWith('Admission purchase failed transiently'))
-          exhausted.push(describeFailure(fields.err ?? {}, ''));
+          endedTransiently.push(describeFailure(fields.err ?? {}, ''));
         return (warn as (...a: unknown[]) => void)(...args);
       }) as typeof logger.warn);
 
@@ -257,29 +263,30 @@ reproSuite(
         ...orderIds.map((orderId) => ({ type: 'settle' as const, send: () => settle(orderId) })),
       ];
       failures.length = 0;
-      exhausted.length = 0;
+      endedTransiently.length = 0;
       const responses = await Promise.all(requests.map((request) => request.send()));
-      const snapshot = { failures: [...failures], exhausted: [...exhausted] };
+      const snapshot = { failures: [...failures], endedTransiently: [...endedTransiently] };
       const sent = responses.map((response, i) => ({
         type: requests[i].type,
         status: response.status,
         code: (response.body.error?.code as string | undefined) ?? null,
         resend: requests[i].send,
       }));
-      // Contract §5: a purchase that used up its attempts keeps its identity. The same request is
-      // sent again, alone, until it is answered; this also returns its slot for the next wave.
+      // Contract §5: an admission purchase answered 503 keeps its identity. The same request is
+      // sent again, alone, and must succeed; this also returns its slot for the next wave.
       for (const item of sent) {
         if (item.status !== 503 || (item.type !== 'direct' && item.type !== 'reserve')) continue;
         const again = await item.resend();
         expect(again.status).toBe(201);
       }
       failures.splice(0, failures.length, ...snapshot.failures);
-      exhausted.splice(0, exhausted.length, ...snapshot.exhausted);
+      endedTransiently.splice(0, endedTransiently.length, ...snapshot.endedTransiently);
       return sent;
     }
 
-    // `last` is null where the requests carry no admission fields: the log line it is read from
-    // is written for admission purchases only, so there is nothing to count.
+    // `last` counts admission purchases only: the log line it is read from is written for them
+    // alone. The 500s of checkouts of reservations and of settlements are in `responses`, not
+    // here, and `last` is null where no request carries admission fields.
     function report(scenario: string, sent: Sent[], all: Failure[], last: Failure[] | null) {
       const byType: Record<string, Record<string, number>> = {};
       for (const type of new Set(sent.map((item) => item.type)))
@@ -297,7 +304,7 @@ reproSuite(
           byReason: tally(all, (failure) => `${failure.kind}: ${failure.reason}`),
           byStatement: tally(all, (failure) => `${failure.kind} @ ${failure.statement}`),
         },
-        attemptsUsedUp: last && {
+        endedTransiently: last && {
           total: last.length,
           byLastError: tally(last, (failure) => failure.kind),
         },
@@ -318,19 +325,21 @@ reproSuite(
       for (let i = 0; i < waves; i++) {
         sent.push(...(await wave(fx, users, mix)));
         all.push(...failures);
-        last.push(...exhausted);
+        last.push(...endedTransiently);
       }
       // No answer but success or the contract's 503 for an admission purchase.
       for (const item of sent)
         if (item.type === 'direct' || item.type === 'reserve')
           expect([201, 503]).toContain(item.status);
-      // `last` is read from a log line. It is written once for every admission purchase whose
-      // transaction failed transiently (a serialization failure after the last attempt, or a lock
-      // or statement timeout, which shows as `code:`), and each of those is answered 503.
-      expect(last).toHaveLength(sent.filter((item) => item.status === 503).length);
-      expect([...all, ...last].filter((failure) => failure.kind === 'unrecognized40001')).toEqual(
-        [],
+      // An expectation of this fixture, not an invariant of `purchaseTransaction`: with Redis up,
+      // the feature on and the limiter raised, the only 503 of an admission purchase is the one
+      // that follows the "failed transiently" log line, which is written once per such purchase.
+      // A 503 from elsewhere (Redis or the admission state in trouble) makes the counts differ.
+      const unavailable = sent.filter(
+        (item) => (item.type === 'direct' || item.type === 'reserve') && item.status === 503,
       );
+      expect(last).toHaveLength(unavailable.length);
+      expectRecognized([...all, ...last]);
       return report(name, sent, all, last);
     }
 
@@ -376,16 +385,6 @@ reproSuite(
       expect(serializationFailures.byKind.ssi ?? 0).toBeGreaterThan(0);
     });
 
-    /**
-     * Each buyer has an own, unprotected event, so no two transactions write the same event row,
-     * policy row or checkout key. They still share tables: `orders` (read by Idempotency-Key, then
-     * INSERT), `payment_records` (INSERT), and whatever a statement reads at a granularity wider
-     * than its row. S8 lists them: for `events` and `users` a page of the primary key index on a
-     * new database, and the whole relation once the planner scans those small tables instead. So a
-     * failure here shows that a shared row is not needed for a dependency cycle; it does not
-     * single out the read of `orders`. `filler` rows enlarge `orders` and its indexes only.
-     */
-
     /** How the planner reads `orders` by Idempotency-Key right now (statistics included). */
     async function orderKeyPlan() {
       const plan = (
@@ -395,6 +394,16 @@ reproSuite(
       ).rows[0]['QUERY PLAN'][0].Plan;
       return { node: plan['Node Type'] as string, index: (plan['Index Name'] as string) ?? null };
     }
+
+    /**
+     * Each buyer has an own, unprotected event, so no two transactions write the same event row,
+     * policy row or checkout key. They still share tables: `orders` (read by Idempotency-Key, then
+     * INSERT), `payment_records` (INSERT), and whatever a statement reads at a granularity wider
+     * than its row. S8 lists them: for `events` and `users` a page of the primary key index on a
+     * new database, and the whole relation in the runs that came after the other scenarios. So a
+     * failure here shows that a shared row is not needed for a dependency cycle; it does not
+     * single out the read of `orders`. `filler` rows enlarge `orders` and its indexes only.
+     */
     async function separateEvents(name: string, filler: number) {
       const buyers = 8;
       const own = [];
@@ -417,7 +426,7 @@ reproSuite(
 
       const sent: Sent[] = [];
       failures.length = 0;
-      exhausted.length = 0;
+      endedTransiently.length = 0;
       for (let i = 0; i < WAVES * 2; i++) {
         const responses = await Promise.all(
           own.map((fx) => checkout(fx, fx.users[0], randomUUID())),
@@ -430,6 +439,7 @@ reproSuite(
           })),
         );
       }
+      expectRecognized(failures);
       const summary = report(name, sent, [...failures], null);
       process.stdout.write(`REPRO-PLAN ${JSON.stringify({ scenario: name, ...plan })}\n`);
       return summary;
@@ -528,15 +538,14 @@ reproSuite(
     }
 
     it('S8: predicate locks of one direct checkout, one checkout of a reservation and one settlement', async () => {
-      // "No filler" is not "small" for the planner: S7 leaves the statistics of its ANALYZE behind.
       const locks = await lockReport('S8 no filler', 0);
-      // The Idempotency-Key read of both checkouts is a predicate lock on `orders`: a page of that
-      // index when the planner uses it, the whole relation when it scans the table instead.
-      const keyRead =
-        locks.orderKeyPlan.node === 'Seq Scan'
-          ? 'orders relation x1'
-          : `${locks.orderKeyPlan.index} page x1`;
-      for (const held of [locks.direct, locks.viaReservation]) expect(held).toContain(keyRead);
+      // In every run so far, after the other scenarios and alone on a new database, the planner
+      // read `orders` by Idempotency-Key through an index, and both checkouts then held a page
+      // lock on it. Another plan is printed and not judged.
+      const { index } = locks.orderKeyPlan;
+      if (index)
+        for (const held of [locks.direct, locks.viaReservation])
+          expect(held).toContain(`${index} page x1`);
     });
 
     it('S9: the same with 5,000 other orders in the table', async () => {
