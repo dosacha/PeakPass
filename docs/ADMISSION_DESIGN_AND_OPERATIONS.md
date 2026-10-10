@@ -69,12 +69,12 @@ COMMIT;
 ```
 
 - `<event id>`는 소문자 UUID로 쓴다. gate의 key(`1347436869`와 event id의 `hashtext`)와 namespace의 형식은 `src/infra/postgres/admission-policy.ts`의 값이다. 끌 때는 `protected = false`로 같은 transaction을 실행한다.
-- INSERT가 필요한 이유: migration 012는 그때 있던 이벤트의 행만 만든다. 그 뒤에 만든 이벤트는 그 이벤트의 대기열 조회가 처음 오기 전에는 행이 없었고, 그 상태에서 UPDATE만 실행하면 0행으로 끝나 보호가 켜지지 않았다.
+- INSERT가 필요한 이유: migration 012는 그때 있던 이벤트의 행만 만든다. 그 뒤에 만든 이벤트의 행은 그 이벤트의 정책을 처음 읽는 요청(대기열 조회, 신규 예약, 직접 checkout)이 만든다(`readAdmissionPolicy`). 2026-10-10 실행에서는 그런 요청이 오기 전의 이벤트에 행이 없었고, 그 상태에서 UPDATE만 실행하면 0행으로 끝나 보호가 켜지지 않았다.
 - 2026-10-10에 이 SQL을 production 이미지와 PostgreSQL 16, Redis 7에서 실행했다([#36](https://github.com/dosacha/PeakPass/issues/36)). 켠 뒤 1.5초 안에 `phase`가 `open`이 되고 대기열 조회가 200으로 답했으며, 끈 뒤에는 404 `ADMISSION_NOT_ENABLED`로 답했다. 로컬 실행 1회다.
 
 **환경 변수만 끄면 보호가 풀리지 않는다.** 기능을 끈 인스턴스가 보호 이벤트의 신규 예약·checkout을 admission 필드와 함께 받으면 503 `ADMISSION_UNAVAILABLE`로 답한다. admission 필드가 없는 신규 예약은 기능을 켠 인스턴스와 끈 인스턴스 모두 400 `ADMISSION_INVALID_INPUT`으로 답했다(2026-10-10 실행). 이미 DB에 있는 예약과 주문은 기존 검증으로 진행한다.
 
-**종료**(`src/main.ts`의 `gracefulShutdown`). SIGTERM·SIGINT를 받으면 먼저 Redis 연결을 끊는다. 그 순간부터 이 인스턴스의 Redis 명령은 실패한다. 이어서 sweeper와 scheduler를 멈추고, HTTP 서버를 닫아 진행 중인 요청의 응답을 기다린 뒤, PostgreSQL pool을 닫는다. 그래서 종료 중에 PostgreSQL에 commit된 구매는 이 인스턴스가 Redis에 반영하지 못한다. 응답은 DB 결과로 나가고, 슬롯은 claim 기한 뒤 다른 인스턴스의 reclaimer가 원장을 읽어 정리한다(P7의 K5: Redis 차단 → 결과를 reclaimer에 넘김 → HTTP 서버 종료 → PostgreSQL 종료 순서를 로그로 확인). 종료 중에 구매 요청에 답한 경우, client가 그 연결을 닫으면 약 3초에 끝났지만 keep-alive로 쥐고 있으면 약 73초가 걸렸다(P7의 K5·K5b와 F2, 로컬 관측. Node 18과 Fastify 기본 keep-alive timeout 72초). 진행 중인 요청이 없는 인스턴스는 유휴 keep-alive 연결이 하나 있어도 1초 안에 끝났다(2026-10-10 로컬 관측 1회). 그보다 짧은 grace period를 주는 orchestrator는 프로세스를 먼저 죽인다. 고치지 않은 한계다([#32](https://github.com/dosacha/PeakPass/issues/32)).
+**종료**(`src/main.ts`의 `gracefulShutdown`). SIGTERM·SIGINT를 받으면 먼저 Redis 연결을 끊는다. 그 순간부터 이 인스턴스의 Redis 명령은 실패한다. 이어서 sweeper와 scheduler를 멈추고, HTTP 서버를 닫아 진행 중인 요청의 응답을 기다린 뒤, PostgreSQL pool을 닫는다. 그래서 종료 중에 PostgreSQL에 commit된 구매는 이 인스턴스가 Redis에 반영하지 못한다. 응답은 DB 결과로 나가고, 슬롯은 claim 기한 뒤 다른 인스턴스의 reclaimer가 원장을 읽어 정리한다(P7의 K5: Redis 차단 → 결과를 reclaimer에 넘김 → HTTP 서버 종료 → PostgreSQL 종료 순서를 로그로 확인). 종료 중에 구매 요청에 답한 경우, client가 그 연결을 닫으면 약 3초에 끝났지만 keep-alive로 쥐고 있으면 약 73초가 걸렸다(P7의 K5·K5b와 F2, 로컬 관측. Node 18과 Fastify 기본 keep-alive timeout 72초). 진행 중인 요청이 없는 인스턴스는 유휴 keep-alive 연결이 하나 있어도 1초 안에 끝났다(2026-10-10 로컬 관측 1회). 73초보다 짧은 grace period를 주는 orchestrator는 프로세스를 먼저 죽인다. 고치지 않은 한계다([#32](https://github.com/dosacha/PeakPass/issues/32)).
 
 ## 장애 때의 동작
 

@@ -2,7 +2,7 @@
 
 PeakPass의 k6 기반 부하 테스트 스크립트와 실행 방법입니다. 시나리오의 설계 기준은 [docs/LOAD_TEST_STRATEGY.md](../docs/LOAD_TEST_STRATEGY.md), 측정 결과는 [docs/PERFORMANCE_REPORT.md](../docs/PERFORMANCE_REPORT.md)에 있습니다.
 
-모든 스크립트는 로컬 환경을 대상으로 합니다. 공개 데모 서버를 포함해 자신이 운영하지 않는 주소에는 실행하지 마세요.
+모든 스크립트는 로컬 환경을 대상으로 합니다. 자신이 운영하지 않는 주소에는 실행하지 마세요.
 
 ## 설치
 

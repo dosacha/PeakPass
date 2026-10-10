@@ -26,8 +26,14 @@ import {
  * during a wave is recorded with its message, its reason and the statement it interrupted. The
  * waves go through the real routes on loopback HTTP. Product code is not changed.
  *
- * The counts depend on timing and are printed, not asserted. What is asserted is what held in
- * every run of this file (see the end of each test) and the inventory invariant of the fixture.
+ * The counts depend on timing and are printed, not asserted. Asserted are the inventory
+ * invariant of the fixture, that every 503 is a purchase that used up its transaction, and "at
+ * least one failure of this kind" where every run on the host that wrote this file had many. That
+ * last kind of assertion needs the requests of a wave to overlap, so a very different host can
+ * miss it; it is a record of an observation, not a property of the product.
+ *
+ * The kinds are told apart by the server's message text, which is English only with the default
+ * `lc_messages`. A 40001 with another text is counted as `unrecognized40001` and fails the test.
  *
  * Opt-in (ADMISSION_SERIALIZATION_REPRO=1): a measurement of about two minutes whose counts
  * follow the host's timing, so it is skipped in the default integration run and in CI.
@@ -58,11 +64,13 @@ interface Failure {
 const kindOf = (error: { code?: string; message?: string }) =>
   error.code === '40P01'
     ? 'deadlock'
-    : /read\/write dependencies/.test(error.message ?? '')
-      ? 'ssi'
-      : /concurrent update/.test(error.message ?? '')
-        ? 'concurrentUpdate'
-        : `other:${error.message}`;
+    : error.code !== '40001'
+      ? `code:${error.code}`
+      : /read\/write dependencies/.test(error.message ?? '')
+        ? 'ssi'
+        : /concurrent update/.test(error.message ?? '')
+          ? 'concurrentUpdate'
+          : 'unrecognized40001';
 const tally = <T>(items: T[], key: (item: T) => string) =>
   items.reduce<Record<string, number>>((counts, item) => {
     counts[key(item)] = (counts[key(item)] ?? 0) + 1;
@@ -270,7 +278,9 @@ reproSuite(
       return sent;
     }
 
-    function report(scenario: string, sent: Sent[], all: Failure[], last: Failure[]) {
+    // `last` is null where the requests carry no admission fields: the log line it is read from
+    // is written for admission purchases only, so there is nothing to count.
+    function report(scenario: string, sent: Sent[], all: Failure[], last: Failure[] | null) {
       const byType: Record<string, Record<string, number>> = {};
       for (const type of new Set(sent.map((item) => item.type)))
         byType[type] = tally(
@@ -287,7 +297,10 @@ reproSuite(
           byReason: tally(all, (failure) => `${failure.kind}: ${failure.reason}`),
           byStatement: tally(all, (failure) => `${failure.kind} @ ${failure.statement}`),
         },
-        attemptsUsedUp: { total: last.length, byLastError: tally(last, (failure) => failure.kind) },
+        attemptsUsedUp: last && {
+          total: last.length,
+          byLastError: tally(last, (failure) => failure.kind),
+        },
       };
       const line = `REPRO ${JSON.stringify(summary)}\n`;
       process.stdout.write(line);
@@ -311,6 +324,13 @@ reproSuite(
       for (const item of sent)
         if (item.type === 'direct' || item.type === 'reserve')
           expect([201, 503]).toContain(item.status);
+      // `last` is read from a log line. It is written once for every admission purchase whose
+      // transaction failed transiently (a serialization failure after the last attempt, or a lock
+      // or statement timeout, which shows as `code:`), and each of those is answered 503.
+      expect(last).toHaveLength(sent.filter((item) => item.status === 503).length);
+      expect([...all, ...last].filter((failure) => failure.kind === 'unrecognized40001')).toEqual(
+        [],
+      );
       return report(name, sent, all, last);
     }
 
@@ -320,12 +340,12 @@ reproSuite(
     it('S1: direct checkouts of different buyers, one protected event', async () => {
       const { serializationFailures } = await scenario('S1 direct x8', { direct: 8 }, WAVES);
       // Alone, they met on the event row only (in every run: no SSI failure at all).
-      expect(serializationFailures.byKind.concurrentUpdate).toBeGreaterThan(0);
+      expect(serializationFailures.byKind.concurrentUpdate ?? 0).toBeGreaterThan(0);
     });
 
     it('S2: reservations of different buyers, one protected event', async () => {
       const { serializationFailures } = await scenario('S2 reserve x8', { reserve: 8 }, WAVES);
-      expect(serializationFailures.byKind.concurrentUpdate).toBeGreaterThan(0);
+      expect(serializationFailures.byKind.concurrentUpdate ?? 0).toBeGreaterThan(0);
     });
 
     it('S3: direct checkouts with checkouts of existing reservations', async () => {
@@ -335,7 +355,7 @@ reproSuite(
         WAVES,
       );
       // With a writer of `orders` that does not change the event row, SSI failures appear.
-      expect(serializationFailures.byKind.ssi).toBeGreaterThan(0);
+      expect(serializationFailures.byKind.ssi ?? 0).toBeGreaterThan(0);
     });
 
     it('S4: direct checkouts with settlements of existing orders', async () => {
@@ -344,7 +364,7 @@ reproSuite(
         { direct: 4, settle: 4 },
         WAVES,
       );
-      expect(serializationFailures.byKind.ssi).toBeGreaterThan(0);
+      expect(serializationFailures.byKind.ssi ?? 0).toBeGreaterThan(0);
     });
 
     it('S5: direct checkouts, checkouts of reservations and settlements together', async () => {
@@ -353,15 +373,28 @@ reproSuite(
         { direct: 4, viaReservation: 4, settle: 4 },
         WAVES,
       );
-      expect(serializationFailures.byKind.ssi).toBeGreaterThan(0);
+      expect(serializationFailures.byKind.ssi ?? 0).toBeGreaterThan(0);
     });
 
     /**
-     * The discriminator for the guess of #27. Each buyer has an own, unprotected event, so no two
-     * transactions touch the same event row, policy row, admission or checkout key. What they share
-     * is `orders` (read by Idempotency-Key, then INSERT) and `payment_records` (INSERT only).
-     * `filler` rows make the table and its indexes larger than one page.
+     * Each buyer has an own, unprotected event, so no two transactions write the same event row,
+     * policy row or checkout key. They still share tables: `orders` (read by Idempotency-Key, then
+     * INSERT), `payment_records` (INSERT), and whatever a statement reads at a granularity wider
+     * than its row. S8 lists them: for `events` and `users` a page of the primary key index on a
+     * new database, and the whole relation once the planner scans those small tables instead. So a
+     * failure here shows that a shared row is not needed for a dependency cycle; it does not
+     * single out the read of `orders`. `filler` rows enlarge `orders` and its indexes only.
      */
+
+    /** How the planner reads `orders` by Idempotency-Key right now (statistics included). */
+    async function orderKeyPlan() {
+      const plan = (
+        await pool.query(
+          `EXPLAIN (FORMAT JSON) SELECT id FROM orders WHERE idempotency_key = '${randomUUID()}'`,
+        )
+      ).rows[0]['QUERY PLAN'][0].Plan;
+      return { node: plan['Node Type'] as string, index: (plan['Index Name'] as string) ?? null };
+    }
     async function separateEvents(name: string, filler: number) {
       const buyers = 8;
       const own = [];
@@ -377,11 +410,7 @@ reproSuite(
         );
         await pool.query('ANALYZE orders');
       }
-      const plan = (
-        await pool.query(
-          `EXPLAIN (FORMAT JSON) SELECT id FROM orders WHERE idempotency_key = '${randomUUID()}'`,
-        )
-      ).rows[0]['QUERY PLAN'][0].Plan;
+      const plan = await orderKeyPlan();
       // The first purchase of an event creates its policy row; keep that out of the waves.
       for (const fx of own)
         expect((await checkout(fx, fx.users[0], randomUUID())).status).toBe(201);
@@ -401,17 +430,15 @@ reproSuite(
           })),
         );
       }
-      const summary = report(name, sent, [...failures], [...exhausted]);
-      process.stdout.write(
-        `REPRO-PLAN ${JSON.stringify({ scenario: name, node: plan['Node Type'], index: plan['Index Name'] ?? null })}\n`,
-      );
+      const summary = report(name, sent, [...failures], null);
+      process.stdout.write(`REPRO-PLAN ${JSON.stringify({ scenario: name, ...plan })}\n`);
       return summary;
     }
 
     it('S6: direct checkouts of different buyers on separate unprotected events, small orders table', async () => {
       const { serializationFailures } = await separateEvents('S6 separate events, no filler', 0);
       // No shared row at all, and still a dependency cycle: the reads are wider than the rows.
-      expect(serializationFailures.byKind.ssi).toBeGreaterThan(0);
+      expect(serializationFailures.byKind.ssi ?? 0).toBeGreaterThan(0);
     });
 
     it('S7: the same with 5,000 other orders in the table', async () => {
@@ -419,7 +446,7 @@ reproSuite(
         'S7 separate events, 5000 filler orders',
         5000,
       );
-      expect(serializationFailures.byKind.ssi).toBeGreaterThan(0);
+      expect(serializationFailures.byKind.ssi ?? 0).toBeGreaterThan(0);
     });
 
     /**
@@ -468,6 +495,7 @@ reproSuite(
       });
       const locks = {
         scenario: name,
+        orderKeyPlan: await orderKeyPlan(),
         direct: await predicateLocks((client) =>
           new CheckoutService().checkout(input(directUser), client, {
             admissionId: directAdmission.admissionId,
@@ -500,10 +528,15 @@ reproSuite(
     }
 
     it('S8: predicate locks of one direct checkout, one checkout of a reservation and one settlement', async () => {
-      const locks = await lockReport('S8 small tables', 0);
-      // The Idempotency-Key read of both checkouts is a page lock on that index.
-      for (const held of [locks.direct, locks.viaReservation])
-        expect(held).toContain('idx_orders_idempotency_key page x1');
+      // "No filler" is not "small" for the planner: S7 leaves the statistics of its ANALYZE behind.
+      const locks = await lockReport('S8 no filler', 0);
+      // The Idempotency-Key read of both checkouts is a predicate lock on `orders`: a page of that
+      // index when the planner uses it, the whole relation when it scans the table instead.
+      const keyRead =
+        locks.orderKeyPlan.node === 'Seq Scan'
+          ? 'orders relation x1'
+          : `${locks.orderKeyPlan.index} page x1`;
+      for (const held of [locks.direct, locks.viaReservation]) expect(held).toContain(keyRead);
     });
 
     it('S9: the same with 5,000 other orders in the table', async () => {

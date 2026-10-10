@@ -13,7 +13,7 @@ PeakPass는 이런 환경에서 **재고 정합성과 결제 멱등성을 보장
 
 Node.js 백엔드 운영, PostgreSQL 트랜잭션, Redis 실사용, GraphQL read-side, k6 부하 테스트까지 — 한 도메인 안에서 백엔드의 핵심 요소를 일관되게 설명할 수 있도록 구성했습니다.
 
-## 🔗 배포 링크
+## 🔗 엔드포인트
 
 공개 데모 서버(`peak-pass.com`)는 비용 때문에 운영하지 않습니다(2026-10-10 기준). 아래 엔드포인트는 로컬에서 띄운 서버(`http://localhost:3000`)의 경로입니다.
 
@@ -40,7 +40,7 @@ continues to require its HMAC signature.
 
 > 이 문서의 `curl` 명령은 로컬 서버(`http://localhost:3000`) 기준입니다. `myOrders`·`myTickets`는 JWT가 필요하고, production 설정은 예약·checkout에도 JWT를, settlement webhook에 HMAC 서명을 요구합니다.
 
-GraphQL 엔드포인트는 POST 전용 API입니다.
+GraphQL 쿼리는 `POST /graphql`로 보냅니다. `NODE_ENV`가 `production`이 아니면 `GET /graphql`이 Apollo Sandbox 페이지를 엽니다.
 
 ```bash
 curl -X POST http://localhost:3000/graphql \
