@@ -169,6 +169,7 @@ sequenceDiagram
 - 입장 대기열과 승격은 Redis와 admission scheduler가 맡고, 입장 소비 결과의 기준은 PostgreSQL `admission_results`임 — [ADMISSION_DESIGN_AND_OPERATIONS.md](./ADMISSION_DESIGN_AND_OPERATIONS.md)
 - 이벤트/재고 read-through cache는 미구현 — 조회는 PostgreSQL 직행 (다이어그램의 "캐시 키 방어적 삭제"는 향후 도입 대비 hook)
 - Redis TTL 만료 자체는 좌석을 복구하지 않으며, background sweeper와 checkout lazy expiration이 DB에서 복구함
+- 위 시퀀스 다이어그램에는 주문 결제 기한과 order sweeper가 없음 — 결제 기한이 있고 기한이 지날 때까지 `pending`인 주문은 order sweeper가 `expired`로 바꾸고 좌석을 되돌림 ([TRANSACTION_CONSISTENCY.md](./TRANSACTION_CONSISTENCY.md)의 "주문 결제 기한과 만료")
 - checkout 핵심 경로는 트랜잭션·행 잠금·advisory lock으로 보호함
 - 티켓은 checkout 직후가 아니라 settlement webhook 이후에 발급됨
 - duplicate settlement webhook에도 티켓이 중복 발급되지 않도록 구현되어 있음
