@@ -187,6 +187,36 @@ describe('replay of the admission transition log', () => {
     ).toEqual([]);
   });
 
+  it('reports a claim that is left behind when its slot is removed', () => {
+    const claimed = [
+      ...publish('1', EPOCH, T0),
+      ...join('a', 1),
+      ...promote('a', T0 + 1000),
+      ...claim('a', T0 + 1500),
+    ];
+    // The finalization takes the entry out of every set, the slot before the claim.
+    expect(rules([...claimed, ...finish('a', T0 + 2000)])).toEqual([]);
+    // A finalizer that returns the slot and keeps the claim: the sets of replay and Redis still
+    // agree and no slot is in use, so only this rule can see it. Reported at the end of the log,
+    // and as soon as the log moves on, also when the claim is removed later.
+    const slotOnly = lua(T0 + 2000, 'ZREM', key('active'), 'a');
+    expect(rules([...claimed, slotOnly])).toEqual(['claim-without-slot']);
+    const later = replay([
+      ...claimed,
+      slotOnly,
+      ...join('b', 2, T0 + 2100),
+      lua(T0 + 20000, 'ZREM', key('claims'), 'a'),
+    ]);
+    // The violation carries the time of the removal, which is what a later check filters on.
+    expect(later.violations.map((v) => [v.rule, v.time])).toEqual([['claim-without-slot', T0 + 2000]]);
+    // A capture that a replaced server process cut between the two removals is not reported.
+    const restarted: MonitorEntry = { time: T0 + 2010, source: 'fixture:restart', args: ['FLUSHALL'] };
+    const cut = [...claimed, slotOnly].map(parseMonitorLine).filter((e): e is MonitorEntry => e !== null);
+    expect(replayAdmissionLog([...cut, restarted]).violations.map((v) => v.rule)).not.toContain(
+      'claim-without-slot',
+    );
+  });
+
   it('reports a generation that is published below one already published', () => {
     const lost = [...publish('3', EPOCH, T0), line(T0 + 10, '172.18.0.9:40000', 'FLUSHALL')];
     expect(rules([...lost, ...publish('4', NEXT_EPOCH, T0 + 20)])).toEqual([]);

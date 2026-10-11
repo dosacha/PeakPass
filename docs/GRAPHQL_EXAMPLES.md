@@ -1,7 +1,7 @@
 # GraphQL 예시
 
 현재 GraphQL 엔드포인트는 `POST /graphql`입니다.
-`NODE_ENV`가 `production`이 아니면 `GET /graphql` route도 등록됩니다.
+`NODE_ENV`가 `production`이 아니면 `GET /graphql` route도 등록됩니다. 이 route가 응답하는 페이지는 브라우저에서 화면을 그리지 못합니다(2026-10-11 확인: 전역 CSP의 `script-src 'self'`가 페이지의 CDN 스크립트를 막습니다. [#39](https://github.com/dosacha/PeakPass/issues/39), 고치지 않기로 함).
 
 ## 이벤트 목록
 
