@@ -89,20 +89,21 @@ describe('final SQL of admission-v1 §8', () => {
   async function settlement(
     c: PoolClient,
     orderId: string,
-    options: { reconciliation?: boolean; callbackKey?: boolean } = {},
+    options: { reconciliation?: boolean; callbackKey?: boolean; status?: string } = {},
   ) {
     const key = randomUUID(),
-      provider = `provider-${randomUUID()}`;
+      provider = `provider-${randomUUID()}`,
+      status = options.status ?? 'settled';
     await c.query(
       `INSERT INTO payment_records(id,order_id,status,provider_transaction_id,idempotency_key,
-        webhook_received_at,reconciliation_required) VALUES($1,$2,'settled',$3,$4,NOW(),$5)`,
-      [randomUUID(), orderId, provider, key, options.reconciliation ?? false],
+        webhook_received_at,reconciliation_required) VALUES($1,$2,$3,$4,$5,NOW(),$6)`,
+      [randomUUID(), orderId, status, provider, key, options.reconciliation ?? false],
     );
     if (options.callbackKey ?? true)
       await c.query(
         `INSERT INTO payment_callback_keys(idempotency_key,order_id,provider_transaction_id,callback_status)
-        VALUES($1,$2,$3,'settled')`,
-        [key, orderId, provider],
+        VALUES($1,$2,$3,$4)`,
+        [key, orderId, provider, status],
       );
   }
   const tickets = async (
@@ -323,6 +324,16 @@ describe('final SQL of admission-v1 §8', () => {
         await settlement(c, created.id, { reconciliation: true });
       }),
     ).toEqual([]);
+    // The settlement is the only provider record of a paid order. A failed one or a reconciliation
+    // fact next to it has its own callback key and passes every other payment check.
+    for (const extra of [{ status: 'failed' }, { reconciliation: true }])
+      expect(
+        await checks(async (c, ids) => {
+          const created = await paid(c, ids, 1);
+          await settlement(c, created.id, extra);
+          await seats(c, ids, 9);
+        }),
+      ).toEqual(['payment_settled']);
     expect(
       await checks(async (c, ids) => {
         const created = await order(c, ids, 1, 'paid');

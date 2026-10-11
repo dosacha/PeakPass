@@ -5,6 +5,7 @@ import {
   initPostgresPool,
   closePostgresPool,
   serializableTransactionWithRetry,
+  transaction,
 } from '@/infra/postgres/client';
 import { initLogger } from '@/infra/logger';
 import { readAdmissionPolicy } from '@/infra/postgres/admission-policy';
@@ -117,4 +118,38 @@ describe('admission-v1 on owned PostgreSQL and Redis', () => {
       }
     },
   );
+  it('rejects with the 503 admission error when the policy row of an existing event is gone at the locking read', async () => {
+    await serializableTransactionWithRetry((c) => readAdmissionPolicy(c, eventId));
+    const remover = await pool.connect();
+    let reader: Promise<unknown> | undefined;
+    try {
+      // Real locks, READ COMMITTED as a reservation without admission fields runs: the ensure finds
+      // the row, the locking read waits for the session that holds it, and after that session's
+      // commit the row is gone. The removal is SQL of this test: the product deletes a policy row
+      // only with its event.
+      await remover.query('BEGIN');
+      const pid = (await remover.query('SELECT pg_backend_pid() AS pid')).rows[0].pid;
+      await remover.query('SELECT 1 FROM admission_events WHERE event_id=$1 FOR UPDATE', [eventId]);
+      reader = transaction((c) => readAdmissionPolicy(c, eventId));
+      reader.catch(() => undefined);
+      await blocked(pool, pid);
+      await remover.query('DELETE FROM admission_events WHERE event_id=$1', [eventId]);
+      await remover.query('COMMIT');
+      await expect(reader).rejects.toMatchObject({
+        code: 'ADMISSION_UNAVAILABLE',
+        statusCode: 503,
+        message: 'Admission policy unavailable',
+      });
+      // Nothing was written for the event; the next transaction ensures its policy again.
+      expect(await transaction((c) => readAdmissionPolicy(c, eventId))).toMatchObject({
+        eventId,
+        protected: false,
+        generation: '0',
+      });
+    } finally {
+      await remover.query('ROLLBACK');
+      remover.release();
+      await reader?.catch(() => undefined);
+    }
+  });
 });

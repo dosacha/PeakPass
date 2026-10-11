@@ -18,7 +18,7 @@
 --                            reservation has its consumed result (read it only for an event that
 --                            was protected before its first purchase)
 --   payment_settled          exactly a paid or delivered order has one settled payment that is no
---                            reconciliation fact
+--                            reconciliation fact, and that payment is its only provider record
 --   payment_callback_key     a provider payment record has its durable callback key, with the
 --                            status of the record unless a late success was written over it
 --   payment_checkout_record  an order has one checkout payment record and no other: under its own
@@ -109,13 +109,16 @@ WHERE o.reservation_id IS NULL AND NOT EXISTS (
 
 UNION ALL
 SELECT 'payment_settled', o.event_id,
-  format('order=%s status=%s settled=%s', o.id, o.status, p.settled)
+  format('order=%s status=%s settled=%s provider=%s', o.id, o.status, p.settled, p.provider)
 FROM orders o
 CROSS JOIN LATERAL (
-  SELECT COUNT(*) AS settled FROM payment_records p
-  WHERE p.order_id = o.id AND p.status = 'settled' AND NOT p.reconciliation_required
+  SELECT COUNT(*) FILTER (WHERE p.status = 'settled' AND NOT p.reconciliation_required) AS settled,
+    COUNT(*) FILTER (WHERE p.provider_transaction_id IS NOT NULL) AS provider
+  FROM payment_records p
+  WHERE p.order_id = o.id
 ) p
 WHERE p.settled <> CASE WHEN o.status IN ('paid', 'delivered') THEN 1 ELSE 0 END
+  OR (o.status IN ('paid', 'delivered') AND p.provider <> 1)
 
 UNION ALL
 SELECT 'payment_callback_key', o.event_id, format('payment_record=%s order=%s', p.id, o.id)

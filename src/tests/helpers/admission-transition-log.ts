@@ -112,6 +112,9 @@ export function replayAdmissionLog(
   const alive = new Set<string>();
   const gone = new Set<string>();
   let promotions = 0;
+  // Claims whose slot was just removed. The script that returns a slot takes the entry out of the
+  // claims in its next commands; they are judged when the log moves on to anything else.
+  let unslotted: Array<{ ns: Namespace; id: string; member: string; time: number }> = [];
 
   const namespace = (id: string) => {
     let found = namespaces.get(id);
@@ -135,6 +138,18 @@ export function replayAdmissionLog(
     current.delete(eventId);
     const last = published.get(eventId);
     if (last) last.closed = true;
+  };
+  /**
+   * Before every command but a restart mark, and at the end of the log with none: a claim
+   * outlived its slot.
+   */
+  const settle = (args: string[] = []) => {
+    unslotted = unslotted.filter(({ ns, id, member, time }) => {
+      if (args[0]?.toUpperCase() === 'ZREM' && args.includes(member, 2)) return true;
+      if (ns.claims.has(member) && !ns.active.has(member))
+        report('claim-without-slot', time, `${member} kept its claim after its slot was removed in ${id}`);
+      return false;
+    });
   };
 
   function setControl(eventId: string, fields: string[], time: number) {
@@ -182,6 +197,9 @@ export function replayAdmissionLog(
 
   for (const { time, source, args } of entries) {
     const command = args[0]?.toUpperCase();
+    // A replaced server process starts empty: a removal the capture lost before the mark is not judged.
+    if (source === 'fixture:restart') unslotted = [];
+    else settle(args);
     // The capture marks a replaced server process: it starts empty and under another run id.
     if (source === 'fixture:restart') {
       for (const runId of alive) gone.add(runId);
@@ -222,8 +240,8 @@ export function replayAdmissionLog(
           // A promotion takes an entry out of the line and into a slot. A cancel or an expiry
           // takes it out of every set: an entry that left the line that way was not promoted.
           ns.left.delete(member);
-          if (structure === 'active') ns.active.delete(member);
-          else ns.claims.delete(member);
+          if (structure === 'claims') ns.claims.delete(member);
+          else if (ns.active.delete(member) && ns.claims.has(member)) unslotted.push({ ns, id, member, time });
         }
       }
       continue;
@@ -272,6 +290,7 @@ export function replayAdmissionLog(
       ns.claims.add(member);
     }
   }
+  settle();
 
   return {
     violations,

@@ -40,7 +40,7 @@ continues to require its HMAC signature.
 
 > 이 문서의 `curl` 명령은 로컬 서버(`http://localhost:3000`) 기준입니다. `myOrders`·`myTickets`는 JWT가 필요하고, production 설정은 예약·checkout에도 JWT를, settlement webhook에 HMAC 서명을 요구합니다.
 
-GraphQL 쿼리는 `POST /graphql`로 보냅니다. `NODE_ENV`가 `production`이 아니면 `GET /graphql` route도 등록됩니다.
+GraphQL 쿼리는 `POST /graphql`로 보냅니다. `NODE_ENV`가 `production`이 아니면 `GET /graphql` route도 등록됩니다. 이 route가 응답하는 페이지는 브라우저에서 화면을 그리지 못합니다(2026-10-11 확인: 전역 CSP의 `script-src 'self'`가 페이지의 CDN 스크립트를 막습니다. [#39](https://github.com/dosacha/PeakPass/issues/39), 고치지 않기로 함).
 
 ```bash
 curl -X POST http://localhost:3000/graphql \

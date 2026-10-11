@@ -3,7 +3,7 @@ import { randomUUID } from 'crypto';
 import { spawn } from 'child_process';
 import { once } from 'events';
 import http from 'http';
-import type { PoolClient } from 'pg';
+import { Client, type PoolClient } from 'pg';
 import { initRedis, closeRedis } from '@/infra/redis/client';
 import * as commands from '@/infra/redis/commands';
 import { initPostgresPool, closePostgresPool } from '@/infra/postgres/client';
@@ -612,6 +612,49 @@ describe('admission purchase gate on owned PostgreSQL, Redis and loopback HTTP',
       ).toBe(1);
     });
 
+    it('answers a late duplicate of a rejected direct checkout by the order its key made with another admission', async () => {
+      fx = await fixture(1);
+      const [buyer, late] = fx.users,
+        key = randomUUID();
+      const held = await reserve(buyer, await admit(service, fx.eventId, buyer));
+      expect(held.status).toBe(201);
+      const first = await admit(service, fx.eventId, late);
+      const rejected = await checkout(late, key, first);
+      expect(rejected.status).toBe(409);
+      expect(rejected.body.error.code).toBe('INSUFFICIENT_INVENTORY');
+      // The seat returns, and the same key buys it with a fresh admission of the same user.
+      await new ReservationService().expireReservation(held.body.id);
+      const second = await admit(service, fx.eventId, late);
+      const created = await checkout(late, key, second);
+      expect(created.status).toBe(201);
+      // The duplicate of the first request arrives only now. Its key has an order, so it is a
+      // replay of that order and is answered by the order's rule for another admission link
+      // (contract section 5, step 3), not by the rejection stored for its own admission.
+      const duplicate = await checkout(late, key, first);
+      expect(duplicate.status).toBe(409);
+      expect(duplicate.body).toEqual(admissionError('ADMISSION_REQUEST_MISMATCH'));
+      for (const fields of [second, {}]) {
+        const replay = await checkout(late, key, fields);
+        expect(replay.status).toBe(201);
+        expect(replay.body.order.id).toBe(created.body.order.id);
+      }
+      // Both results stay as they were committed, and the first admission bought nothing.
+      expect((await fx.results()).filter((r) => r.userId === late)).toEqual([
+        expect.objectContaining({
+          admissionId: first.admissionId,
+          outcome: 'rejected',
+          errorCode: 'INSUFFICIENT_INVENTORY',
+          orderId: null,
+        }),
+        expect.objectContaining({
+          admissionId: second.admissionId,
+          outcome: 'consumed',
+          orderId: created.body.order.id,
+        }),
+      ]);
+      expect(await fx.state()).toMatchObject({ available: 0, ordered: 1, orders: 1, results: 3 });
+    });
+
     it('keeps an existing reservation checkout, its order replay and its payment exempt after reset', async () => {
       fx = await fixture();
       const [user] = fx.users,
@@ -1169,6 +1212,35 @@ describe('admission purchase gate on owned PostgreSQL, Redis and loopback HTTP',
       httpStatus: 410,
       errorMessage: 'ADMISSION_EXPIRED',
     });
+    // The next transaction (the reclaimer's) is held before its COMMIT, an injected pause on its
+    // own connection, with the closed row written and the admission lock taken. Locks and commits
+    // are real. `paused` resolves with its backend pid.
+    function reclaimerHeldAtCommit() {
+      let resume!: () => void;
+      const held = new Promise<void>((resolve) => (resume = resolve));
+      const connect = pool.connect.bind(pool) as unknown as () => Promise<PoolClient>;
+      const paused = new Promise<number>((reached) => {
+        jest.spyOn(pool, 'connect').mockImplementationOnce((async () => {
+          const client = await connect();
+          const query = client.query.bind(client) as (...args: unknown[]) => Promise<unknown>;
+          client.query = (async (...args: unknown[]) => {
+            if (args[0] === 'COMMIT' || args[0] === 'ROLLBACK') {
+              // The pooled client goes back without a method of its own, so that whoever uses it
+              // next is seen by a spy on the driver.
+              delete (client as Partial<PoolClient>).query;
+              const pid = (await query('SELECT pg_backend_pid() AS pid')) as {
+                rows: { pid: number }[];
+              };
+              reached(pid.rows[0].pid);
+              await held;
+            }
+            return query(...args);
+          }) as typeof client.query;
+          return client;
+        }) as never);
+      });
+      return { paused, resume };
+    }
 
     it.each(['consumed', 'rejected'] as const)(
       'keeps the slot when Redis finalization of a %s result fails and returns it once through the reclaimer',
@@ -1424,6 +1496,115 @@ describe('admission purchase gate on owned PostgreSQL, Redis and loopback HTTP',
       }
     });
 
+    // The case above refuses through an instance that lost its Redis reflection. These reach the
+    // same confirmation through the other refusals of a new occupation. Like it, each needs the
+    // admission lock within the 1 s lock timeout once the holder commits.
+    it.each(['an overdue claim', 'the feature read as off in this process', 'a frozen namespace'] as const)(
+      'replays the committed result when %s refuses a request whose snapshot predates it',
+      async (refusal) => {
+        fx = await fixture();
+        const [user] = fx.users,
+          admission = await admit(service, fx.eventId, user);
+        // Injected pauses: the first request is held at its claim, inside its transaction and
+        // holding the admission lock, and again between its COMMIT and its Redis finalization;
+        // the second request's claim is held until the refusal is in place. PostgreSQL locks,
+        // snapshots and commits are real. What refuses the second request:
+        //   overdue claim     a synthetic deadline passage on the committed claim; Lua answers
+        //   feature off       injected: this process reads ENABLE_ADMISSION=false once the first
+        //                     request holds its claim, in place of a second instance with it off
+        //   frozen namespace  the real freeze of reset step 1
+        let resume!: () => void;
+        const held = new Promise<void>((resolve) => (resume = resolve));
+        let reached!: () => void;
+        const claiming = new Promise<void>((resolve) => (reached = resolve));
+        let commit!: () => void;
+        const committed = new Promise<void>((resolve) => (commit = resolve));
+        let finalize!: () => void;
+        const unreflected = new Promise<void>((resolve) => (finalize = resolve));
+        let proceed!: () => void;
+        const refusing = new Promise<void>((resolve) => (proceed = resolve));
+        const refused: unknown[] = [];
+        const claim = service.claim.bind(service);
+        const claims = jest
+          .spyOn(service, 'claim')
+          .mockImplementationOnce(async (input) => {
+            reached();
+            await held;
+            return claim(input);
+          })
+          .mockImplementationOnce(async (input) => {
+            await refusing;
+            return claim(input).catch((error) => {
+              refused.push(error);
+              throw error;
+            });
+          });
+        const complete = service.complete.bind(service);
+        jest.spyOn(service, 'complete').mockImplementationOnce(async (...args) => {
+          commit();
+          await unreflected;
+          return complete(...args);
+        });
+        const policyReads = jest.spyOn(policy, 'readAdmissionPolicy');
+        try {
+          const first = reserve(user, admission);
+          await claiming;
+          const holder = (
+            await pool.query(
+              `SELECT pid FROM pg_stat_activity WHERE datname=current_database()
+              AND state='idle in transaction' AND query LIKE 'SELECT 1 FROM users%'`,
+            )
+          ).rows[0].pid;
+          if (refusal === 'the feature read as off in this process') {
+            const config = jest.requireMock('@/infra/config') as typeof import('@/infra/config');
+            const on = config.getConfig;
+            jest
+              .spyOn(config, 'getConfig')
+              .mockImplementation(() => ({ ...on(), ENABLE_ADMISSION: false }));
+          }
+          policyReads.mockClear();
+          // The second request takes its SERIALIZABLE snapshot now and waits for the admission lock.
+          const second = reserve(user, admission);
+          await blocked(pool, holder);
+          resume();
+          await committed;
+          if (refusal === 'an overdue claim') await pastDeadline(admission);
+          if (refusal === 'a frozen namespace')
+            await service.freeze(fx.eventId, (await service.control(fx.eventId))!);
+          proceed();
+          const responses = [await second.finally(finalize), await first];
+          // The second request was refused on a snapshot that could not see the reservation, and
+          // read the policy again in a fresh transaction that replayed it.
+          expect(policyReads).toHaveBeenCalledTimes(2);
+          if (refusal === 'the feature read as off in this process') expect(claims).toHaveBeenCalledTimes(1);
+          else
+            expect(refused).toEqual([
+              expect.objectContaining(
+                refusal === 'an overdue claim'
+                  ? { code: 'ADMISSION_IN_PROGRESS', statusCode: 409 }
+                  : { code: 'ADMISSION_RECOVERING', statusCode: 503 },
+              ),
+            ]);
+          for (const response of responses) {
+            expect(response.status).toBe(201);
+            expect(response.body.id).toBe(responses[0].body.id);
+          }
+          // The 503 of the frozen refusal marks this instance not ready, so the finalization of the
+          // first request stops before the `complete` script, after reading the control: the slot is
+          // left to the reset.
+          expect(await slots(redis, fx.eventId, admission.admissionEpoch)).toBe(
+            refusal === 'a frozen namespace' ? 1 : 0,
+          );
+          expect(await fx.state()).toMatchObject({ available: 19, reservations: 1, results: 1 });
+        } finally {
+          resume();
+          proceed();
+          finalize();
+          await service.verifyEnvironment();
+        }
+      },
+    );
+
     it('keeps a late request that waited behind the reclaimer from occupying after the closed commit', async () => {
       fx = await fixture();
       const [user] = fx.users,
@@ -1432,29 +1613,7 @@ describe('admission purchase gate on owned PostgreSQL, Redis and loopback HTTP',
       await service.claim(claimOf(user, admission));
       await pastDeadline(admission);
       const claims = await overdue();
-      // The reclaimer is held before its COMMIT (injected pause on its own connection), with
-      // the closed row written and the admission lock taken. Locks and commits are real.
-      let resume!: () => void;
-      const held = new Promise<void>((resolve) => (resume = resolve));
-      const connect = pool.connect.bind(pool) as unknown as () => Promise<PoolClient>;
-      const paused = new Promise<number>((reached) => {
-        jest.spyOn(pool, 'connect').mockImplementationOnce((async () => {
-          const client = await connect();
-          const query = client.query.bind(client) as (...args: unknown[]) => Promise<unknown>;
-          client.query = (async (...args: unknown[]) => {
-            if (args[0] === 'COMMIT' || args[0] === 'ROLLBACK') {
-              client.query = query as typeof client.query;
-              const pid = (await query('SELECT pg_backend_pid() AS pid')) as {
-                rows: { pid: number }[];
-              };
-              reached(pid.rows[0].pid);
-              await held;
-            }
-            return query(...args);
-          }) as typeof client.query;
-          return client;
-        }) as never);
-      });
+      const { paused, resume } = reclaimerHeldAtCommit();
       const reclaiming = reclaimOverdueClaims(fx.eventId, claims);
       const reclaimerPid = await paused;
       // The late request takes its SERIALIZABLE snapshot now and waits for the admission lock.
@@ -1472,6 +1631,73 @@ describe('admission purchase gate on owned PostgreSQL, Redis and loopback HTTP',
       expect(retry.status).toBe(410);
       expect(retry.body).toEqual(admissionError('ADMISSION_EXPIRED'));
       expect(await fx.state()).toMatchObject({ available: 20, reservations: 0, results: 1 });
+    });
+
+    it('reruns a purchase whose ledger insert meets the committed closed row as a duplicate key', async () => {
+      fx = await fixture();
+      const [user] = fx.users,
+        admission = await admit(service, fx.eventId, user),
+        { admissionEpoch: epoch, admissionId } = admission;
+      // Fixture: an approved claim whose consumer never committed, now past its deadline.
+      await service.claim(claimOf(user, admission));
+      await pastDeadline(admission);
+      const claims = await overdue();
+      const { paused, resume } = reclaimerHeldAtCommit();
+      // Injected: the reclaimer's Redis close is held until the late request has answered, and
+      // the claim's deadline is written into the future again (synthetic), so that Redis lets the
+      // late request resume the claim. On the product's own clock Redis refuses it, as in the case
+      // above: only this rewrite brings a purchase to the ledger insert behind the reclaimer. The
+      // late request has to take the admission lock within the 1 s lock timeout.
+      let reflect!: () => void;
+      const answered = new Promise<void>((resolve) => (reflect = resolve));
+      const close = service.close.bind(service);
+      jest.spyOn(service, 'close').mockImplementationOnce(async (...args) => {
+        await answered;
+        return close(...args);
+      });
+      // Every error PostgreSQL returns to a transaction of this process from here on.
+      const raised: Array<[string, string]> = [];
+      const query = Client.prototype.query as (...args: unknown[]) => unknown;
+      jest.spyOn(Client.prototype, 'query').mockImplementation(function (
+        this: Client,
+        ...args: unknown[]
+      ) {
+        const result = query.apply(this, args);
+        if (result instanceof Promise)
+          result.catch((error: Json) => raised.push([error?.code, error?.constraint]));
+        return result;
+      } as never);
+      const reclaiming = reclaimOverdueClaims(fx.eventId, claims);
+      try {
+        const reclaimerPid = await paused;
+        await age(redis, fx.eventId, epoch, admissionId, {
+          deadline: (await redis.time()).getTime() + 60000,
+        });
+        // The late request takes its SERIALIZABLE snapshot now and waits for the admission lock.
+        const late = reserve(user, admission);
+        await blocked(pool, reclaimerPid);
+        resume();
+        const response = await late.finally(reflect);
+        await reclaiming;
+        // Its snapshot showed no result, Redis approved the claim and it occupied. The reclaimer
+        // is READ COMMITTED and takes no part in serialization checks, so PostgreSQL reports its
+        // committed row to the ledger insert as a duplicate key and not as 40001. The fresh
+        // transaction reads the closed row; the occupation was rolled back with the first one.
+        expect(raised).toEqual([['23505', 'admission_results_pkey']]);
+        expect(response.status).toBe(410);
+        expect(response.body).toEqual(admissionError('ADMISSION_EXPIRED'));
+        expect(await fx.results()).toEqual([closedResult(user, admission)]);
+        expect(await inspect(fx.eventId, epoch, admissionId)).toMatchObject({
+          state: 'expired',
+          reason: 'ADMISSION_EXPIRED',
+        });
+        expect(await slots(redis, fx.eventId, epoch)).toBe(0);
+        expect(await fx.state()).toMatchObject({ available: 20, reservations: 0, results: 1 });
+      } finally {
+        resume();
+        reflect();
+        await reclaiming;
+      }
     });
 
     it('returns the slot of a consumer process killed inside its transaction only after PostgreSQL releases its lock', async () => {
