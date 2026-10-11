@@ -91,6 +91,19 @@ checkout 시점에는 티켓을 발급하지 않습니다.
 - order를 `FOR UPDATE`로 잠금
 - 이미 `paid` 상태이거나 기존 티켓이 있으면 중복 발급 없이 기존 결과 반환
 
+## 주문 결제 기한과 만료
+
+핵심 코드는 [checkout.service.ts](../src/core/services/checkout.service.ts), [order-sweeper.ts](../src/infra/cron/order-sweeper.ts), [order-expiration.service.ts](../src/core/services/order-expiration.service.ts)에 있고, 스키마는 migration 008–011입니다.
+
+- checkout은 주문을 `pending`으로 만들 때 `payment_deadline_at`을 `NOW() + ORDER_PAYMENT_WINDOW_MINUTES`(기본 10분)로 기록
+- migration 008 이전에 만든 주문은 기한이 NULL이고 order sweeper의 대상이 아님
+- order sweeper는 앱 시작 때 한 번 돌고, 한 회차가 끝난 뒤 `ORDER_SWEEP_INTERVAL_MS`(기본 500ms)마다 기한이 지난 `pending` 주문을 `ORDER_SWEEP_BATCH_SIZE`(기본 20)건까지 조회
+- 주문마다 별도의 `SERIALIZABLE` 트랜잭션(재시도 포함)에서 order를 `FOR UPDATE`로 잠그고, PostgreSQL 시각으로 기한을 다시 확인한 뒤, 이벤트 좌석을 되돌리고 order를 `expired`로 전환
+- 이 트랜잭션은 Redis와 reservation을 건드리지 않음. 커밋 뒤의 이벤트 캐시 키 삭제는 best effort
+- 만료 처리에 실패한 주문은 `expiration_last_failed_at`을 갱신해 대기 순서의 뒤로 보냄(migration 009. `orders`의 BEFORE UPDATE trigger로 `updated_at`도 바뀜). 기한과 상태는 바뀌지 않음
+- `expired` 주문에 도착한 webhook은 payment record로 남기고 티켓을 발급하지 않음. `settled`였다면 그 record에 `reconciliation_required = true`를 표시(migration 008)
+- migration 010–011은 callback key를 status와 함께 보관하는 `payment_callback_keys` 테이블을 추가
+
 ## 예약 hold 흐름
 
 핵심 코드는 [reservation.service.ts](../src/core/services/reservation.service.ts)에 있습니다.

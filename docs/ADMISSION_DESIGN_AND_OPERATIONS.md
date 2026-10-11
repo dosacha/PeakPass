@@ -2,7 +2,7 @@
 
 이 문서는 PeakPass의 입장 제어(대기열, 입장량 제한, polling)를 왜 이렇게 만들었는지와 어떻게 켜고 끄고 재현하는지를 한곳에 모은다. 규칙의 원문은 [입장 제어 계약 admission-v1](ADMISSION_CONTRACT.md)이고, 이 문서가 계약과 다르면 계약이 맞다.
 
-기준: main `5529898`(2026-10-09, P8 병합)의 코드와 증거. 제품 코드·계약·migration은 main `1bb2796`과 같고, 그 뒤 2026-10-10까지의 병합은 문서만 바꿨다. 여기 적은 수치는 모두 로컬 단일 host에서 한 측정이며 운영 성과가 아니다.
+기준: main `5529898`(2026-10-09, P8 병합)의 코드와 증거. 제품 코드·계약·migration은 main `1bb2796`과 같고, `5529898` 뒤 main `7b12027`(2026-10-10)까지의 병합이 Markdown 문서 밖에서 바꾼 것은 opt-in 통합 테스트 `src/tests/integration/admission-serialization-repro.test.ts` 하나다. 여기 적은 수치는 모두 로컬 단일 host에서 한 측정이며 운영 성과가 아니다.
 
 ## 무엇을 풀려고 했나
 
@@ -100,7 +100,64 @@ COMMIT;
 - 보호를 해제한 직후 다음 scheduler tick(250ms)과 배타 gate를 기다리는 동안 이전 상태가 응답될 수 있다.
 - Redis 반영이 실패한 구매의 슬롯은 회수될 때까지 사용 중으로 남고, 그 시간에 상한이 없다.
 - 데모 페이지는 프로세스마다 고정 사용자 1명이다. 스크린리더, 다른 브라우저, 모바일은 확인하지 않았다.
-- seed profile에서 대기는 분 단위다. 받아들일 만한지는 제품 판단이며 정하지 않았다.
+- seed profile에서 대기는 분 단위다(1,000명에 최소 500초). 2026-10-10에 이 대기 시간을 그대로 받아들이기로 정했고, 다시 측정하지 않는다([#34](https://github.com/dosacha/PeakPass/issues/34)).
+
+### 고치지 않고 받아들인 것
+
+아래는 2026-10-10과 2026-10-11에 고치지 않기로 정한 것이다. 제품 코드와 계약은 바꾸지 않았다. 이 문서의 다른 절에 이미 적은 한계(예: 종료 지연, 직렬화 실패, polling 비용, "하지 않은 것"의 목록)는 되풀이하지 않는다. 줄마다의 근거와 상세는 괄호의 Issue에 있고, 측정하지 않은 값은 수치로 적지 않았다.
+
+**수명주기와 scheduler ([#25](https://github.com/dosacha/PeakPass/issues/25))**
+
+- 기능을 끈 인스턴스(`ENABLE_ADMISSION=false`)에는 scheduler가 없어 해제되거나 삭제된 이벤트의 대기열 상태를 정리하지 않는다. 남은 상태에는 404가 아니라 503으로 답한다. 계약 §3의 문언은 대기열이 적용되지 않은 이벤트에 404 `ADMISSION_NOT_ENABLED`를 말하므로, 이 줄은 계약 문언과 다른 구현의 동작을 적은 것이다. 기능을 켠 인스턴스가 하나도 없으면 그대로 남는다.
+- 주인 없는 키의 정리는 tick마다 `SCAN` 한 페이지(`COUNT 100`)씩 진행한다. keyspace를 한 바퀴 도는 시간은 키 수에 비례하고, 재지 않았다.
+- Redis 하나를 서로 다른 PostgreSQL DB의, 기능을 켠 인스턴스가 함께 쓰면, 한쪽의 정리가 그 DB에 보호 정책이 없는 이벤트의 키를 주인 없는 것으로 보고 지운다. 이 전제는 시작할 때 검증하지 않는다.
+- 같은 이유로, 보호 정책 없는 이벤트로 대기열 키를 직접 만드는 테스트 fixture는 기능을 켠 인스턴스와 같은 Redis에서 동시에 돌리면 지워진다.
+- epoch의 24시간 기한이 지나면 대기열 조회(status)와 취소(cancel)도 503으로 닫힌다. 계약 §4의 문언은 신규 등록·claim·승격의 중단만 말한다. 이 동작은 계약에 넣지 않고 여기에만 적는다.
+- scheduler의 정책 조회는 tick마다 정책 테이블을 읽고(`protected OR phase='open'` 조건이라 partial index를 쓰지 못한다), 정리에 `SCAN`이 tick당 1회, 보호 이벤트가 준비 상태면 2회 든다. 이 비용은 재지 않았다.
+
+**구매 경로 ([#27](https://github.com/dosacha/PeakPass/issues/27))**
+
+- 입장 필드가 있는 구매는 보호 켜기나 reset이 배타 gate를 쥐고 있는 동안, 또는 정책 행이 없는 이벤트의 첫 확인이 event 행을 기다리는 동안 1초 뒤 503 `ADMISSION_UNAVAILABLE`로 답한다.
+- 정책 행이 없는 이벤트의 첫 구매는 event 행을 기다리고, SERIALIZABLE checkout이 동시에 첫 구매를 하면 시도 1회를 그 경합에 쓴다.
+- 원장 행 없이 내려진 신규 점유 거절은 transaction이 끝난 뒤 원장을 한 번 더 읽어 확인한다. 그 조회가 실패하면 거절 대신 503으로 답한다.
+- Idempotency-Key 재전송은 주문을 checkout-key 잠금 없이 먼저 읽고, 주문이 있으면 event와 정책을 확인하지 않는다.
+- code가 없는 driver 연결 오류가 구매 작업 안에서 나면 500으로 답한다.
+- `orders.idempotency_key`의 23505는 새 transaction에서 다시 조회할 대상으로 분류하지 않았다. 같은 key의 checkout 세 개를 겹친 테스트는 수정 없이 10회 통과했고, 로그가 온전한 9회에서 PostgreSQL 16.12는 패자의 INSERT를 40001로 보고했으며 기존 재시도가 처리했다. 관측이며 23505가 나올 수 없다는 증명은 아니다.
+- 구매 테스트 가운데 다른 요청이 쥔 잠금을 `lock_timeout` 1초 안에 얻어야 통과하는 케이스가 있다(main `7b12027`에 둘). runner가 그 구간에서 1초 멈추면 실패한다.
+
+**대기 화면과 데모 페이지 ([#29](https://github.com/dosacha/PeakPass/issues/29), [#32](https://github.com/dosacha/PeakPass/issues/32))**
+
+- 실제 브라우저로 만들어 보지 않은 경로: 503의 15초 최소 대기와 `Retry-After`(주입한 응답으로만 확인), 같은 id를 가진 두 서버 사이의 미확인 구매 복원, 같은 사용자의 두 탭이 동시에 전면인 경우, 24시간 epoch 마감, 대기열 가득(429 `ADMISSION_QUEUE_FULL`), trace 5,000건 초과, 다크 테마, 실제 네트워크 단절.
+- 입장 인지 marker는 `localStorage`에 있고 탭 사이 transaction이 없어, 같은 사용자의 두 탭이 같은 입장을 중복 기록할 수 있다. 분석할 때 run·epoch·입장 자격마다 가장 이른 기록만 쓴다.
+- trace는 메모리에만 있다. `snapshot()`을 읽기 전에 새로고침하면 그 인지 표본은 다시 기록되지 않는다. marker는 프로필당 최근 50개만 남는다.
+- 데모 세션 요청은 5초 안에 답이 없으면 포기하고 다음 요청 때 다시 보내며, 시도마다 세션 요청 한도에 잡힌다. live mode에서 이벤트가 선택돼 있으면 페이지가 클릭 없이 `POST /demo/session`과 이벤트 조회를 보낸다.
+- 복원된 미확인 구매는 "예약 불러오기"로 닫히지 않고 같은 요청을 다시 보내야 닫힌다. 새 예약을 불러와도 화면의 주문·정산은 남고, 이벤트를 바꿔도 화면의 예약은 남는다.
+- checkout 응답을 잃은 뒤 새로고침하면 페이지는 그 주문에 다시 닿지 못한다(새 key는 409 `CONFLICT`를 받고, 주문은 결제 기한에 만료돼 좌석이 돌아온다).
+- 페이지를 연 뒤에 보호된 이벤트는 새로고침 전까지 "대기열 미적용"으로 표시된다. 그동안의 구매는 400으로 거절되고 점유는 없다.
+- 기존 팔레트의 색 대비가 낮은 곳이 있다(대기 카드의 라벨 4.38:1, 등록 버튼 4.24:1, 취소 확정 버튼 3.88:1). 팔레트는 바꾸지 않았다.
+- 페이지와 API의 origin이 다르면 요청에 preflight가 붙을 수 있다. 대기열 API 한도에는 잡히지 않는다.
+
+**reset, 로그, 승격 상한 ([#32](https://github.com/dosacha/PeakPass/issues/32))**
+
+- scheduler의 정책 조회가 Redis 재시작과 다른 인스턴스의 복구 전체에 걸치면, 방금 복구된 상태를 낯선 것으로 보고 한 번 더 reset할 가능성이 있다(재시작 1회에 세대 2개). 정적 검토로만 본 가능성이고 재현하지 않았다.
+- PostgreSQL pool 오류 로그에 driver의 client 객체가 남는다(연결 파라미터와 끝난 세션의 cancel key. 비밀번호는 없다).
+- R은 epoch 하나의 상한이다(계약 §4). reset 직후의 새 epoch는 빈 승격 이력으로 시작하므로 같은 1초 안에 R건이 더 승격될 수 있다.
+
+**장애 검증과 검증 코드 ([#32](https://github.com/dosacha/PeakPass/issues/32))**
+
+- 실행하지 않은 것: claim 기한보다 긴 PostgreSQL 장애와 failover, 저장소의 disk·memory 한도, scheduler 3개 이상, 호스트 간 시계 차이, reset 수명주기 결함(F1) 둘째 형태의 컨테이너 재현, 수정 뒤의 민감도 6건 재실행. 브라우저 시나리오와 이미지 검사는 최종 이미지에서 1회씩이다.
+- 장애 스위트의 일부 시나리오(K4, T1, M4, K1, K3, R1)는 타이밍 가정이 있어 부하가 큰 호스트에서 실패할 수 있다. M2, M3 후반, L4의 경합은 승자를 기록만 하고, reset 뒤의 두 번째 reset은 1.5–2초 동안만 살핀다. 전이 로그 재생은 `UNLINK`가 namespace의 set 하나만 지목해도 그 namespace를 버린다.
+- 원장과 Redis entry를 대조하는 검증 helper(`src/tests/helpers/admission-ledger.ts`)는 fingerprint를 비교하지 않는다. 상태·operation·대상·code가 같고 fingerprint만 다른 쌍은 통과한다. 이 파일은 P8 하네스가 SHA256으로 고정하고 있어 고치지 않았다.
+
+**부하 측정 ([#34](https://github.com/dosacha/PeakPass/issues/34), [#36](https://github.com/dosacha/PeakPass/issues/36))**
+
+- P8 측정은 도착 조건 1개(초당 50명 × 20초), 앱 인스턴스 1개(scheduler 1개), arm당 3회다. 정식 run은 전원이 전면 탭이었고, 숨김 탭 20%는 통계에서 뺀 관측 2회로만 봤다.
+- 하네스의 검사 가운데 합성 입력으로만 확인한 것: `cancelled` 상태 응답의 형식 검사, Redis가 `MONITOR` 연결을 끊는 경우, dump 표시 뒤에 쓰기가 이어지는 캡처. `--arm` 없는 기본 실행이 invalid가 되는 것이 base `1bb2796`에서도 같았는지는 돌려 보지 않았다.
+- 로컬 Node 18 컨테이너에서는 재생 script 검사가 skip된다(Windows에서 설치한 `node_modules`의 `tsx`가 Linux에서 변환하지 못한다).
+- 검증 run `p8-verify-b-01`의 폴더에는 `monitor-replay.json`이 없어, 폴더만 다시 분석하면 invalid다. 자체 완결된 근거는 `p8-verify-b-02`다.
+- 승격된 뒤 아무도 인지하지 못한 채 만료된 entry가 `admittedAt`을 잃으면 dump만으로는 대기 중 만료와 구분되지 않는다. 검증 run의 재생만 이를 본다.
+- 앱 이미지는 run마다 다시 빌드해 id가 run마다 다르다. 재현 가능한 build가 아니다.
+- `npm run test:flash-sale`이 새 worktree의 첫 실행에서 1회 실패한 적이 있다(44개 중 1개). 출력은 남지 않았고, 다시 시도했을 때 재현되지 않았으며 원인은 모른다.
 
 단계별로 남긴 항목은 [#25](https://github.com/dosacha/PeakPass/issues/25)(P4), [#27](https://github.com/dosacha/PeakPass/issues/27)(P5), [#29](https://github.com/dosacha/PeakPass/issues/29)(P6), [#32](https://github.com/dosacha/PeakPass/issues/32)(P7), [#34](https://github.com/dosacha/PeakPass/issues/34)(P8), [#36](https://github.com/dosacha/PeakPass/issues/36)(P9)에 있다.
 

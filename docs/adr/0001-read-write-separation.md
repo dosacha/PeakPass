@@ -24,4 +24,4 @@ PeakPass는 정합성이 중요한 예약과 체크아웃을 다룹니다.
 
 - 구조가 명확해짐
 - GraphQL을 전면 도입했을 때의 복잡성을 줄임
-- read-side 완성도가 따라오지 않으면 일부 resolver가 placeholder로 남을 수 있음
+- read-side 완성도가 따라오지 않으면 일부 resolver가 placeholder로 남을 수 있음 (결정 당시에 적은 위험이다. 2026-10-11에 `src/api/graphql`의 테스트가 아닌 `.ts` 파일에서 `TODO`, `not implemented`, `미구현`을 검색했을 때 나온 것이 없었고, `placeholder`는 SQL 파라미터 자리 표시뿐이었다. resolver를 하나씩 읽어 확인한 것은 아니다)
