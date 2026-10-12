@@ -183,7 +183,8 @@ export class ReservationService {
    * 의 reservation convert 쿼리). 즉 Redis hold가 stale해도 정합성에는 영향이 없고,
    * 사용자가 GET 응답에서 잠깐 stale한 expiresAt을 볼 수 있는 정도가 최악의 시나리오다.
    *
-   * Redis 장애 시 DB로 폴백하므로 이 경로는 fail-safe하다.
+   * 이 함수는 Redis hold를 읽지 못하면 DB에서 읽는다. 다만 HTTP 요청은 여기 오기 전에 rate
+   * limiter를 거치므로, 기본 설정에서 Redis에 닿지 않으면 `GET /reservations/:id`는 503이 먼저다.
    */
   async getReservationWithClient(
     reservationId: string,

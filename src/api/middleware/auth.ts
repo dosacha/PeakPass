@@ -4,6 +4,7 @@ import jwt from 'jsonwebtoken';
 import { getConfig } from '@/infra/config';
 import { ForbiddenError, UnauthorizedError } from '@/core/errors';
 import { AdmissionError, AdmissionRef, parsePurchaseAdmission } from '@/core/models/admission';
+import { uuid } from '@/api/uuid';
 
 export interface AuthUser {
   id: string;
@@ -17,8 +18,13 @@ export function extractUserFromToken(token: string): AuthUser | null {
 
   try {
     const decoded = jwt.verify(token, config.JWT_SECRET) as jwt.JwtPayload;
+    // UUID는 대소문자를 구분하지 않지만 문자열 비교와 Map 조회는 구분한다. 주체가 UUID면
+    // PostgreSQL이 돌려주는 소문자 형태로 맞춘다. 그래야 소유권 비교와 DataLoader 조회가 같은
+    // 사용자를 같은 값으로 본다. UUID가 아닌 주체는 그대로 둔다.
+    const subject = String(decoded.sub || decoded.id);
+    const normalized = uuid.safeParse(subject);
     return {
-      id: String(decoded.sub || decoded.id),
+      id: normalized.success ? normalized.data : subject,
       email: String(decoded.email || ''),
       role: decoded.role ? String(decoded.role) : undefined,
     };
@@ -80,7 +86,8 @@ export function assertBodyUserMatchesAuth(request: FastifyRequest, bodyUserId: s
   const authUser = request.user;
 
   if (authUser) {
-    if (authUser.id !== bodyUserId) {
+    // 본문의 userId는 schema가 UUID로 검증한 값이다. 주체와 같은 형태로 놓고 비교한다.
+    if (authUser.id !== bodyUserId.toLowerCase()) {
       logger.warn(
         { authUserId: authUser.id, bodyUserId, requestId: request.id },
         'Body userId does not match authenticated subject',

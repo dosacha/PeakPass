@@ -7,7 +7,7 @@ import type { GraphQLContext } from '@/api/graphql/loaders';
 // policy a request gets must follow the route that handles it, not the text of its URL.
 //   - Fastify decodes the path before it picks a route, so `POST /%63heckouts` is a checkout.
 //   - A lookup of an order or a reservation counts against the same limit as the purchase. The
-//     admission contract (§3, §6) keeps the limiter policy of lookups as it was, so this is
+//     admission contract (§2, §6) keeps the limiter policy of lookups as it was, so this is
 //     pinned here as it is: a known limit, not an accident of the matching.
 //   - A request that matches no route is a 404 and is not counted.
 const mockCheckRateLimit = jest.fn();

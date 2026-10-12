@@ -38,7 +38,7 @@ export async function registerReservationRoutes(app: FastifyInstance) {
     },
   );
 
-  // 조회도 예약 생성과 같은 한도를 쓴다. 입장 제어 계약(admission-v1 §3, §6)이 조회의 기존
+  // 조회도 예약 생성과 같은 한도를 쓴다. 입장 제어 계약(admission-v1 §2, §6)이 조회의 기존
   // limiter 정책 유지를 정하고 있어 바꾸지 않았다.
   app.get<{ Params: { id: string } }>(
     '/reservations/:id',
