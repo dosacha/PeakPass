@@ -124,6 +124,32 @@ describe('live demo sessions', () => {
     await app.close();
   });
 
+  it('hands the order id of a demo settlement on in lower case', async () => {
+    const { registerDemoSessionRoutes } = await loadDemoRoutes();
+    const { jwtAuthMiddleware } = await import('@/api/middleware/auth');
+    const processSettlement = jest.fn(async (request) =>
+      createSettlementResult(request.orderId, request.userId),
+    );
+    const orderId = randomUUID();
+    const app = Fastify();
+    app.addHook('preHandler', jwtAuthMiddleware);
+    await registerDemoSessionRoutes(app, { processSettlement });
+
+    const response = await app.inject({
+      method: 'POST',
+      url: '/demo/settlement',
+      payload: { orderId: orderId.toUpperCase() },
+      headers: {
+        Authorization: `Bearer ${createDemoToken()}`,
+        'Idempotency-Key': randomUUID(),
+      },
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(processSettlement).toHaveBeenCalledWith(expect.objectContaining({ orderId }));
+    await app.close();
+  });
+
   it('requires a live demo JWT for demo settlement', async () => {
     const { registerDemoSessionRoutes } = await loadDemoRoutes();
     const { jwtAuthMiddleware } = await import('@/api/middleware/auth');

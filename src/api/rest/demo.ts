@@ -16,6 +16,7 @@ import { PaymentWebhookService } from '@/core/services/payment-webhook.service';
 import { OrderService } from '@/core/services/order.service';
 import { CheckoutResult } from '@/core/services/checkout.service';
 import { Order } from '@/core/models/order';
+import { uuid } from '@/core/models/uuid';
 import { AuthUser } from '@/api/middleware/auth';
 
 type DemoUser = {
@@ -32,7 +33,7 @@ type DemoSession = {
 
 const DemoSettlementSchema = z
   .object({
-    orderId: z.string().uuid(),
+    orderId: uuid,
   })
   .strict();
 
@@ -101,6 +102,8 @@ function requireDemoIdempotencyKey(request: FastifyRequest): string {
     throw new ValidationError('Idempotency-Key header is required');
   }
 
+  // 정산의 Idempotency-Key는 텍스트로 저장되고 보낸 문자열 그대로가 key다. 실제 webhook과 같게
+  // 형식만 검사하고 값은 바꾸지 않는다.
   const result = z.string().uuid().safeParse(idempotencyKey);
   if (!result.success) {
     throw new ValidationError('Idempotency-Key header must be a UUID');

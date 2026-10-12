@@ -13,6 +13,7 @@ type PurchaseBody = {
   eventId: string;
   status: string;
   order: { id: string; userId: string; eventId: string; status: string; reservationId?: string };
+  error: { code: string; message: string };
 };
 
 // A client may send its ids in upper case. PostgreSQL stores and returns them in lower case, so
@@ -132,5 +133,42 @@ describe('purchase requests whose UUIDs are sent in upper case', () => {
     expect(replay.status).toBe(201);
     expect(replay.body.order.id).toBe(first.body.order.id);
     expect(await orderCount()).toBe(1);
+  });
+
+  it('reports an expired reservation named in upper case as expired and returns its seat', async () => {
+    const reservation = await post('/reservations', {
+      eventId,
+      userId,
+      tierId: 'general',
+      quantity: 1,
+    });
+    expect(reservation.status).toBe(201);
+    await pool.query(`UPDATE reservations SET expires_at=NOW()-INTERVAL '1 minute' WHERE id=$1`, [
+      reservation.body.id,
+    ]);
+
+    const response = await post(
+      '/checkouts',
+      {
+        eventId: eventId.toUpperCase(),
+        userId: userId.toUpperCase(),
+        tierId: 'general',
+        quantity: 1,
+        reservationId: reservation.body.id.toUpperCase(),
+      },
+      uuid(),
+    );
+
+    // The same 409 status would also mean "this request does not match the reservation".
+    // The message and the returned seat tell the two apart.
+    expect(response.status).toBe(409);
+    expect(response.body.error.message).toBe('Reservation has expired or is no longer valid');
+    const state = await pool.query(
+      `SELECT r.status, e.available_seats AS available FROM reservations r
+       JOIN events e ON e.id=r.event_id WHERE r.id=$1`,
+      [reservation.body.id],
+    );
+    expect(state.rows[0]).toEqual({ status: 'expired', available: 10 });
+    expect(await orderCount()).toBe(0);
   });
 });

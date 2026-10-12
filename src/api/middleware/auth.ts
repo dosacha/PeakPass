@@ -21,8 +21,9 @@ export function extractUserFromToken(token: string): AuthUser | null {
     // UUID는 대소문자를 구분하지 않지만 문자열 비교와 Map 조회는 구분한다. 주체가 UUID면
     // PostgreSQL이 돌려주는 소문자 형태로 맞춘다. 그래야 소유권 비교와 DataLoader 조회가 같은
     // 사용자를 같은 값으로 본다. UUID가 아닌 주체는 그대로 둔다. 하이픈 없는 32자리처럼
-    // PostgreSQL은 받지만 이 schema는 UUID로 보지 않는 형태도 그대로 남고, 그런 주체는 어느
-    // 소유권 비교와도 일치하지 않는다(거절 쪽으로 닫힌다).
+    // PostgreSQL은 받지만 이 schema는 UUID로 보지 않는 형태도 그대로 남는다. 그런 주체는
+    // 문자열로 비교하는 곳(REST의 소유권 확인, 본문 userId 확인)에서는 일치하지 않고, 주체를
+    // SQL 조건으로만 쓰는 곳(GraphQL myOrders·myTickets)에서는 PostgreSQL이 같은 사용자로 본다.
     const subject = String(decoded.sub || decoded.id);
     const normalized = uuid.safeParse(subject);
     return {

@@ -118,8 +118,13 @@ describe('demo settlement on real PostgreSQL and loopback HTTP', () => {
       settlements: 1,
     });
 
-    for (const nextKey of [key, uuid()]) {
-      const again = await settle(token, orderId, nextKey);
+    // The same key again, a new key, and the same key with the order named in upper case.
+    for (const [nextKey, id] of [
+      [key, orderId],
+      [uuid(), orderId],
+      [key, orderId.toUpperCase()],
+    ]) {
+      const again = await settle(token, id, nextKey);
       expect(again.status).toBe(200);
       const body = (await again.json()) as { tickets: { id: string }[] };
       expect(body.tickets.map((ticket) => ticket.id).sort()).toEqual(

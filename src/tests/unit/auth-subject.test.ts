@@ -2,6 +2,8 @@ import Fastify from 'fastify';
 import jwt from 'jsonwebtoken';
 import { CreateOrderSchema } from '@/core/models/order';
 import { CreateReservationSchema } from '@/core/models/reservation';
+import { PaymentWebhookSchema } from '@/core/models/payment';
+import { parsePurchaseAdmission } from '@/core/models/admission';
 
 const ORIGINAL_ENV = process.env;
 const JWT_SECRET = 'a'.repeat(32);
@@ -31,11 +33,27 @@ describe('UUIDs that enter with a request', () => {
     expect(extractUserFromToken(jwt.sign({ sub: 'Service-Account' }, JWT_SECRET))?.id).toBe(
       'Service-Account',
     );
-    // PostgreSQL accepts this form, the schema does not: it stays as sent and matches nothing.
+    // PostgreSQL accepts this form, the schema does not: it stays as sent. It then fails the
+    // string comparisons of the REST routes, while a query that only filters by it still finds
+    // the user's rows.
     const unhyphenated = UPPER.replace(/-/g, '');
     expect(extractUserFromToken(jwt.sign({ sub: unhyphenated }, JWT_SECRET))?.id).toBe(
       unhyphenated,
     );
+  });
+
+  it('lower-cases the order id of a settlement and the admission fields of a purchase', () => {
+    expect(
+      PaymentWebhookSchema.parse({
+        orderId: UPPER,
+        providerTransactionId: 'txn-1',
+        status: 'settled',
+      }),
+    ).toEqual({ orderId: LOWER, providerTransactionId: 'txn-1', status: 'settled' });
+    expect(parsePurchaseAdmission({ admissionId: UPPER, admissionEpoch: UPPER })).toEqual({
+      admissionId: LOWER,
+      epoch: LOWER,
+    });
   });
 
   it('lower-cases every UUID field of the two create requests', () => {

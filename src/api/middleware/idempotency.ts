@@ -27,7 +27,8 @@ function sleep(ms: number): Promise<void> {
 }
 
 function callbackFingerprint(input: PaymentWebhookInput): string {
-  return JSON.stringify([input.orderId.toLowerCase(), input.providerTransactionId, input.status]);
+  // orderId는 schema가 소문자로 맞춘 값이다.
+  return JSON.stringify([input.orderId, input.providerTransactionId, input.status]);
 }
 
 function matchesCallbackCache(cached: Record<string, unknown>, request: FastifyRequest): boolean {

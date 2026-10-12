@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { AppError } from '@/core/errors';
+import { uuid } from './uuid';
 
 export const admissionProfile = Object.freeze({
   revision: 'admission-v1-seed',
@@ -68,11 +69,7 @@ export interface AdmissionRef {
   admissionId: string;
   epoch: string;
 }
-const lowerUuid = z
-  .string()
-  .uuid()
-  .transform((v) => v.toLowerCase());
-const PurchaseAdmissionSchema = z.object({ admissionId: lowerUuid, admissionEpoch: lowerUuid });
+const PurchaseAdmissionSchema = z.object({ admissionId: uuid, admissionEpoch: uuid });
 
 /** Both fields or neither. One alone or a malformed value is 400 before any purchase work. */
 export function parsePurchaseAdmission(body: unknown): AdmissionRef | undefined {
