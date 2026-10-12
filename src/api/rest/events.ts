@@ -6,7 +6,7 @@ import { ValidationError } from '@/core/errors';
 import { getConfig } from '@/infra/config';
 import { getLogger } from '@/infra/logger';
 import { z } from 'zod';
-import { uuid } from '@/api/uuid';
+import { uuid } from '@/core/models/uuid';
 
 const IdParamsSchema = z.object({ id: uuid });
 

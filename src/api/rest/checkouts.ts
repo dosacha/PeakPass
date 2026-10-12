@@ -15,7 +15,7 @@ import {
 } from '@/infra/redis/commands';
 import { assertBodyUserMatchesAuth, purchaseAdmission } from '@/api/middleware/auth';
 import { z } from 'zod';
-import { uuid } from '@/api/uuid';
+import { uuid } from '@/core/models/uuid';
 
 const OrderParamsSchema = z.object({ orderId: uuid });
 
@@ -111,8 +111,9 @@ export async function registerCheckoutRoutes(app: FastifyInstance) {
     },
   );
 
-  // 조회도 구매와 같은 한도를 쓴다. 입장 제어 계약(admission-v1 §2, §6)이 조회의 기존 limiter
-  // 정책 유지를 정하고 있어 바꾸지 않았다. 주문을 여러 번 조회하면 그만큼 구매 한도가 줄어든다.
+  // 조회도 checkout 생성과 같은 카운터를 쓴다. 입장 제어 계약(admission-v1 §2, §6)이 조회의
+  // 기존 limiter 정책 유지를 정하고 있어 바꾸지 않았다. 주문을 여러 번 조회하면 그만큼 checkout
+  // 생성의 한도가 줄어든다(예약 생성의 한도는 따로다).
   app.get<{ Params: { orderId: string } }>(
     '/checkouts/:orderId',
     { config: { rateLimit: 'checkout' } },

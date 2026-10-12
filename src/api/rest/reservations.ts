@@ -5,7 +5,7 @@ import { getConfig } from '@/infra/config';
 import { getLogger } from '@/infra/logger';
 import { assertBodyUserMatchesAuth, purchaseAdmission } from '@/api/middleware/auth';
 import { z } from 'zod';
-import { uuid } from '@/api/uuid';
+import { uuid } from '@/core/models/uuid';
 
 const IdParamsSchema = z.object({ id: uuid });
 

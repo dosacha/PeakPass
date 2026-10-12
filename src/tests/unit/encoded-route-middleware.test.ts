@@ -6,7 +6,8 @@ import type { GraphQLContext } from '@/api/graphql/loaders';
 // The global hooks (rate limit, webhook signature, idempotency) on the real application: which
 // policy a request gets must follow the route that handles it, not the text of its URL.
 //   - Fastify decodes the path before it picks a route, so `POST /%63heckouts` is a checkout.
-//   - A lookup of an order or a reservation counts against the same limit as the purchase. The
+//   - A lookup counts against the counter of the matching create request: an order lookup
+//     against the one of a checkout, a reservation lookup against the one of a reservation. The
 //     admission contract (§2, §6) keeps the limiter policy of lookups as it was, so this is
 //     pinned here as it is: a known limit, not an accident of the matching.
 //   - A request that matches no route is a 404 and is not counted.

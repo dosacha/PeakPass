@@ -4,7 +4,7 @@ import jwt from 'jsonwebtoken';
 import { getConfig } from '@/infra/config';
 import { ForbiddenError, UnauthorizedError } from '@/core/errors';
 import { AdmissionError, AdmissionRef, parsePurchaseAdmission } from '@/core/models/admission';
-import { uuid } from '@/api/uuid';
+import { uuid } from '@/core/models/uuid';
 
 export interface AuthUser {
   id: string;
@@ -20,7 +20,9 @@ export function extractUserFromToken(token: string): AuthUser | null {
     const decoded = jwt.verify(token, config.JWT_SECRET) as jwt.JwtPayload;
     // UUID는 대소문자를 구분하지 않지만 문자열 비교와 Map 조회는 구분한다. 주체가 UUID면
     // PostgreSQL이 돌려주는 소문자 형태로 맞춘다. 그래야 소유권 비교와 DataLoader 조회가 같은
-    // 사용자를 같은 값으로 본다. UUID가 아닌 주체는 그대로 둔다.
+    // 사용자를 같은 값으로 본다. UUID가 아닌 주체는 그대로 둔다. 하이픈 없는 32자리처럼
+    // PostgreSQL은 받지만 이 schema는 UUID로 보지 않는 형태도 그대로 남고, 그런 주체는 어느
+    // 소유권 비교와도 일치하지 않는다(거절 쪽으로 닫힌다).
     const subject = String(decoded.sub || decoded.id);
     const normalized = uuid.safeParse(subject);
     return {
@@ -86,8 +88,9 @@ export function assertBodyUserMatchesAuth(request: FastifyRequest, bodyUserId: s
   const authUser = request.user;
 
   if (authUser) {
-    // 본문의 userId는 schema가 UUID로 검증한 값이다. 주체와 같은 형태로 놓고 비교한다.
-    if (authUser.id !== bodyUserId.toLowerCase()) {
+    // 주체와 본문의 userId는 둘 다 들어올 때 소문자로 맞춰진 값이다(주체는 위에서, 본문은
+    // 생성 schema에서). 여기서 다시 바꾸지 않는다.
+    if (authUser.id !== bodyUserId) {
       logger.warn(
         { authUserId: authUser.id, bodyUserId, requestId: request.id },
         'Body userId does not match authenticated subject',

@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { uuid } from './uuid';
 
 export const ReservationStatus = z.enum(['active', 'released', 'converted', 'expired']);
 export type ReservationStatus = z.infer<typeof ReservationStatus>;
@@ -16,8 +17,8 @@ export interface Reservation {
 }
 
 export const CreateReservationSchema = z.object({
-  eventId: z.string().uuid(),
-  userId: z.string().uuid(),
+  eventId: uuid,
+  userId: uuid,
   quantity: z.number().int().positive().max(100), // 홀드당 최대 100좌석
   tierId: z.string(),
 });

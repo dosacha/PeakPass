@@ -42,8 +42,9 @@ declare module 'fastify' {
  * 판정하면 `/%63heckouts`가 `/checkouts` handler에 닿으면서 한도를 건너뛴다.
  *
  * 예약·주문 조회(`GET /reservations/:id`, `GET /checkouts/:orderId`)는 생성 요청과 같은 action을
- * 선언한다. 조회가 구매 한도를 나눠 쓰는 것은 알려진 한계이고, 입장 제어 계약이 기존 limiter
- * 정책을 고정하고 있어 그대로 둔다.
+ * 선언한다. 카운터는 action마다 따로여서 예약 조회는 예약 생성과, 주문 조회는 checkout 생성과
+ * 같은 카운터를 쓴다. 알려진 한계이고, 입장 제어 계약이 기존 limiter 정책을 고정하고 있어
+ * 그대로 둔다.
  *
  * GraphQL은 별도 한도를 사용한다. write 경로의 5/60s를 그대로 쓰면 화면 1개 렌더링에
  * 호출되는 events/event/myOrders 등이 1초도 안 되어 한도를 소진한다.

@@ -5,7 +5,7 @@ import { OrderService } from '@/core/services/order.service';
 import { TicketService } from '@/core/services/ticket.service';
 import { getLogger } from '@/infra/logger';
 import { AppError, ValidationError } from '@/core/errors';
-import { uuid } from '@/api/uuid';
+import { uuid } from '@/core/models/uuid';
 import { getPostgresPool } from '@/infra/postgres/client';
 
 const logger = getLogger();
