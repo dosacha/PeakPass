@@ -5,6 +5,9 @@ import { CreateEventSchema, GetEventsSchema } from '@/core/models/event';
 import { ValidationError } from '@/core/errors';
 import { getConfig } from '@/infra/config';
 import { getLogger } from '@/infra/logger';
+import { z } from 'zod';
+
+const IdParamsSchema = z.object({ id: z.string().uuid() });
 
 export async function registerEventRoutes(app: FastifyInstance) {
   const logger = getLogger();
@@ -98,7 +101,8 @@ export async function registerEventRoutes(app: FastifyInstance) {
   });
 
   app.get<{ Params: { id: string } }>('/events/:id', async (request, reply) => {
-    const { id } = request.params;
+    // UUID가 아닌 id는 DB까지 가면 22P02로 500이 된다. 입력 오류(400)로 먼저 끝낸다.
+    const { id } = IdParamsSchema.parse(request.params);
     const client = await pool.connect();
 
     try {

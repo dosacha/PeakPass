@@ -219,7 +219,6 @@ async function build(image: string, prefix: string, options: TopologyOptions) {
   const secrets = {
     DB_PASSWORD: randomBytes(18).toString('base64url'),
     JWT_SECRET: randomBytes(36).toString('base64url'),
-    API_KEY: randomBytes(24).toString('base64url'),
     WEBHOOK_SIGNING_SECRET: randomBytes(24).toString('base64url'),
   };
   const appEnv: Record<string, string> = {

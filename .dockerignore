@@ -2,7 +2,6 @@ node_modules
 npm-debug.log
 dist
 .git
-.superpowers
 .gitignore
 README.md
 docs
@@ -13,6 +12,7 @@ terraform
 .DS_Store
 coverage
 .env
-.env.local
+.env.*
+*.pem
 *.log
 .docker

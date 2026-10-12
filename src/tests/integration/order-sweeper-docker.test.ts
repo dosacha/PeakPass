@@ -13,11 +13,11 @@ dockerTests('order sweeper production Docker lifecycle', () => {
   const containers: string[] = [];
   const env = { ...process.env, NODE_ENV: 'production', LOG_LEVEL: 'info', PORT: '3000',
     DB_HOST: 'host.docker.internal', REDIS_HOST: 'host.docker.internal',
-    JWT_SECRET: 'wave4-order-sweeper-production-test-secret-32', API_KEY: 'wave4-test-key',
-    WEBHOOK_SIGNING_SECRET: 'wave4-test-webhook-secret', ORDER_SWEEP_INTERVAL_MS: '60000', ORDER_SWEEP_BATCH_SIZE: '25',
+    JWT_SECRET: 'wave4-order-sweeper-production-test-secret-32',
+    WEBHOOK_SIGNING_SECRET: 'wave4-order-sweeper-test-webhook-secret-32', ORDER_SWEEP_INTERVAL_MS: '60000', ORDER_SWEEP_BATCH_SIZE: '25',
     ENFORCE_AUTH_USER_MATCH: 'true', ENABLE_RATE_LIMITING: 'true', RATE_LIMIT_FAIL_MODE: 'closed' };
   const keys = ['NODE_ENV', 'LOG_LEVEL', 'PORT', 'DB_HOST', 'DB_PORT', 'DB_USER', 'DB_PASSWORD', 'DB_NAME',
-    'REDIS_HOST', 'REDIS_PORT', 'JWT_SECRET', 'API_KEY', 'WEBHOOK_SIGNING_SECRET', 'ORDER_SWEEP_INTERVAL_MS',
+    'REDIS_HOST', 'REDIS_PORT', 'JWT_SECRET', 'WEBHOOK_SIGNING_SECRET', 'ORDER_SWEEP_INTERVAL_MS',
     'ORDER_SWEEP_BATCH_SIZE', 'ENFORCE_AUTH_USER_MATCH', 'ENABLE_RATE_LIMITING', 'RATE_LIMIT_FAIL_MODE'];
   function docker(args: string[]) {
     return execFileSync('docker', args, { env, encoding: 'utf8', windowsHide: true, timeout: 20000 }).trim();

@@ -14,6 +14,9 @@ import {
   releaseIdempotencyLock,
 } from '@/infra/redis/commands';
 import { assertBodyUserMatchesAuth, purchaseAdmission } from '@/api/middleware/auth';
+import { z } from 'zod';
+
+const OrderParamsSchema = z.object({ orderId: z.string().uuid() });
 
 /**
  * 정책 (현재 코드 기준):
@@ -104,7 +107,8 @@ export async function registerCheckoutRoutes(app: FastifyInstance) {
   });
 
   app.get<{ Params: { orderId: string } }>('/checkouts/:orderId', async (request, reply) => {
-    const { orderId } = request.params;
+    // UUID가 아닌 id는 DB까지 가면 22P02로 500이 된다. 입력 오류(400)로 먼저 끝낸다.
+    const { orderId } = OrderParamsSchema.parse(request.params);
     const config = getConfig();
 
     // auth 가드를 DB 조회 *전에* 통과시킨다.

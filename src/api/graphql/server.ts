@@ -69,32 +69,5 @@ export async function registerGraphQLRoute(
     }
   });
 
-  if (process.env.NODE_ENV !== 'production') {
-    fastify.get('/graphql', async (_request, reply) => {
-      const sandboxHtml = `
-        <!DOCTYPE html>
-        <html>
-          <head>
-            <title>Apollo Sandbox</title>
-            <style>
-              body { margin: 0; overflow: hidden; }
-            </style>
-          </head>
-          <body>
-            <apollo-sandbox
-              initial-state='{
-                "document":"query GetEvents { events(limit: 5) { id name availableSeats } }",
-                "variables":{}
-              }'
-            ></apollo-sandbox>
-            <script src="https://embeddable-sandbox.cdn.apollographql.com/_latest/embeddable-sandbox.umd.production.min.js"></script>
-          </body>
-        </html>
-      `;
-
-      return reply.type('text/html').send(sandboxHtml);
-    });
-  }
-
   logger.info('GraphQL endpoint registered at POST /graphql');
 }

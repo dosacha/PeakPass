@@ -8,6 +8,7 @@ import { AdmissionError } from '@/core/models/admission';
 import { ZodError } from 'zod';
 import {
   handleAppError,
+  handleHttpError,
   handleUnexpectedError,
   handleValidationError,
   sendAdmissionError,
@@ -104,6 +105,19 @@ export async function createApp() {
 
     if (err instanceof AppError) {
       handleAppError(err, reply, requestId);
+      return;
+    }
+
+    // Fastify가 요청을 거절하며 만든 4xx(415 지원하지 않는 Content-Type, 413 본문 초과 등)는
+    // 서버 결함이 아니므로 그 상태 코드로 답한다. Fastify의 오류(code가 FST_ERR_로 시작)만
+    // 대상이다. statusCode만 붙은 알 수 없는 오류는 메시지가 새지 않도록 500으로 남긴다.
+    if (
+      err.code?.startsWith('FST_ERR_') &&
+      typeof err.statusCode === 'number' &&
+      err.statusCode >= 400 &&
+      err.statusCode < 500
+    ) {
+      handleHttpError(reply, err.statusCode, err.message, requestId);
       return;
     }
 

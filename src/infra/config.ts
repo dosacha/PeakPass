@@ -2,6 +2,7 @@ import 'dotenv/config';
 import { z } from 'zod';
 
 const DEVELOPMENT_JWT_SECRET = 'dev-secret-change-in-production-32chars';
+const MIN_SECRET_LENGTH = 32;
 
 // 환경변수에서 boolean을 안전하게 읽는다.
 // `z.coerce.boolean()`은 자바스크립트 `Boolean(string)` 룰을 따라
@@ -47,8 +48,7 @@ const envSchema = z.object({
   REDIS_POOL_SIZE: z.coerce.number().default(10),
 
   // 애플리케이션 설정
-  JWT_SECRET: z.string().min(32).default(DEVELOPMENT_JWT_SECRET),
-  API_KEY: z.string().default('dev-api-key-change-in-production'),
+  JWT_SECRET: z.string().min(MIN_SECRET_LENGTH).default(DEVELOPMENT_JWT_SECRET),
   ORDER_PAYMENT_WINDOW_MINUTES: z.coerce.number().finite().positive().default(10),
   ORDER_SWEEP_INTERVAL_MS: z.coerce.number().int().positive().max(2147483647).default(500),
   ORDER_SWEEP_BATCH_SIZE: z.coerce.number().int().positive().max(Number.MAX_SAFE_INTEGER).default(20),
@@ -123,16 +123,21 @@ function assertProductionInvariants(config: Config): void {
     throw new Error('JWT_SECRET must be set in production environment');
   }
 
-  if (config.API_KEY === 'dev-api-key-change-in-production') {
-    throw new Error('API_KEY must be set in production environment');
-  }
-
   // WEBHOOK_SIGNING_SECRET이 미설정이면 webhook-signature 미들웨어가 검증을 skip한다.
   // production에서는 fail-open이 보안 사고로 직결되므로 fail-fast로 강제한다.
-  if (!config.WEBHOOK_SIGNING_SECRET || config.WEBHOOK_SIGNING_SECRET.trim().length === 0) {
+  const webhookSecret = config.WEBHOOK_SIGNING_SECRET?.trim() ?? '';
+  if (webhookSecret.length === 0) {
     throw new Error(
       'WEBHOOK_SIGNING_SECRET must be set in production environment ' +
         '(missing secret would cause webhook signature verification to silently skip)',
+    );
+  }
+
+  // HMAC-SHA256의 key는 출력 길이(32바이트)보다 짧으면 그만큼 약해진다(RFC 2104).
+  // JWT_SECRET과 같은 하한을 둔다.
+  if (webhookSecret.length < MIN_SECRET_LENGTH) {
+    throw new Error(
+      `WEBHOOK_SIGNING_SECRET must be at least ${MIN_SECRET_LENGTH} characters in production environment`,
     );
   }
 

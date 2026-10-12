@@ -5,7 +5,7 @@ import { OrderService } from '@/core/services/order.service';
 import { TicketService } from '@/core/services/ticket.service';
 import { getLogger } from '@/infra/logger';
 import { AppError } from '@/core/errors';
-import { getPostgresPool } from '@/infra/postgres/client';
+import { getPostgresPool, PoolClient } from '@/infra/postgres/client';
 
 const logger = getLogger();
 const eventService = new EventService();
@@ -102,6 +102,17 @@ function toGraphQLError(err: Error): GraphQLError {
   });
 }
 
+// 연결 실패(ECONNREFUSED 등)의 메시지에는 DB host와 port가 들어 있다. resolver의 try 밖에서
+// 던져지면 그대로 응답에 실리므로, 다른 실패와 같은 변환을 거치게 한다.
+async function acquireClient(): Promise<PoolClient> {
+  try {
+    return await getPostgresPool().connect();
+  } catch (err) {
+    logger.error({ err }, 'Query failed: no database connection');
+    throw toGraphQLError(err as Error);
+  }
+}
+
 export const resolvers = {
   Query: {
     events: async (
@@ -142,8 +153,7 @@ export const resolvers = {
         });
       }
 
-      const pool = getPostgresPool();
-      const client = await pool.connect();
+      const client = await acquireClient();
       const safeLimit = clampLimit(limit, 10, MAX_LIMIT_ORDERS);
       const safeOffset = clampOffset(offset);
 
@@ -180,8 +190,7 @@ export const resolvers = {
         });
       }
 
-      const pool = getPostgresPool();
-      const client = await pool.connect();
+      const client = await acquireClient();
       const safeLimit = clampLimit(limit, 20, MAX_LIMIT_TICKETS);
       const safeOffset = clampOffset(offset);
 
@@ -201,8 +210,7 @@ export const resolvers = {
       { code }: { code: string },
       _context: GraphQLContext,
     ) => {
-      const pool = getPostgresPool();
-      const client = await pool.connect();
+      const client = await acquireClient();
 
       try {
         logger.info({ code }, 'Query: ticketByCode');

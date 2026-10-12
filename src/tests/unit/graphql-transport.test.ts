@@ -178,6 +178,31 @@ describe('GraphQL HTTP transport through createApp and Apollo', () => {
     expect(response.json()).toMatchObject({ error: { code: 'INTERNAL_ERROR' } });
   });
 
+  it('answers 415 to a body with an unsupported content type instead of 500', async () => {
+    const response = await app.inject({
+      method: 'POST', url: '/events', headers: { 'content-type': 'application/xml' }, payload: '<x/>',
+    });
+    expect(response.statusCode).toBe(415);
+    expect(response.json()).toMatchObject({ error: { code: 'UNSUPPORTED_MEDIA_TYPE' } });
+  });
+
+  it('answers 413 to a body over the size limit instead of 500', async () => {
+    const response = await app.inject({
+      method: 'POST', url: '/events', headers: { 'content-type': 'application/json' },
+      payload: JSON.stringify({ name: 'x'.repeat(2 * 1024 * 1024) }),
+    });
+    expect(response.statusCode).toBe(413);
+    expect(response.json()).toMatchObject({ error: { code: 'PAYLOAD_TOO_LARGE' } });
+  });
+
+  it.each(['/events/not-a-uuid', '/reservations/not-a-uuid', '/checkouts/not-a-uuid'])(
+    'answers 400 to GET %s before any database access', async (url) => {
+      const response = await app.inject({ method: 'GET', url });
+      expect(response.statusCode).toBe(400);
+      expect(response.json()).toMatchObject({ error: { code: 'VALIDATION_ERROR' } });
+    },
+  );
+
   it('verifies the exact signed JSON bytes and rejects a whitespace-only change', async () => {
     const payload = '{\n  "event": "결제", "x": 1\n}\n';
     const timestamp = String(Math.floor(Date.now() / 1000));
