@@ -3,11 +3,8 @@ import { z } from 'zod';
 import { AdmissionService, admissionService } from '@/core/services/admission.service';
 import { AdmissionError } from '@/core/models/admission';
 import { sendAdmissionError } from '@/api/errors';
+import { uuid } from '@/api/uuid';
 
-const uuid = z
-  .string()
-  .uuid()
-  .transform((v) => v.toLowerCase());
 const eventParams = z.object({ eventId: uuid }).strict();
 const joinBody = z.object({ epoch: uuid, joinRequestId: uuid }).strict();
 const cancelBody = z.object({ epoch: uuid }).strict();

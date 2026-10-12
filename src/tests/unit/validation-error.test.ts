@@ -49,17 +49,8 @@ describe('API validation and demo route protection', () => {
   });
 
   it('applies a dedicated ten-per-minute rate limit to public demo sessions', async () => {
-    process.env.ENABLE_DEMO_SESSION = 'true';
-    const { resolveRouteRateLimit } = await import('@/api/middleware/rateLimit');
-    expect(resolveRouteRateLimit('/demo/session')).toEqual({
-      action: 'demoSession',
-      limit: 10,
-      windowMs: 60_000,
-    });
-    expect(resolveRouteRateLimit('/demo/settlement')).toEqual({
-      action: 'demoSettlement',
-      limit: 10,
-      windowMs: 60_000,
-    });
+    const { rateLimitFor } = await import('@/api/middleware/rateLimit');
+    expect(rateLimitFor('demoSession')).toEqual({ limit: 10, windowMs: 60_000 });
+    expect(rateLimitFor('demoSettlement')).toEqual({ limit: 10, windowMs: 60_000 });
   });
 });

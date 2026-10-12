@@ -106,7 +106,8 @@ function createMockServer() {
     const cacheKey = "settle:" + idemKey;
     if (idempCache.has(cacheKey)) {
       const cached = idempCache.get(cacheKey);
-      return { ok: true, status: 200, data: { ...cached, duplicate: true, _meta: { source: "redis_idempotency_cache" } }, replayed: true };
+      // The server replays the stored first response as it is, including its duplicate value.
+      return { ok: true, status: 200, data: { ...cached, _meta: { source: "redis_idempotency_cache" } }, replayed: true };
     }
     if (settledTxns.has(body.providerTransactionId)) {
       // semantic duplicate — the server finds the order already paid under its row lock

@@ -1,4 +1,6 @@
 import crypto from 'crypto';
+import jwt from 'jsonwebtoken';
+import { GraphQLError } from 'graphql';
 import type { ApolloServer } from '@apollo/server';
 import type { FastifyInstance } from 'fastify';
 import type { GraphQLContext } from '@/api/graphql/loaders';
@@ -42,6 +44,9 @@ describe('GraphQL HTTP transport through createApp and Apollo', () => {
     app = await (await import('@/api/app')).createApp();
     app.get('/transport-internal-error', async () => {
       throw Object.assign(new Error('internal failure'), { statusCode: 400 });
+    });
+    app.get('/transport-numeric-code-error', async () => {
+      throw Object.assign(new Error('internal failure'), { statusCode: 400, code: 42 });
     });
     app.post('/webhooks/transport-probe', async (request) => ({
       raw: request.rawBody?.toString('utf8'),
@@ -109,9 +114,11 @@ describe('GraphQL HTTP transport through createApp and Apollo', () => {
     },
   );
 
-  it('preserves successful fields and GraphQL execution errors with HTTP 200', async () => {
+  it('keeps a GraphQLError that a resolver throws as it is, with HTTP 200', async () => {
     queryResolvers.event.mockImplementationOnce(() => {
-      throw new Error('resolver failed');
+      throw new GraphQLError('Event id must be a UUID', {
+        extensions: { code: 'VALIDATION_ERROR', statusCode: 400 },
+      });
     });
     const response = await app.inject({
       method: 'POST',
@@ -121,8 +128,40 @@ describe('GraphQL HTTP transport through createApp and Apollo', () => {
     expect(response.statusCode).toBe(200);
     expect(response.json()).toMatchObject({
       data: { events: [], event: null },
-      errors: [{ message: 'resolver failed', path: ['event'] }],
+      errors: [
+        {
+          message: 'Event id must be a UUID',
+          path: ['event'],
+          extensions: { code: 'VALIDATION_ERROR' },
+        },
+      ],
     });
+  });
+
+  // Any resolver, including a field resolver behind a DataLoader, can throw something that is
+  // not a GraphQLError. A refused database connection names the host and the port.
+  it('replaces an unexpected resolver error by a generic one and keeps the other fields', async () => {
+    queryResolvers.event.mockImplementationOnce(() => {
+      throw new Error('connect ECONNREFUSED 10.1.2.3:5432');
+    });
+    const response = await app.inject({
+      method: 'POST',
+      url: '/graphql',
+      payload: { query: '{ events { id } event(id: "bad") { id } }' },
+    });
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toMatchObject({
+      data: { events: [], event: null },
+      errors: [
+        {
+          message: 'Internal server error',
+          path: ['event'],
+          extensions: { code: 'INTERNAL_ERROR' },
+        },
+      ],
+    });
+    expect(response.body).not.toContain('10.1.2.3');
+    expect(response.body).not.toContain('ECONNREFUSED');
   });
 
   it('keeps complexity budget rejections at HTTP 400 without running resolvers', async () => {
@@ -220,6 +259,15 @@ describe('GraphQL HTTP transport through createApp and Apollo', () => {
     expect(response.json()).toMatchObject({ error: { code: 'INTERNAL_ERROR' } });
   });
 
+  it('keeps an error whose code is not a string at the standard 500', async () => {
+    const response = await app.inject({ method: 'GET', url: '/transport-numeric-code-error' });
+    expect(response.statusCode).toBe(500);
+    expect(response.json()).toMatchObject({
+      error: { code: 'INTERNAL_ERROR' },
+      requestId: expect.any(String),
+    });
+  });
+
   it('answers 415 to a body with an unsupported content type instead of 500', async () => {
     const response = await app.inject({
       method: 'POST',
@@ -242,14 +290,54 @@ describe('GraphQL HTTP transport through createApp and Apollo', () => {
     expect(response.json()).toMatchObject({ error: { code: 'PAYLOAD_TOO_LARGE' } });
   });
 
-  it.each(['/events/not-a-uuid', '/reservations/not-a-uuid', '/checkouts/not-a-uuid'])(
-    'answers 400 to GET %s before any database access',
-    async (url) => {
-      const response = await app.inject({ method: 'GET', url });
+  it('answers 400 to GET /events/:id with an id that is not a UUID', async () => {
+    const response = await app.inject({ method: 'GET', url: '/events/not-a-uuid' });
+    expect(response.statusCode).toBe(400);
+    expect(response.json()).toMatchObject({ error: { code: 'VALIDATION_ERROR' } });
+  });
+
+  describe.each(['/reservations', '/checkouts'])('GET %s/:id', (prefix) => {
+    it.each(['not-a-uuid', '11111111-1111-4111-8111-111111111111'])(
+      'answers 401 without a JWT whatever the id looks like (%s)',
+      async (id) => {
+        const response = await app.inject({ method: 'GET', url: `${prefix}/${id}` });
+        expect(response.statusCode).toBe(401);
+      },
+    );
+
+    it('answers 400 to an authenticated request with an id that is not a UUID', async () => {
+      const { getConfig } = await import('@/infra/config');
+      const token = jwt.sign(
+        { sub: '22222222-2222-4222-8222-222222222222' },
+        getConfig().JWT_SECRET,
+      );
+      const response = await app.inject({
+        method: 'GET',
+        url: `${prefix}/not-a-uuid`,
+        headers: { authorization: `Bearer ${token}` },
+      });
       expect(response.statusCode).toBe(400);
       expect(response.json()).toMatchObject({ error: { code: 'VALIDATION_ERROR' } });
-    },
-  );
+    });
+  });
+
+  it.each([
+    ['a body that is not JSON', { 'content-type': 'text/plain' }, 'x'],
+    ['no body at all', {}, undefined],
+  ])('answers 400, not 500, to a webhook with %s', async (_name, contentHeaders, payload) => {
+    const response = await app.inject({
+      method: 'POST',
+      url: '/webhooks/transport-probe',
+      headers: {
+        ...contentHeaders,
+        'x-webhook-timestamp': String(Math.floor(Date.now() / 1000)),
+        'x-webhook-signature': 'x',
+      },
+      payload,
+    });
+    expect(response.statusCode).toBe(400);
+    expect(response.json()).toMatchObject({ error: { code: 'RAW_BODY_UNAVAILABLE' } });
+  });
 
   it('verifies the exact signed JSON bytes and rejects a whitespace-only change', async () => {
     const payload = '{\n  "event": "결제", "x": 1\n}\n';

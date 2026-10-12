@@ -2,6 +2,12 @@ import 'dotenv/config';
 import { z } from 'zod';
 
 const DEVELOPMENT_JWT_SECRET = 'dev-secret-change-in-production-32chars';
+// 공개된 적이 있는 값들. 이 저장소의 `.env.example`이 2026-10-12까지 둘째 값을 싣고 있었으므로
+// 그대로 복사해 쓴 환경이 있을 수 있다. production에서는 둘 다 거부한다.
+const PUBLIC_JWT_SECRETS = new Set([
+  DEVELOPMENT_JWT_SECRET,
+  'your-jwt-secret-change-in-production-32chars',
+]);
 const MIN_SECRET_LENGTH = 32;
 
 // 환경변수에서 boolean을 안전하게 읽는다.
@@ -27,7 +33,6 @@ const envSchema = z.object({
   PORT: z.coerce.number().default(3000),
 
   // 데이터베이스 설정
-  DATABASE_URL: z.string().default('postgresql://peakpass:peakpass@localhost:5432/peakpass'),
   DB_HOST: z.string().default('localhost'),
   DB_PORT: z.coerce.number().default(5432),
   DB_USER: z.string().default('peakpass'),
@@ -39,11 +44,9 @@ const envSchema = z.object({
   DB_POOL_SAMPLE_INTERVAL_MS: z.coerce.number().int().min(0).max(2147483647).default(0),
 
   // Redis 설정
-  REDIS_URL: z.string().optional(),
   REDIS_HOST: z.string().default('localhost'),
   REDIS_PORT: z.coerce.number().default(6379),
   REDIS_PASSWORD: z.string().optional(),
-  REDIS_POOL_SIZE: z.coerce.number().default(10),
 
   // 애플리케이션 설정
   JWT_SECRET: z.string().min(MIN_SECRET_LENGTH).default(DEVELOPMENT_JWT_SECRET),
@@ -57,8 +60,6 @@ const envSchema = z.object({
     .default(20),
 
   // 외부 서비스 설정
-  PAYMENT_SERVICE_URL: z.string().url().default('https://api.payment-provider.example.com'),
-  PAYMENT_API_KEY: z.string().default('test-key-change-in-production'),
   WEBHOOK_SIGNING_SECRET: z.string().optional(),
   // webhook timestamp ± 허용 범위 (초). default 5분 (Stripe 권장값과 동일).
   WEBHOOK_REPLAY_TOLERANCE_SECONDS: z.coerce.number().int().positive().default(300),
@@ -122,7 +123,7 @@ function assertProductionInvariants(config: Config): void {
     return;
   }
 
-  if (config.JWT_SECRET === DEVELOPMENT_JWT_SECRET) {
+  if (PUBLIC_JWT_SECRETS.has(config.JWT_SECRET)) {
     throw new Error('JWT_SECRET must be set in production environment');
   }
 

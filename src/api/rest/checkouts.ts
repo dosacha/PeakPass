@@ -15,8 +15,9 @@ import {
 } from '@/infra/redis/commands';
 import { assertBodyUserMatchesAuth, purchaseAdmission } from '@/api/middleware/auth';
 import { z } from 'zod';
+import { uuid } from '@/api/uuid';
 
-const OrderParamsSchema = z.object({ orderId: z.string().uuid() });
+const OrderParamsSchema = z.object({ orderId: uuid });
 
 /**
  * 정책 (현재 코드 기준):
@@ -35,80 +36,82 @@ export async function registerCheckoutRoutes(app: FastifyInstance) {
   const orderService = new OrderService();
   const ticketService = new TicketService();
 
-  app.post<{ Body: Record<string, unknown> | undefined }>('/checkouts', async (request, reply) => {
-    const body = request.body ?? {};
-    const bodyIdempotencyKey =
-      typeof body.idempotencyKey === 'string' ? body.idempotencyKey : undefined;
-    const idempotencyKey = request.idempotencyKey ?? bodyIdempotencyKey;
+  app.post<{ Body: Record<string, unknown> | undefined }>(
+    '/checkouts',
+    { config: { rateLimit: 'checkout', idempotency: 'checkout' } },
+    async (request, reply) => {
+      const body = request.body ?? {};
+      const bodyIdempotencyKey =
+        typeof body.idempotencyKey === 'string' ? body.idempotencyKey : undefined;
+      const idempotencyKey = request.idempotencyKey ?? bodyIdempotencyKey;
 
-    try {
-      const input = CreateOrderSchema.parse({
-        ...body,
-        idempotencyKey,
-      });
-
-      // admission 필드가 있으면 JWT 없는 요청은 admission 계약의 401 envelope로 먼저 끝난다.
-      const admission = purchaseAdmission(request);
-      assertBodyUserMatchesAuth(request, input.userId);
-
-      logger.info(
-        {
-          eventId: input.eventId,
-          userId: input.userId,
-          quantity: input.quantity,
-          idempotencyKey: input.idempotencyKey,
-        },
-        'Checkout request',
-      );
-
-      const { settlement, ...orderResult } = await purchaseTransaction(
-        async (client) => {
-          const checkoutService = new CheckoutService();
-          return checkoutService.checkout(input, client, admission);
-        },
-        { admission },
-      );
-      // The result is committed. Redis is told now; a failure here never changes the response.
-      await settleAdmission(settlement);
-
-      if (input.reservationId) {
-        await deleteReservationHold(input.reservationId);
-      }
-
-      await invalidateEventCache(input.eventId);
-
-      if ('rejected' in orderResult) {
-        throw orderResult.rejected;
-      }
-
-      if ('reservationExpired' in orderResult) {
-        throw new ConflictError('Reservation has expired or is no longer valid');
-      }
-
-      logger.info(
-        {
-          orderId: orderResult.order.id,
-          ticketCount: orderResult.tickets.length,
+      try {
+        const input = CreateOrderSchema.parse({
+          ...body,
           idempotencyKey,
-        },
-        'Checkout completed successfully',
-      );
+        });
 
-      return reply.code(201).send(orderResult);
-    } finally {
-      if (request.idempotencyLockToken && request.idempotencyKey && request.idempotencyScope) {
-        await releaseIdempotencyLock(
-          request.idempotencyScope,
-          request.idempotencyKey,
-          request.idempotencyLockToken,
+        // admission 필드가 있으면 JWT 없는 요청은 admission 계약의 401 envelope로 먼저 끝난다.
+        const admission = purchaseAdmission(request);
+        assertBodyUserMatchesAuth(request, input.userId);
+
+        logger.info(
+          {
+            eventId: input.eventId,
+            userId: input.userId,
+            quantity: input.quantity,
+            idempotencyKey: input.idempotencyKey,
+          },
+          'Checkout request',
         );
+
+        const { settlement, ...orderResult } = await purchaseTransaction(
+          async (client) => {
+            const checkoutService = new CheckoutService();
+            return checkoutService.checkout(input, client, admission);
+          },
+          { admission },
+        );
+        // The result is committed. Redis is told now; a failure here never changes the response.
+        await settleAdmission(settlement);
+
+        if (input.reservationId) {
+          await deleteReservationHold(input.reservationId);
+        }
+
+        await invalidateEventCache(input.eventId);
+
+        if ('rejected' in orderResult) {
+          throw orderResult.rejected;
+        }
+
+        if ('reservationExpired' in orderResult) {
+          throw new ConflictError('Reservation has expired or is no longer valid');
+        }
+
+        logger.info(
+          {
+            orderId: orderResult.order.id,
+            ticketCount: orderResult.tickets.length,
+            idempotencyKey,
+          },
+          'Checkout completed successfully',
+        );
+
+        return reply.code(201).send(orderResult);
+      } finally {
+        if (request.idempotencyLockToken && request.idempotencyKey && request.idempotencyScope) {
+          await releaseIdempotencyLock(
+            request.idempotencyScope,
+            request.idempotencyKey,
+            request.idempotencyLockToken,
+          );
+        }
       }
-    }
-  });
+    },
+  );
 
   app.get<{ Params: { orderId: string } }>('/checkouts/:orderId', async (request, reply) => {
-    // UUID가 아닌 id는 DB까지 가면 22P02로 500이 된다. 입력 오류(400)로 먼저 끝낸다.
-    const { orderId } = OrderParamsSchema.parse(request.params);
     const config = getConfig();
 
     // auth 가드를 DB 조회 *전에* 통과시킨다.
@@ -118,6 +121,10 @@ export async function registerCheckoutRoutes(app: FastifyInstance) {
         error: { code: 'UNAUTHENTICATED', message: 'Authentication required' },
       });
     }
+
+    // UUID가 아닌 id는 DB까지 가면 22P02로 500이 된다. 입력 오류(400)로 끝낸다.
+    // 인증 가드 뒤에 둔다: 인증 없는 요청은 id 형식과 무관하게 401이어야 한다.
+    const { orderId } = OrderParamsSchema.parse(request.params);
 
     const client = await pool.connect();
 

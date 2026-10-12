@@ -6,8 +6,9 @@ import { ValidationError } from '@/core/errors';
 import { getConfig } from '@/infra/config';
 import { getLogger } from '@/infra/logger';
 import { z } from 'zod';
+import { uuid } from '@/api/uuid';
 
-const IdParamsSchema = z.object({ id: z.string().uuid() });
+const IdParamsSchema = z.object({ id: uuid });
 
 export async function registerEventRoutes(app: FastifyInstance) {
   const logger = getLogger();

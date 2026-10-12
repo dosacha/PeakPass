@@ -67,6 +67,11 @@ describe('production config invariants', () => {
       'JWT_SECRET must be set in production environment',
     ],
     [
+      'the JWT_SECRET that .env.example used to ship',
+      { JWT_SECRET: 'your-jwt-secret-change-in-production-32chars' },
+      'JWT_SECRET must be set in production environment',
+    ],
+    [
       'a missing WEBHOOK_SIGNING_SECRET',
       { WEBHOOK_SIGNING_SECRET: undefined },
       'WEBHOOK_SIGNING_SECRET must be set in production environment',

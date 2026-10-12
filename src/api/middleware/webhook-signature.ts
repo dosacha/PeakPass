@@ -114,10 +114,15 @@ export async function webhookSignatureMiddleware(request: FastifyRequest, reply:
     });
   }
 
+  // rawBody는 JSON parser만 채운다. 본문이 없거나 JSON이 아닌 요청은 서명할 바이트가 없다.
+  // 보낸 쪽의 잘못이므로 500이 아니라 400으로 답한다.
   const rawBody = request.rawBody;
   if (!rawBody) {
-    return reply.code(500).send({
-      error: { code: 'RAW_BODY_UNAVAILABLE', message: 'unable to verify webhook signature' },
+    return reply.code(400).send({
+      error: {
+        code: 'RAW_BODY_UNAVAILABLE',
+        message: 'webhook body must be sent as application/json',
+      },
     });
   }
 

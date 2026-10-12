@@ -4,8 +4,9 @@ import { EventService } from '@/core/services/event.service';
 import { OrderService } from '@/core/services/order.service';
 import { TicketService } from '@/core/services/ticket.service';
 import { getLogger } from '@/infra/logger';
-import { AppError } from '@/core/errors';
-import { getPostgresPool, PoolClient } from '@/infra/postgres/client';
+import { AppError, ValidationError } from '@/core/errors';
+import { uuid } from '@/api/uuid';
+import { getPostgresPool } from '@/infra/postgres/client';
 
 const logger = getLogger();
 const eventService = new EventService();
@@ -102,17 +103,6 @@ function toGraphQLError(err: Error): GraphQLError {
   });
 }
 
-// 연결 실패(ECONNREFUSED 등)의 메시지에는 DB host와 port가 들어 있다. resolver의 try 밖에서
-// 던져지면 그대로 응답에 실리므로, 다른 실패와 같은 변환을 거치게 한다.
-async function acquireClient(): Promise<PoolClient> {
-  try {
-    return await getPostgresPool().connect();
-  } catch (err) {
-    logger.error({ err }, 'Query failed: no database connection');
-    throw toGraphQLError(err as Error);
-  }
-}
-
 export const resolvers = {
   Query: {
     events: async (
@@ -133,6 +123,12 @@ export const resolvers = {
     },
 
     event: async (_: unknown, { id }: { id: string }, context: GraphQLContext) => {
+      // UUID가 아닌 id를 loader에 넣으면 같은 batch의 쿼리 전체가 22P02로 실패해, 함께 요청된
+      // 정상 id까지 오류가 된다. REST와 같이 입력 오류로 먼저 거절한다.
+      if (!uuid.safeParse(id).success) {
+        throw toGraphQLError(new ValidationError('Event id must be a UUID'));
+      }
+
       try {
         logger.info({ id }, 'Query: event');
         return await context.loaders.eventLoader.load(id);
@@ -153,7 +149,7 @@ export const resolvers = {
         });
       }
 
-      const client = await acquireClient();
+      const client = await getPostgresPool().connect();
       const safeLimit = clampLimit(limit, 10, MAX_LIMIT_ORDERS);
       const safeOffset = clampOffset(offset);
 
@@ -201,7 +197,7 @@ export const resolvers = {
         });
       }
 
-      const client = await acquireClient();
+      const client = await getPostgresPool().connect();
       const safeLimit = clampLimit(limit, 20, MAX_LIMIT_TICKETS);
       const safeOffset = clampOffset(offset);
 
@@ -228,7 +224,7 @@ export const resolvers = {
     },
 
     ticketByCode: async (_: unknown, { code }: { code: string }, _context: GraphQLContext) => {
-      const client = await acquireClient();
+      const client = await getPostgresPool().connect();
 
       try {
         logger.info({ code }, 'Query: ticketByCode');

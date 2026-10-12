@@ -114,7 +114,8 @@ export async function createApp() {
     // 서버 결함이 아니므로 그 상태 코드로 답한다. Fastify의 오류(code가 FST_ERR_로 시작)만
     // 대상이다. statusCode만 붙은 알 수 없는 오류는 메시지가 새지 않도록 500으로 남긴다.
     if (
-      err.code?.startsWith('FST_ERR_') &&
+      typeof err.code === 'string' &&
+      err.code.startsWith('FST_ERR_') &&
       typeof err.statusCode === 'number' &&
       err.statusCode >= 400 &&
       err.statusCode < 500

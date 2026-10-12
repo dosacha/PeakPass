@@ -168,29 +168,24 @@ describe('concurrency integration tests', () => {
     );
     process.stdout.write(JSON.stringify({ concurrentCheckouts: { sold, reasons } }) + '\n');
 
-    // 동시 구매의 패자는 품절이거나, SERIALIZABLE 재시도 3회를 다 쓴 40001이다.
+    // 동시 구매의 패자는 품절이거나, SERIALIZABLE transaction이 세 번의 시도를 다 쓴 40001이다.
     // 어느 쪽이 몇 건인지는 타이밍에 달려 있어 단언하지 않는다. 다른 이유의 거절은 없어야 한다.
     expect(
       reasons.filter((reason) => reason !== 'sold-out' && reason !== 'serialization-failure'),
     ).toEqual([]);
 
-    // 불변식: 판 수만큼만 좌석이 줄고, 좌석보다 많이 팔리지 않는다.
-    expect(sold).toBeGreaterThanOrEqual(1);
-    expect(sold).toBeLessThanOrEqual(seats);
-    expect(await getAvailableSeats(eventId)).toBe(seats - sold);
-    expect(await countOrders(eventId)).toBe(sold);
+    // 거절 사유가 무엇이든 팔린 수는 정확히 좌석 수다. 품절 거절은 좌석이 0일 때만 나오고,
+    // 한 요청의 시도 세 번이 모두 직렬화 실패였다면 그 사이에 서로 다른 구매 3건이 commit된 것이다.
+    expect(sold).toBe(seats);
+    expect(reasons).toHaveLength(userIds.length - seats);
+    expect(await getAvailableSeats(eventId)).toBe(0);
+    expect(await countOrders(eventId)).toBe(seats);
 
-    // 패자가 한 명씩 다시 구매하면 경합이 없다. 남은 좌석만큼만 팔리고 나머지는 품절로 거절된다.
+    // 패자가 한 명씩 다시 구매하면 경합이 없으므로 모두 품절로 거절되고, 주문은 늘지 않는다.
     const losers = userIds.filter((_, index) => results[index].status === 'rejected');
-    const retried: string[] = [];
     for (const userId of losers) {
-      retried.push(await checkout(userId).then(() => 'sold', rejectionReason));
+      expect(await checkout(userId).then(() => 'sold', rejectionReason)).toBe('sold-out');
     }
-
-    expect(retried.filter((outcome) => outcome === 'sold')).toHaveLength(seats - sold);
-    expect(retried.filter((outcome) => outcome === 'sold-out')).toHaveLength(
-      losers.length - (seats - sold),
-    );
     expect(await getAvailableSeats(eventId)).toBe(0);
     expect(await countOrders(eventId)).toBe(seats);
   }, 15000);

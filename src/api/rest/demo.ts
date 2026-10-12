@@ -160,7 +160,7 @@ export async function registerDemoSessionRoutes(
   const findUserByEmail = dependencies.findUserByEmail ?? findDemoUserByEmail;
   const processSettlement = dependencies.processSettlement ?? processDemoSettlement;
 
-  app.post('/demo/session', async (request, reply) => {
+  app.post('/demo/session', { config: { rateLimit: 'demoSession' } }, async (request, reply) => {
     const user = await findUserByEmail(config.DEMO_USER_EMAIL);
     if (!user) {
       throw new DemoSessionConfigurationError();
@@ -172,26 +172,30 @@ export async function registerDemoSessionRoutes(
     return reply.header('Cache-Control', 'no-store').send(session);
   });
 
-  app.post<{ Body: unknown }>('/demo/settlement', async (request, reply) => {
-    const demoUser = requireDemoSession(request);
-    const body = DemoSettlementSchema.parse(request.body);
-    const idempotencyKey = requireDemoIdempotencyKey(request);
-    const result = await processSettlement({
-      orderId: body.orderId,
-      userId: demoUser.id,
-      idempotencyKey,
-    });
+  app.post<{ Body: unknown }>(
+    '/demo/settlement',
+    { config: { rateLimit: 'demoSettlement' } },
+    async (request, reply) => {
+      const demoUser = requireDemoSession(request);
+      const body = DemoSettlementSchema.parse(request.body);
+      const idempotencyKey = requireDemoIdempotencyKey(request);
+      const result = await processSettlement({
+        orderId: body.orderId,
+        userId: demoUser.id,
+        idempotencyKey,
+      });
 
-    logger.info(
-      {
-        requestId: request.id,
-        orderId: result.order.id,
-        duplicate: result.duplicate,
-        ticketCount: result.tickets.length,
-      },
-      'Live demo settlement processed',
-    );
+      logger.info(
+        {
+          requestId: request.id,
+          orderId: result.order.id,
+          duplicate: result.duplicate,
+          ticketCount: result.tickets.length,
+        },
+        'Live demo settlement processed',
+      );
 
-    return reply.header('Cache-Control', 'no-store').send(result);
-  });
+      return reply.header('Cache-Control', 'no-store').send(result);
+    },
+  );
 }

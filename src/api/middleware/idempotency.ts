@@ -12,23 +12,6 @@ import {
 const logger = getLogger();
 const IN_PROGRESS_RECHECK_DELAY_MS = 100;
 
-/**
- * 매칭된 route 패턴(`request.routeOptions.url`)을 idempotency command scope로 매핑한다.
- * raw `request.url`을 넘기면 인코딩된 경로(`/%63heckouts`)가 scope 없이 handler에 닿는다.
- *
- * 등록된 command surface만 정확히(pathname 일치) 매핑한다 — 부분 문자열 매칭으로
- * 의도치 않은 alias가 생기는 것을 막기 위해서다. 새 command route가 생기면
- * 여기에 명시적으로 추가해야 idempotency middleware 대상이 된다.
- * scope가 결정되지 않는 route는 idempotency middleware 대상이 아니다
- * (임의의 기본 scope를 부여하지 않는다).
- */
-export function resolveIdempotencyScope(url: string): IdempotencyScope | null {
-  const pathname = url.split('?')[0];
-  if (pathname === '/checkouts') return 'checkout';
-  if (pathname === '/webhooks/payments/settlement') return 'payment-settlement';
-  return null;
-}
-
 function getIdempotencyHeader(request: FastifyRequest): string | undefined {
   const header = request.headers['idempotency-key'];
   const value = Array.isArray(header) ? header[0] : header;
@@ -72,11 +55,10 @@ async function sendCachedResult(
 }
 
 export async function idempotencyMiddleware(request: FastifyRequest, reply: FastifyReply) {
-  if (request.method !== 'POST') {
-    return;
-  }
-
-  const scope = resolveIdempotencyScope(request.routeOptions.url ?? '');
+  // 어느 command인지는 route가 `config.idempotency`로 선언한다. 요청 경로를 해석하지 않으므로
+  // 인코딩된 경로(`/%63heckouts`)도 같은 route의 선언을 따른다. 선언하지 않은 route는 대상이
+  // 아니다(임의의 기본 scope를 주지 않는다).
+  const scope = request.routeOptions.config.idempotency;
   if (!scope) {
     return;
   }
@@ -169,6 +151,10 @@ export async function storeIdempotencyResult(
 }
 
 declare module 'fastify' {
+  interface FastifyContextConfig {
+    /** 이 route의 idempotency command scope. */
+    idempotency?: IdempotencyScope;
+  }
   interface FastifyRequest {
     idempotencyKey?: string;
     idempotencyLockToken?: string;

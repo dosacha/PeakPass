@@ -5,8 +5,9 @@ import { getConfig } from '@/infra/config';
 import { getLogger } from '@/infra/logger';
 import { assertBodyUserMatchesAuth, purchaseAdmission } from '@/api/middleware/auth';
 import { z } from 'zod';
+import { uuid } from '@/api/uuid';
 
-const IdParamsSchema = z.object({ id: z.string().uuid() });
+const IdParamsSchema = z.object({ id: uuid });
 
 /**
  * 정책 (현재 코드 기준):
@@ -22,20 +23,22 @@ export async function registerReservationRoutes(app: FastifyInstance) {
   const logger = getLogger();
   const reservationService = new ReservationService();
 
-  app.post<{ Body: unknown }>('/reservations', async (request, reply) => {
-    const input = CreateReservationSchema.parse(request.body);
-    // admission 필드가 있으면 JWT 없는 요청은 admission 계약의 401 envelope로 먼저 끝난다.
-    const admission = purchaseAdmission(request);
-    assertBodyUserMatchesAuth(request, input.userId);
-    const reservation = await reservationService.createReservation(input, admission);
+  app.post<{ Body: unknown }>(
+    '/reservations',
+    { config: { rateLimit: 'reservation' } },
+    async (request, reply) => {
+      const input = CreateReservationSchema.parse(request.body);
+      // admission 필드가 있으면 JWT 없는 요청은 admission 계약의 401 envelope로 먼저 끝난다.
+      const admission = purchaseAdmission(request);
+      assertBodyUserMatchesAuth(request, input.userId);
+      const reservation = await reservationService.createReservation(input, admission);
 
-    logger.info({ reservationId: reservation.id, eventId: input.eventId }, 'Reservation created');
-    return reply.code(201).send(reservation);
-  });
+      logger.info({ reservationId: reservation.id, eventId: input.eventId }, 'Reservation created');
+      return reply.code(201).send(reservation);
+    },
+  );
 
   app.get<{ Params: { id: string } }>('/reservations/:id', async (request, reply) => {
-    // UUID가 아닌 id는 DB까지 가면 22P02로 500이 된다. 입력 오류(400)로 먼저 끝낸다.
-    const { id } = IdParamsSchema.parse(request.params);
     const config = getConfig();
 
     // auth 가드를 DB 조회 *전에* 통과시킨다.
@@ -45,6 +48,10 @@ export async function registerReservationRoutes(app: FastifyInstance) {
         error: { code: 'UNAUTHENTICATED', message: 'Authentication required' },
       });
     }
+
+    // UUID가 아닌 id는 DB까지 가면 22P02로 500이 된다. 입력 오류(400)로 끝낸다.
+    // 인증 가드 뒤에 둔다: 인증 없는 요청은 id 형식과 무관하게 401이어야 한다.
+    const { id } = IdParamsSchema.parse(request.params);
 
     const reservation = await reservationService.getReservation(id);
 
