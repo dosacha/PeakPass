@@ -2,7 +2,7 @@
 
 이 문서는 PeakPass의 입장 제어(대기열, 입장량 제한, polling)를 왜 이렇게 만들었는지와 어떻게 켜고 끄고 재현하는지를 한곳에 모은다. 규칙의 원문은 [입장 제어 계약 admission-v1](ADMISSION_CONTRACT.md)이고, 이 문서가 계약과 다르면 계약이 맞다.
 
-기준: 여기 적은 수치는 측정 commit `6f9568f780219ea8e28e026072c448a38e8e069b`(main `5529898`로 병합)의 코드로 2026-10-08–09에 잰 것이다. 그 뒤 계약과 migration은 바뀌지 않았고, 제품 코드는 2026-10-12에 입장 제어 밖에서 바뀌었다(인코딩된 경로의 미들웨어 적용, 매칭되는 route가 없는 요청을 한도 없이 404로 답하는 것, 동작하지 않던 `GET /graphql` 삭제, 밖에서 들어오는 UUID(JWT 주체, 조회 경로의 id, 예약·checkout·정산·데모 정산 본문의 id, checkout의 Idempotency-Key, GraphQL `event(id)`)를 소문자로 맞춘 것, 운영 시작 검사, 입력 오류의 4xx 응답, GraphQL 오류 메시지 가리기, 주석 정리와 서식). 그 변경 뒤에 다시 측정하지는 않았다. 수치는 모두 로컬 단일 host에서 한 측정이며 운영 성과가 아니다.
+기준: 여기 적은 수치는 측정 commit `6f9568f780219ea8e28e026072c448a38e8e069b`(main `5529898`로 병합)의 코드로 2026-10-08–09에 잰 것이다. 그 뒤 계약과 migration은 바뀌지 않았고, 제품 코드는 2026-10-12에 입장 제어 밖에서 바뀌었다(인코딩된 경로의 미들웨어 적용, 매칭되는 route가 없는 요청을 한도 없이 404로 답하는 것, 동작하지 않던 `GET /graphql` 삭제, 밖에서 들어오는 UUID를 소문자로 맞춘 것(대상: UUID인 JWT 주체, 조회 경로의 id, 예약·checkout·정산·데모 정산 본문의 `eventId`·`userId`·`reservationId`·`orderId`, GraphQL `event(id)`. checkout의 Idempotency-Key는 PostgreSQL에 쓰는 값만 맞추고 Redis의 lock은 보낸 그대로 쓴다), 운영 시작 검사, 입력 오류의 4xx 응답, GraphQL 오류 메시지 가리기, 주석 정리와 서식). 그 변경 뒤에 다시 측정하지는 않았다. 수치는 모두 로컬 단일 host에서 한 측정이며 운영 성과가 아니다.
 
 ## 무엇을 풀려고 했나
 
