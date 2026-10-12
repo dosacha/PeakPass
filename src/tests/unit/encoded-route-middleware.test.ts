@@ -6,7 +6,9 @@ import type { GraphQLContext } from '@/api/graphql/loaders';
 // The global hooks (rate limit, webhook signature, idempotency) on the real application: which
 // policy a request gets must follow the route that handles it, not the text of its URL.
 //   - Fastify decodes the path before it picks a route, so `POST /%63heckouts` is a checkout.
-//   - A lookup of an order is not a purchase and must not use up the purchase limit.
+//   - A lookup of an order or a reservation counts against the same limit as the purchase. The
+//     admission contract (§3, §6) keeps the limiter policy of lookups as it was, so this is
+//     pinned here as it is: a known limit, not an accident of the matching.
 //   - A request that matches no route is a 404 and is not counted.
 const mockCheckRateLimit = jest.fn();
 jest.mock('@/infra/logger', () => ({
@@ -40,6 +42,7 @@ describe('global hooks follow the matched route of the real application', () => 
       JWT_SECRET: 'e'.repeat(32),
       WEBHOOK_SIGNING_SECRET: secret,
       ENABLE_RATE_LIMITING: 'true',
+      ENABLE_DEMO_SESSION: 'true',
       RATE_LIMIT_FAIL_MODE: 'closed',
     };
     const serverModule = await import('@/api/graphql/server');
@@ -90,6 +93,8 @@ describe('global hooks follow the matched route of the real application', () => 
     ['/%72eservations', 'reservation'],
     ['/graphql', 'graphql'],
     ['/%67raphql', 'graphql'],
+    ['/demo/session', 'demoSession'],
+    ['/demo/settlement', 'demoSettlement'],
   ])('counts POST %s against the %s limit', async (url, action) => {
     await app.inject({
       method: 'POST',
@@ -119,16 +124,29 @@ describe('global hooks follow the matched route of the real application', () => 
   );
 
   it.each([
-    ['GET', `/checkouts/${orderId}`],
-    ['HEAD', `/checkouts/${orderId}`],
-    ['GET', `/reservations/${orderId}`],
-    ['HEAD', `/reservations/${orderId}`],
-  ] as const)('does not count %s %s: a lookup is not a purchase', async (method, url) => {
-    const response = await app.inject({ method, url });
+    ['GET', `/checkouts/${orderId}`, 'checkout'],
+    ['HEAD', `/checkouts/${orderId}`, 'checkout'],
+    ['GET', `/reservations/${orderId}`, 'reservation'],
+    ['HEAD', `/reservations/${orderId}`, 'reservation'],
+  ] as const)('counts %s %s against the %s limit, as before', async (method, url, action) => {
+    await app.inject({ method, url });
 
-    // No JWT is sent, so the route itself answers 401; the limiter was not asked.
-    expect(response.statusCode).toBe(401);
-    expect(mockCheckRateLimit).not.toHaveBeenCalled();
+    expect(mockCheckRateLimit).toHaveBeenCalledTimes(1);
+    expect(mockCheckRateLimit.mock.calls[0][1]).toBe(action);
+  });
+
+  it('answers 503 to a lookup while the rate limiter has no Redis', async () => {
+    mockCheckRateLimit.mockResolvedValue({
+      allowed: false,
+      count: 0,
+      resetAt: 0,
+      redisAvailable: false,
+    });
+
+    const response = await app.inject({ method: 'GET', url: `/reservations/${orderId}` });
+
+    expect(response.statusCode).toBe(503);
+    expect(response.json()).toMatchObject({ error: { code: 'RATE_LIMIT_UNAVAILABLE' } });
   });
 
   it.each([

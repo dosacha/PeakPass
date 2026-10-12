@@ -38,11 +38,12 @@ declare module 'fastify' {
 /**
  * action별 한도. 어느 route가 어느 action인지는 route가 `config.rateLimit`으로 선언한다.
  *
- * 요청 경로의 문자열로 고르지 않는 이유는 둘이다.
- *   - Fastify는 경로를 디코딩한 뒤 route를 고른다. raw URL로 판정하면 `/%63heckouts`가
- *     `/checkouts` handler에 닿으면서 한도를 건너뛴다.
- *   - 경로의 부분 문자열로 고르면 method를 구분하지 못한다. `GET /checkouts/:orderId` 조회가
- *     구매(POST)와 같은 한도를 나눠 써서, 주문을 몇 번 조회하면 구매가 429로 막힌다.
+ * 요청 경로의 문자열로 고르지 않는다. Fastify는 경로를 디코딩한 뒤 route를 고르므로, raw URL로
+ * 판정하면 `/%63heckouts`가 `/checkouts` handler에 닿으면서 한도를 건너뛴다.
+ *
+ * 예약·주문 조회(`GET /reservations/:id`, `GET /checkouts/:orderId`)는 생성 요청과 같은 action을
+ * 선언한다. 조회가 구매 한도를 나눠 쓰는 것은 알려진 한계이고, 입장 제어 계약이 기존 limiter
+ * 정책을 고정하고 있어 그대로 둔다.
  *
  * GraphQL은 별도 한도를 사용한다. write 경로의 5/60s를 그대로 쓰면 화면 1개 렌더링에
  * 호출되는 events/event/myOrders 등이 1초도 안 되어 한도를 소진한다.

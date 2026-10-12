@@ -48,7 +48,9 @@ describe('API validation and demo route protection', () => {
     );
   });
 
-  it('applies a dedicated ten-per-minute rate limit to public demo sessions', async () => {
+  // Which routes use these limits is checked on the real application in
+  // encoded-route-middleware.test.ts.
+  it('gives the two demo actions a limit of ten per minute', async () => {
     const { rateLimitFor } = await import('@/api/middleware/rateLimit');
     expect(rateLimitFor('demoSession')).toEqual({ limit: 10, windowMs: 60_000 });
     expect(rateLimitFor('demoSettlement')).toEqual({ limit: 10, windowMs: 60_000 });

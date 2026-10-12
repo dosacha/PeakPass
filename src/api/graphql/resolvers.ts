@@ -125,13 +125,16 @@ export const resolvers = {
     event: async (_: unknown, { id }: { id: string }, context: GraphQLContext) => {
       // UUID가 아닌 id를 loader에 넣으면 같은 batch의 쿼리 전체가 22P02로 실패해, 함께 요청된
       // 정상 id까지 오류가 된다. REST와 같이 입력 오류로 먼저 거절한다.
-      if (!uuid.safeParse(id).success) {
+      const parsed = uuid.safeParse(id);
+      if (!parsed.success) {
         throw toGraphQLError(new ValidationError('Event id must be a UUID'));
       }
 
       try {
         logger.info({ id }, 'Query: event');
-        return await context.loaders.eventLoader.load(id);
+        // loader는 PostgreSQL이 돌려준 소문자 id로 결과를 찾는다. 대문자로 온 id를 그대로 넘기면
+        // 있는 이벤트도 null이 된다.
+        return await context.loaders.eventLoader.load(parsed.data);
       } catch (err) {
         logger.error({ err, id }, 'Query failed: event');
         throw toGraphQLError(err as Error);

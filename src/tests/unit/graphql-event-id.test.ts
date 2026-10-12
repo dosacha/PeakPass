@@ -35,4 +35,14 @@ describe('Query.event with an id that is not a UUID', () => {
     await expect(resolvers.Query.event({}, { id }, context)).resolves.toBeNull();
     expect(load).toHaveBeenCalledWith(id);
   });
+
+  // The loader finds its rows by the lower-case id that PostgreSQL returns.
+  it('passes an upper-case UUID on in lower case', async () => {
+    const load = jest.fn(async () => null);
+    const context = { loaders: { eventLoader: { load } } } as never;
+
+    await resolvers.Query.event({}, { id: 'AAAAAAAA-AAAA-4AAA-8AAA-AAAAAAAAAAAA' }, context);
+
+    expect(load).toHaveBeenCalledWith('aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa');
+  });
 });

@@ -111,61 +111,67 @@ export async function registerCheckoutRoutes(app: FastifyInstance) {
     },
   );
 
-  app.get<{ Params: { orderId: string } }>('/checkouts/:orderId', async (request, reply) => {
-    const config = getConfig();
+  // 조회도 구매와 같은 한도를 쓴다. 입장 제어 계약(admission-v1 §3, §6)이 조회의 기존 limiter
+  // 정책 유지를 정하고 있어 바꾸지 않았다. 주문을 여러 번 조회하면 그만큼 구매 한도가 줄어든다.
+  app.get<{ Params: { orderId: string } }>(
+    '/checkouts/:orderId',
+    { config: { rateLimit: 'checkout' } },
+    async (request, reply) => {
+      const config = getConfig();
 
-    // auth 가드를 DB 조회 *전에* 통과시킨다.
-    // 무인증 요청이 어차피 401로 끊길 거라면 DB connection을 잡을 이유가 없다.
-    if (config.ENFORCE_AUTH_USER_MATCH && !request.user?.id) {
-      return reply.code(401).send({
-        error: { code: 'UNAUTHENTICATED', message: 'Authentication required' },
-      });
-    }
-
-    // UUID가 아닌 id는 DB까지 가면 22P02로 500이 된다. 입력 오류(400)로 끝낸다.
-    // 인증 가드 뒤에 둔다: 인증 없는 요청은 id 형식과 무관하게 401이어야 한다.
-    const { orderId } = OrderParamsSchema.parse(request.params);
-
-    const client = await pool.connect();
-
-    try {
-      const order = await orderService.getOrderById(orderId, client);
-
-      // Ownership 검증.
-      //
-      // ENFORCE_AUTH_USER_MATCH=true (production default):
-      //   - order.userId != request.user.id → 404 (order 존재 자체를 숨겨 enumeration 방지)
-      //
-      // ENFORCE_AUTH_USER_MATCH=false (demo override):
-      //   - body userId를 무인증 신뢰하는 demo 흐름과 짝. 조회 ownership도 검증하지 않음.
-      //   - production fail-fast로 production에서는 이 분기가 절대 작동하지 않는다.
-      //
-      // order가 존재하지 않을 때와 ownership mismatch가 *같은 404 응답*인 것은 의도된 설계다.
-      // 응답을 분기하면 order 존재 여부가 timing/응답 차이로 누설된다.
-      if (config.ENFORCE_AUTH_USER_MATCH) {
-        // 위에서 request.user.id 존재가 보장됨
-        if (!order || order.userId !== request.user!.id) {
-          if (order) {
-            logger.warn(
-              {
-                orderId,
-                requestedBy: request.user!.id,
-                ownerId: order.userId,
-                requestId: request.id,
-              },
-              'Order ownership mismatch on GET /checkouts/:orderId',
-            );
-          }
-          return reply.code(404).send({ error: 'Order not found' });
-        }
-      } else if (!order) {
-        return reply.code(404).send({ error: 'Order not found' });
+      // auth 가드를 DB 조회 *전에* 통과시킨다.
+      // 무인증 요청이 어차피 401로 끊길 거라면 DB connection을 잡을 이유가 없다.
+      if (config.ENFORCE_AUTH_USER_MATCH && !request.user?.id) {
+        return reply.code(401).send({
+          error: { code: 'UNAUTHENTICATED', message: 'Authentication required' },
+        });
       }
 
-      const tickets = await ticketService.getTicketsByOrderId(orderId, client);
-      return reply.send({ order, tickets });
-    } finally {
-      client.release();
-    }
-  });
+      // UUID가 아닌 id는 DB까지 가면 22P02로 500이 된다. 입력 오류(400)로 끝낸다.
+      // 인증 가드 뒤에 둔다: 인증 없는 요청은 id 형식과 무관하게 401이어야 한다.
+      const { orderId } = OrderParamsSchema.parse(request.params);
+
+      const client = await pool.connect();
+
+      try {
+        const order = await orderService.getOrderById(orderId, client);
+
+        // Ownership 검증.
+        //
+        // ENFORCE_AUTH_USER_MATCH=true (production default):
+        //   - order.userId != request.user.id → 404 (order 존재 자체를 숨겨 enumeration 방지)
+        //
+        // ENFORCE_AUTH_USER_MATCH=false (demo override):
+        //   - body userId를 무인증 신뢰하는 demo 흐름과 짝. 조회 ownership도 검증하지 않음.
+        //   - production fail-fast로 production에서는 이 분기가 절대 작동하지 않는다.
+        //
+        // order가 존재하지 않을 때와 ownership mismatch가 *같은 404 응답*인 것은 의도된 설계다.
+        // 응답을 분기하면 order 존재 여부가 timing/응답 차이로 누설된다.
+        if (config.ENFORCE_AUTH_USER_MATCH) {
+          // 위에서 request.user.id 존재가 보장됨
+          if (!order || order.userId !== request.user!.id) {
+            if (order) {
+              logger.warn(
+                {
+                  orderId,
+                  requestedBy: request.user!.id,
+                  ownerId: order.userId,
+                  requestId: request.id,
+                },
+                'Order ownership mismatch on GET /checkouts/:orderId',
+              );
+            }
+            return reply.code(404).send({ error: 'Order not found' });
+          }
+        } else if (!order) {
+          return reply.code(404).send({ error: 'Order not found' });
+        }
+
+        const tickets = await ticketService.getTicketsByOrderId(orderId, client);
+        return reply.send({ order, tickets });
+      } finally {
+        client.release();
+      }
+    },
+  );
 }
