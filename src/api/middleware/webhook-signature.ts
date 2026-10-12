@@ -77,7 +77,8 @@ export async function webhookSignatureMiddleware(
   request: FastifyRequest,
   reply: FastifyReply,
 ) {
-  if (!request.url.startsWith('/webhooks/')) return;
+  // raw URL이 아니라 매칭된 route로 판정한다. `/%77ebhooks/...`도 같은 handler에 닿는다.
+  if (!request.routeOptions.url?.startsWith('/webhooks/')) return;
 
   const config = getConfig();
   const secret = config.WEBHOOK_SIGNING_SECRET;

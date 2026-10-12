@@ -35,8 +35,11 @@ interface RouteRateLimit {
 }
 
 /**
- * URL을 보고 적용할 rate limit 정책을 결정한다.
+ * 매칭된 route 패턴(`request.routeOptions.url`)으로 적용할 rate limit 정책을 결정한다.
  * 매치 안 되면 null (rate limit 미적용 경로).
+ *
+ * raw `request.url`을 받으면 안 된다. Fastify는 경로를 디코딩한 뒤 route를 고르므로
+ * `/%63heckouts`도 `/checkouts` handler에 닿고, raw URL로 판정하면 한도를 건너뛴다.
  *
  * GraphQL은 별도 한도를 사용한다. write 경로의 5/60s를 그대로 쓰면 화면 1개 렌더링에
  * 호출되는 events/event/myOrders 등이 1초도 안 되어 한도를 소진한다.
@@ -110,7 +113,8 @@ export async function rateLimitMiddleware(
     return;
   }
 
-  const route = resolveRouteRateLimit(request.url);
+  // 매칭된 route가 없으면(404) 한도 대상이 아니다.
+  const route = resolveRouteRateLimit(request.routeOptions.url ?? '');
   if (!route) {
     return;
   }

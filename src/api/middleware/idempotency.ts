@@ -13,7 +13,8 @@ const logger = getLogger();
 const IN_PROGRESS_RECHECK_DELAY_MS = 100;
 
 /**
- * 요청 URL을 idempotency command scope로 매핑한다.
+ * 매칭된 route 패턴(`request.routeOptions.url`)을 idempotency command scope로 매핑한다.
+ * raw `request.url`을 넘기면 인코딩된 경로(`/%63heckouts`)가 scope 없이 handler에 닿는다.
  *
  * 등록된 command surface만 정확히(pathname 일치) 매핑한다 — 부분 문자열 매칭으로
  * 의도치 않은 alias가 생기는 것을 막기 위해서다. 새 command route가 생기면
@@ -78,7 +79,7 @@ export async function idempotencyMiddleware(
     return;
   }
 
-  const scope = resolveIdempotencyScope(request.url);
+  const scope = resolveIdempotencyScope(request.routeOptions.url ?? '');
   if (!scope) {
     return;
   }
