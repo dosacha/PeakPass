@@ -34,8 +34,8 @@ PeakPass에서 Redis는 성능과 편의성을 높이기 위한 보조 계층입
 
 ## 2. rate limiting
 
-- 대상: `POST /reservations`, `POST /checkouts`, settlement webhook(write 한도 `RATE_LIMIT_*`), `POST /graphql`(별도 한도 `GRAPHQL_RATE_LIMIT_*`), 데모 세션·데모 정산(각자의 한도)
-- 어느 한도를 쓸지는 route가 `config.rateLimit`으로 선언한다. 요청 경로의 문자열로 고르지 않으므로 인코딩된 경로(`/%63heckouts`)도 같은 한도에 잡힌다. 예약·주문 조회(`GET /reservations/:id`, `GET /checkouts/:orderId`)는 생성 요청과 같은 한도를 나눠 쓴다. 조회를 여러 번 하면 그만큼 구매 한도가 줄어드는 알려진 한계이고, 입장 제어 계약 §3·§6이 조회의 기존 limiter 정책을 고정하고 있어 그대로 뒀다
+- 대상: 예약의 생성과 조회(`POST /reservations`, `GET /reservations/:id`), 주문의 생성과 조회(`POST /checkouts`, `GET /checkouts/:orderId`), settlement webhook(이상 write 한도 `RATE_LIMIT_*`), `POST /graphql`(별도 한도 `GRAPHQL_RATE_LIMIT_*`), 데모 세션·데모 정산(각자의 한도)
+- 어느 한도를 쓸지는 route가 `config.rateLimit`으로 선언한다. 요청 경로의 문자열로 고르지 않으므로 인코딩된 경로(`/%63heckouts`)도 같은 한도에 잡힌다. 카운터는 action마다 따로다. 예약 조회는 예약 생성과, 주문 조회는 checkout 생성과 같은 카운터를 쓴다. 예약을 여러 번 조회하면 그만큼 예약 생성의 한도가 줄어드는 알려진 한계이고(주문 조회와 checkout도 같다), 입장 제어 계약 §2·§6이 조회의 기존 limiter 정책을 고정하고 있어 그대로 뒀다
 - 기준: 인증 사용자 ID 우선, 없으면 IP. 데모 세션 발급(`POST /demo/session`)은 항상 IP
 - 구현 방식: Redis sorted set 기반 sliding window
 
