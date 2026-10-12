@@ -73,7 +73,7 @@ async function main() {
     await initRedis();
     logger.info('Redis 연결 완료');
     await assertAdmissionLedger();
-    if(config.ENABLE_ADMISSION) await admissionService.verifyEnvironment();
+    if (config.ENABLE_ADMISSION) await admissionService.verifyEnvironment();
 
     app = await createApp();
 
@@ -82,7 +82,7 @@ async function main() {
 
     sweeperHandle = startReservationSweeper();
     orderSweeper = startOrderSweeper();
-    if(config.ENABLE_ADMISSION) admissionScheduler = startAdmissionScheduler();
+    if (config.ENABLE_ADMISSION) admissionScheduler = startAdmissionScheduler();
 
     await app.listen({ port: config.PORT, host: '0.0.0.0' });
 
@@ -98,7 +98,11 @@ async function main() {
     const ordersStopped = orderSweeper?.stop();
     const admissionStopped = admissionScheduler?.stop();
     if (sweeperHandle) stopReservationSweeper(sweeperHandle);
-    await Promise.allSettled([ordersStopped, admissionStopped, app ? app.close() : Promise.resolve()]);
+    await Promise.allSettled([
+      ordersStopped,
+      admissionStopped,
+      app ? app.close() : Promise.resolve(),
+    ]);
     await Promise.allSettled([closePostgresPool(), redisClosed]);
     process.exit(1);
   }

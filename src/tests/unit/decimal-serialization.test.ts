@@ -63,7 +63,9 @@ describe('money serialization consistency (string-first)', () => {
     }
 
     // GraphQLObjectType에는 getFields()가 있다. 직접 호출하기 위해 좁힌다.
-    const fields = (orderType as { getFields: () => Record<string, { type: unknown }> }).getFields();
+    const fields = (
+      orderType as { getFields: () => Record<string, { type: unknown }> }
+    ).getFields();
     const totalAmountField = fields.totalAmount;
 
     if (!totalAmountField) {

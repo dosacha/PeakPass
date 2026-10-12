@@ -74,10 +74,7 @@ export async function jwtAuthMiddleware(request: FastifyRequest, reply: FastifyR
  *
  * 운영 환경에서는 ENFORCE_AUTH_USER_MATCH=true 권장.
  */
-export function assertBodyUserMatchesAuth(
-  request: FastifyRequest,
-  bodyUserId: string,
-): void {
+export function assertBodyUserMatchesAuth(request: FastifyRequest, bodyUserId: string): void {
   const cfg = getConfig();
   const logger = getLogger();
   const authUser = request.user;

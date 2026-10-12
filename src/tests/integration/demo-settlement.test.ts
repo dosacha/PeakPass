@@ -112,7 +112,11 @@ describe('demo settlement on real PostgreSQL and loopback HTTP', () => {
     const firstBody = (await first.json()) as { duplicate: boolean; tickets: { id: string }[] };
     expect(firstBody.duplicate).toBe(false);
     expect(firstBody.tickets).toHaveLength(quantity);
-    expect(await orderState(orderId)).toEqual({ status: 'paid', tickets: quantity, settlements: 1 });
+    expect(await orderState(orderId)).toEqual({
+      status: 'paid',
+      tickets: quantity,
+      settlements: 1,
+    });
 
     for (const nextKey of [key, uuid()]) {
       const again = await settle(token, orderId, nextKey);
@@ -122,7 +126,11 @@ describe('demo settlement on real PostgreSQL and loopback HTTP', () => {
         firstBody.tickets.map((ticket) => ticket.id).sort(),
       );
     }
-    expect(await orderState(orderId)).toEqual({ status: 'paid', tickets: quantity, settlements: 1 });
+    expect(await orderState(orderId)).toEqual({
+      status: 'paid',
+      tickets: quantity,
+      settlements: 1,
+    });
   });
 
   it('answers 404 for an order of another user and leaves that order unpaid', async () => {
@@ -132,6 +140,10 @@ describe('demo settlement on real PostgreSQL and loopback HTTP', () => {
     const response = await settle(stranger.token, owner.orderId, uuid());
 
     expect(response.status).toBe(404);
-    expect(await orderState(owner.orderId)).toEqual({ status: 'pending', tickets: 0, settlements: 0 });
+    expect(await orderState(owner.orderId)).toEqual({
+      status: 'pending',
+      tickets: 0,
+      settlements: 0,
+    });
   });
 });

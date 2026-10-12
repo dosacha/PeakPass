@@ -8,16 +8,17 @@ export function initLogger(): PinoLogger {
 
   const config = getConfig();
 
-  const transport = config.NODE_ENV === 'production'
-    ? undefined
-    : pino.transport({
-        target: 'pino-pretty',
-        options: {
-          colorize: true,
-          translateTime: 'SYS:standard',
-          ignore: 'pid,hostname',
-        },
-      });
+  const transport =
+    config.NODE_ENV === 'production'
+      ? undefined
+      : pino.transport({
+          target: 'pino-pretty',
+          options: {
+            colorize: true,
+            translateTime: 'SYS:standard',
+            ignore: 'pid,hostname',
+          },
+        });
 
   logger = pino(
     {

@@ -103,10 +103,7 @@ export function resolveRouteRateLimit(url: string): RouteRateLimit | null {
   return null;
 }
 
-export async function rateLimitMiddleware(
-  request: FastifyRequest,
-  reply: FastifyReply,
-) {
+export async function rateLimitMiddleware(request: FastifyRequest, reply: FastifyReply) {
   const config = getConfig();
 
   if (!config.ENABLE_RATE_LIMITING) {
@@ -119,9 +116,10 @@ export async function rateLimitMiddleware(
     return;
   }
 
-  const userId = route.action === 'demoSession'
-    ? request.ip || 'anonymous'
-    : request.user?.id || request.ip || 'anonymous';
+  const userId =
+    route.action === 'demoSession'
+      ? request.ip || 'anonymous'
+      : request.user?.id || request.ip || 'anonymous';
 
   const { allowed, count, resetAt, redisAvailable } = await checkRateLimit(
     userId,

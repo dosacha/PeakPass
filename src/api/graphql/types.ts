@@ -142,6 +142,8 @@ export function buildGraphQLSchema(): GraphQLSchema {
   try {
     return buildSchema(graphqlTypeDefs);
   } catch (err) {
-    throw new Error(`Failed to build GraphQL schema: ${err instanceof Error ? err.message : String(err)}`);
+    throw new Error(
+      `Failed to build GraphQL schema: ${err instanceof Error ? err.message : String(err)}`,
+    );
   }
 }

@@ -37,7 +37,8 @@ describe('GraphQL HTTP transport through createApp and Apollo', () => {
       apollo = await createServer();
       return apollo;
     });
-    queryResolvers = (await import('@/api/graphql/resolvers')).resolvers.Query as unknown as typeof queryResolvers;
+    queryResolvers = (await import('@/api/graphql/resolvers')).resolvers
+      .Query as unknown as typeof queryResolvers;
     app = await (await import('@/api/app')).createApp();
     app.get('/transport-internal-error', async () => {
       throw Object.assign(new Error('internal failure'), { statusCode: 400 });
@@ -60,7 +61,9 @@ describe('GraphQL HTTP transport through createApp and Apollo', () => {
 
   it('executes only named operation B from a multi-operation document', async () => {
     const response = await app.inject({
-      method: 'POST', url: '/graphql', payload: { query, operationName: 'B' },
+      method: 'POST',
+      url: '/graphql',
+      payload: { query, operationName: 'B' },
     });
     expect(response.statusCode).toBe(200);
     expect(response.json()).toEqual({ data: { b: null } });
@@ -83,7 +86,10 @@ describe('GraphQL HTTP transport through createApp and Apollo', () => {
     ['object operationName', '{"query":"{ events { id } }","operationName":{}}'],
   ])('rejects %s with 400 before any resolver runs', async (_name, payload) => {
     const response = await app.inject({
-      method: 'POST', url: '/graphql', headers: { 'content-type': 'application/json' }, payload,
+      method: 'POST',
+      url: '/graphql',
+      headers: { 'content-type': 'application/json' },
+      payload,
     });
     expect(response.statusCode).toBe(400);
     expect(queryResolvers.event).not.toHaveBeenCalled();
@@ -91,9 +97,12 @@ describe('GraphQL HTTP transport through createApp and Apollo', () => {
   });
 
   it.each([{}, { variables: null, operationName: null }, { variables: {} }])(
-    'accepts optional/null transport fields: %j', async (fields) => {
+    'accepts optional/null transport fields: %j',
+    async (fields) => {
       const response = await app.inject({
-        method: 'POST', url: '/graphql', payload: { query: '{ events { id } }', ...fields },
+        method: 'POST',
+        url: '/graphql',
+        payload: { query: '{ events { id } }', ...fields },
       });
       expect(response.statusCode).toBe(200);
       expect(response.json()).toEqual({ data: { events: [] } });
@@ -101,20 +110,26 @@ describe('GraphQL HTTP transport through createApp and Apollo', () => {
   );
 
   it('preserves successful fields and GraphQL execution errors with HTTP 200', async () => {
-    queryResolvers.event.mockImplementationOnce(() => { throw new Error('resolver failed'); });
+    queryResolvers.event.mockImplementationOnce(() => {
+      throw new Error('resolver failed');
+    });
     const response = await app.inject({
-      method: 'POST', url: '/graphql',
+      method: 'POST',
+      url: '/graphql',
       payload: { query: '{ events { id } event(id: "bad") { id } }' },
     });
     expect(response.statusCode).toBe(200);
     expect(response.json()).toMatchObject({
-      data: { events: [], event: null }, errors: [{ message: 'resolver failed', path: ['event'] }],
+      data: { events: [], event: null },
+      errors: [{ message: 'resolver failed', path: ['event'] }],
     });
   });
 
   it('keeps complexity budget rejections at HTTP 400 without running resolvers', async () => {
     const response = await app.inject({
-      method: 'POST', url: '/graphql', payload: { query: '{ events(limit: 5001) { id } }' },
+      method: 'POST',
+      url: '/graphql',
+      payload: { query: '{ events(limit: 5001) { id } }' },
     });
     expect(response.statusCode).toBe(400);
     expect(response.json()).toMatchObject({
@@ -125,8 +140,11 @@ describe('GraphQL HTTP transport through createApp and Apollo', () => {
 
   it('accepts a selected cheap operation despite an unused expensive operation', async () => {
     const response = await app.inject({
-      method: 'POST', url: '/graphql', payload: {
-        query: 'query Cheap { event(id: "cheap") { id } } query Expensive { events(limit: 10000) { id } }',
+      method: 'POST',
+      url: '/graphql',
+      payload: {
+        query:
+          'query Cheap { event(id: "cheap") { id } } query Expensive { events(limit: 10000) { id } }',
         operationName: 'Cheap',
       },
     });
@@ -137,25 +155,46 @@ describe('GraphQL HTTP transport through createApp and Apollo', () => {
   });
 
   it.each([
-    ['named fragment', 'fragment Root on Query { events(limit: 10000) { ...Item } } fragment Item on Event { id } query Expensive { ...Root }'],
-    ['inline fragment', 'query Expensive { ... on Query { events(limit: 10000) { ... on Event { id } } } }'],
+    [
+      'named fragment',
+      'fragment Root on Query { events(limit: 10000) { ...Item } } fragment Item on Event { id } query Expensive { ...Root }',
+    ],
+    [
+      'inline fragment',
+      'query Expensive { ... on Query { events(limit: 10000) { ... on Event { id } } } }',
+    ],
     ['variable default', 'query Expensive($limit: Int = 10000) { events(limit: $limit) { id } }'],
-    ['multiplied aliases', 'query Expensive { events(limit: 100) { ' + Array.from({ length: 51 }, (_, index) => `f${index}: id`).join(' ') + ' } }'],
-    ['selected operation', 'query Cheap { event(id: "cheap") { id } } query Expensive { events(limit: 10000) { id } }'],
+    [
+      'multiplied aliases',
+      'query Expensive { events(limit: 100) { ' +
+        Array.from({ length: 51 }, (_, index) => `f${index}: id`).join(' ') +
+        ' } }',
+    ],
+    [
+      'selected operation',
+      'query Cheap { event(id: "cheap") { id } } query Expensive { events(limit: 10000) { id } }',
+    ],
   ])('rejects expensive %s before Apollo resolver execution with 400', async (_name, query) => {
     const response = await app.inject({
-      method: 'POST', url: '/graphql', payload: { query, operationName: 'Expensive' },
+      method: 'POST',
+      url: '/graphql',
+      payload: { query, operationName: 'Expensive' },
     });
     expect(response.statusCode).toBe(400);
-    expect(response.json()).toMatchObject({ errors: [{ extensions: { code: 'QUERY_TOO_COMPLEX' } }] });
+    expect(response.json()).toMatchObject({
+      errors: [{ extensions: { code: 'QUERY_TOO_COMPLEX' } }],
+    });
     expect(queryResolvers.event).not.toHaveBeenCalled();
     expect(queryResolvers.events).not.toHaveBeenCalled();
   });
 
   it.each(['query {', '{ unknownField }', query])(
-    'keeps GraphQL parse/validation/operation selection failures at 400', async (invalidQuery) => {
+    'keeps GraphQL parse/validation/operation selection failures at 400',
+    async (invalidQuery) => {
       const response = await app.inject({
-        method: 'POST', url: '/graphql', payload: { query: invalidQuery },
+        method: 'POST',
+        url: '/graphql',
+        payload: { query: invalidQuery },
       });
       expect(response.statusCode).toBe(400);
       expect(response.json().errors).not.toHaveLength(0);
@@ -166,7 +205,10 @@ describe('GraphQL HTTP transport through createApp and Apollo', () => {
 
   it('returns the standard 400 response for malformed REST JSON', async () => {
     const response = await app.inject({
-      method: 'POST', url: '/events', headers: { 'content-type': 'application/json' }, payload: '{',
+      method: 'POST',
+      url: '/events',
+      headers: { 'content-type': 'application/json' },
+      payload: '{',
     });
     expect(response.statusCode).toBe(400);
     expect(response.json()).toMatchObject({ error: { code: 'BAD_REQUEST' } });
@@ -180,7 +222,10 @@ describe('GraphQL HTTP transport through createApp and Apollo', () => {
 
   it('answers 415 to a body with an unsupported content type instead of 500', async () => {
     const response = await app.inject({
-      method: 'POST', url: '/events', headers: { 'content-type': 'application/xml' }, payload: '<x/>',
+      method: 'POST',
+      url: '/events',
+      headers: { 'content-type': 'application/xml' },
+      payload: '<x/>',
     });
     expect(response.statusCode).toBe(415);
     expect(response.json()).toMatchObject({ error: { code: 'UNSUPPORTED_MEDIA_TYPE' } });
@@ -188,7 +233,9 @@ describe('GraphQL HTTP transport through createApp and Apollo', () => {
 
   it('answers 413 to a body over the size limit instead of 500', async () => {
     const response = await app.inject({
-      method: 'POST', url: '/events', headers: { 'content-type': 'application/json' },
+      method: 'POST',
+      url: '/events',
+      headers: { 'content-type': 'application/json' },
       payload: JSON.stringify({ name: 'x'.repeat(2 * 1024 * 1024) }),
     });
     expect(response.statusCode).toBe(413);
@@ -196,7 +243,8 @@ describe('GraphQL HTTP transport through createApp and Apollo', () => {
   });
 
   it.each(['/events/not-a-uuid', '/reservations/not-a-uuid', '/checkouts/not-a-uuid'])(
-    'answers 400 to GET %s before any database access', async (url) => {
+    'answers 400 to GET %s before any database access',
+    async (url) => {
       const response = await app.inject({ method: 'GET', url });
       expect(response.statusCode).toBe(400);
       expect(response.json()).toMatchObject({ error: { code: 'VALIDATION_ERROR' } });
@@ -206,19 +254,28 @@ describe('GraphQL HTTP transport through createApp and Apollo', () => {
   it('verifies the exact signed JSON bytes and rejects a whitespace-only change', async () => {
     const payload = '{\n  "event": "결제", "x": 1\n}\n';
     const timestamp = String(Math.floor(Date.now() / 1000));
-    const signature = crypto.createHmac('sha256', secret)
-      .update(`${timestamp}.`).update(Buffer.from(payload)).digest('hex');
+    const signature = crypto
+      .createHmac('sha256', secret)
+      .update(`${timestamp}.`)
+      .update(Buffer.from(payload))
+      .digest('hex');
     const headers = {
-      'content-type': 'application/json', 'x-webhook-timestamp': timestamp,
+      'content-type': 'application/json',
+      'x-webhook-timestamp': timestamp,
       'x-webhook-signature': signature,
     };
     const accepted = await app.inject({
-      method: 'POST', url: '/webhooks/transport-probe', headers, payload,
+      method: 'POST',
+      url: '/webhooks/transport-probe',
+      headers,
+      payload,
     });
     expect(accepted.statusCode).toBe(200);
     expect(accepted.json()).toEqual({ raw: payload, parsed: { event: '결제', x: 1 } });
     const rejected = await app.inject({
-      method: 'POST', url: '/webhooks/transport-probe', headers,
+      method: 'POST',
+      url: '/webhooks/transport-probe',
+      headers,
       payload: '{"event":"결제","x":1}',
     });
     expect(rejected.statusCode).toBe(401);

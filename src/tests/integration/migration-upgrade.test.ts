@@ -57,7 +57,15 @@ describe('upgrade of an existing 011 database by the migration runner', () => {
   // The tables the product had at 011. A later migration that changes their rows changes this test.
   const data = async (db: Client) => {
     const tables: Record<string, string> = {};
-    for (const table of ['users', 'events', 'reservations', 'orders', 'payment_records', 'payment_callback_keys', 'tickets'])
+    for (const table of [
+      'users',
+      'events',
+      'reservations',
+      'orders',
+      'payment_records',
+      'payment_callback_keys',
+      'tickets',
+    ])
       tables[table] = await rows(db, table);
     return tables;
   };
@@ -104,10 +112,10 @@ describe('upgrade of an existing 011 database by the migration runner', () => {
     for (const file of files.filter((f) => version(f) <= 11)) {
       await db.query('BEGIN');
       await db.query(readFileSync(join(dir, file), 'utf8'));
-      await db.query('INSERT INTO migrations (version, name, execution_time_ms) VALUES ($1, $2, 0)', [
-        version(file),
-        file.replace(/^\d+_|\.sql$/g, ''),
-      ]);
+      await db.query(
+        'INSERT INTO migrations (version, name, execution_time_ms) VALUES ($1, $2, 0)',
+        [version(file), file.replace(/^\d+_|\.sql$/g, '')],
+      );
       await db.query('COMMIT');
     }
     expect((await db.query(`SELECT to_regclass('admission_events') AS t`)).rows[0].t).toBeNull();
@@ -164,7 +172,9 @@ describe('upgrade of an existing 011 database by the migration runner', () => {
     await migrate(name);
 
     // Only the later files ran: the eleven recorded rows are as they were, 012 and 013 were added.
-    const added = (await db.query('SELECT version FROM migrations WHERE version > 11 ORDER BY version')).rows;
+    const added = (
+      await db.query('SELECT version FROM migrations WHERE version > 11 ORDER BY version')
+    ).rows;
     expect(added.map((row) => row.version)).toEqual(files.map(version).filter((v) => v > 11));
     expect(added.map((row) => row.version)).toEqual(expect.arrayContaining([12, 13]));
     expect(await rows(db, '(SELECT * FROM migrations WHERE version <= 11)')).toBe(recorded);

@@ -34,16 +34,18 @@ function createSettlementResult(orderId: string, userId: string, duplicate: bool
       updatedAt: now,
       paidAt: now,
     },
-    tickets: [{
-      id: randomUUID(),
-      orderId,
-      eventId: randomUUID(),
-      userId,
-      ticketNumber: `PASS-${randomUUID().slice(0, 8)}`,
-      status: 'active' as const,
-      createdAt: now,
-      updatedAt: now,
-    }],
+    tickets: [
+      {
+        id: randomUUID(),
+        orderId,
+        eventId: randomUUID(),
+        userId,
+        ticketNumber: `PASS-${randomUUID().slice(0, 8)}`,
+        status: 'active' as const,
+        createdAt: now,
+        updatedAt: now,
+      },
+    ],
     paymentStatus: 'settled',
     duplicate,
   };
@@ -182,7 +184,7 @@ describe('live demo sessions', () => {
   // The settlement itself is stubbed here: this checks the ownership rule and that the route turns
   // its rejection into 404. The rejection of a real order of another user, and the ticket count
   // after a replay, are checked against PostgreSQL in integration/demo-settlement.test.ts.
-  it('answers 404 when the settlement rejects an order that is not the demo user\'s', async () => {
+  it("answers 404 when the settlement rejects an order that is not the demo user's", async () => {
     const { assertDemoOrderOwnership, registerDemoSessionRoutes } = await loadDemoRoutes();
     const { jwtAuthMiddleware } = await import('@/api/middleware/auth');
     const otherUserId = randomUUID();
@@ -207,8 +209,9 @@ describe('live demo sessions', () => {
     });
 
     expect(response.statusCode).toBe(404);
-    expect(() => assertDemoOrderOwnership({ userId: otherUserId }, DEMO_USER.id))
-      .toThrow('Order not found');
+    expect(() => assertDemoOrderOwnership({ userId: otherUserId }, DEMO_USER.id)).toThrow(
+      'Order not found',
+    );
     await app.close();
   });
 });

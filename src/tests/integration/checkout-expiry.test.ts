@@ -36,7 +36,13 @@ describe('expired reservation checkout commit boundary (real PG/Redis/HTTP)', ()
   });
 
   beforeEach(async () => {
-    input = { eventId: uuid(), tierId: uuid(), userId: uuid(), quantity: 2, idempotencyKey: uuid() };
+    input = {
+      eventId: uuid(),
+      tierId: uuid(),
+      userId: uuid(),
+      quantity: 2,
+      idempotencyKey: uuid(),
+    };
     strangerId = uuid();
     for (const id of [input.userId, strangerId]) {
       await pool.query('INSERT INTO users (id, email) VALUES ($1, $2)', [id, `${id}@expiry.test`]);
@@ -44,16 +50,25 @@ describe('expired reservation checkout commit boundary (real PG/Redis/HTTP)', ()
     await pool.query(
       `INSERT INTO events (id, name, starts_at, ends_at, total_seats, available_seats, pricing, status)
        VALUES ($1, 'Checkout expiry', NOW() + INTERVAL '1 hour', NOW() + INTERVAL '2 hours', 5, 5, $2, 'published')`,
-      [input.eventId, JSON.stringify([{ id: input.tierId, name: 'General', price: 50, quantity: 5 }])],
+      [
+        input.eventId,
+        JSON.stringify([{ id: input.tierId, name: 'General', price: 50, quantity: 5 }]),
+      ],
     );
     input.reservationId = (await new reservations.ReservationService().createReservation(input)).id;
-    await pool.query(`UPDATE reservations SET expires_at = NOW() - INTERVAL '1 minute' WHERE id = $1`, [input.reservationId]);
+    await pool.query(
+      `UPDATE reservations SET expires_at = NOW() - INTERVAL '1 minute' WHERE id = $1`,
+      [input.reservationId],
+    );
   });
 
   afterEach(async () => {
     jest.restoreAllMocks();
     await holds.deleteReservationHold(input.reservationId!);
-    await pool.query('DELETE FROM payment_records WHERE order_id IN (SELECT id FROM orders WHERE event_id = $1)', [input.eventId]);
+    await pool.query(
+      'DELETE FROM payment_records WHERE order_id IN (SELECT id FROM orders WHERE event_id = $1)',
+      [input.eventId],
+    );
     await pool.query('DELETE FROM orders WHERE event_id = $1', [input.eventId]);
     await pool.query('DELETE FROM reservations WHERE event_id = $1', [input.eventId]);
     await pool.query('DELETE FROM events WHERE id = $1', [input.eventId]);
@@ -68,9 +83,15 @@ describe('expired reservation checkout commit boundary (real PG/Redis/HTTP)', ()
 
   function checkout(overrides: Partial<CreateOrderInput> = {}) {
     const payload = { ...input, ...overrides };
-    return app.inject({ method: 'POST', url: '/checkouts', payload,
-      headers: { authorization: `Bearer ${jwt.sign({ sub: payload.userId }, secret, { expiresIn: '1h' })}`,
-        'idempotency-key': payload.idempotencyKey } });
+    return app.inject({
+      method: 'POST',
+      url: '/checkouts',
+      payload,
+      headers: {
+        authorization: `Bearer ${jwt.sign({ sub: payload.userId }, secret, { expiresIn: '1h' })}`,
+        'idempotency-key': payload.idempotencyKey,
+      },
+    });
   }
 
   async function snapshot() {
@@ -78,7 +99,9 @@ describe('expired reservation checkout commit boundary (real PG/Redis/HTTP)', ()
       `SELECT r.status, e.available_seats,
        (SELECT COUNT(*)::int FROM orders WHERE event_id = e.id) AS orders,
        (SELECT COUNT(*)::int FROM payment_records p JOIN orders o ON o.id = p.order_id WHERE o.event_id = e.id) AS payments
-       FROM reservations r JOIN events e ON e.id = r.event_id WHERE r.id = $1`, [input.reservationId]);
+       FROM reservations r JOIN events e ON e.id = r.event_id WHERE r.id = $1`,
+      [input.reservationId],
+    );
     return result.rows[0];
   }
 
@@ -95,19 +118,35 @@ describe('expired reservation checkout commit boundary (real PG/Redis/HTTP)', ()
     expect(await snapshot()).toEqual(expired);
   });
 
-  it.each(['owner', 'quantity', 'tier', 'event'] as const)('leaves expired active reservation untouched on %s mismatch', async (field) => {
-    const overrides = { owner: { userId: strangerId }, quantity: { quantity: 1 }, tier: { tierId: uuid() }, event: { eventId: uuid() } }[field];
-    expect((await checkout(overrides)).statusCode).toBe(409);
-    expect(await snapshot()).toEqual(active);
-    expect(await holds.getReservationHold(input.reservationId!)).not.toBeNull();
-  });
+  it.each(['owner', 'quantity', 'tier', 'event'] as const)(
+    'leaves expired active reservation untouched on %s mismatch',
+    async (field) => {
+      const overrides = {
+        owner: { userId: strangerId },
+        quantity: { quantity: 1 },
+        tier: { tierId: uuid() },
+        event: { eventId: uuid() },
+      }[field];
+      expect((await checkout(overrides)).statusCode).toBe(409);
+      expect(await snapshot()).toEqual(active);
+      expect(await holds.getReservationHold(input.reservationId!)).not.toBeNull();
+    },
+  );
 
   it('converts a valid reservation and replays its order without returning held seats', async () => {
-    await pool.query(`UPDATE reservations SET expires_at = NOW() + INTERVAL '1 hour' WHERE id = $1`, [input.reservationId]);
+    await pool.query(
+      `UPDATE reservations SET expires_at = NOW() + INTERVAL '1 hour' WHERE id = $1`,
+      [input.reservationId],
+    );
     const response = await checkout();
     expect(response.statusCode).toBe(201);
     expect((await checkout()).json().order.id).toBe(response.json().order.id);
-    expect(await snapshot()).toEqual({ status: 'converted', available_seats: 3, orders: 1, payments: 1 });
+    expect(await snapshot()).toEqual({
+      status: 'converted',
+      available_seats: 3,
+      orders: 1,
+      payments: 1,
+    });
   });
 
   it('rolls back cleanup when real inventory constraint rejects the seat return', async () => {
@@ -122,7 +161,9 @@ describe('expired reservation checkout commit boundary (real PG/Redis/HTTP)', ()
     let pending: Promise<unknown>[] = [];
     try {
       await blocker.query('BEGIN');
-      await blocker.query('SELECT id FROM reservations WHERE id = $1 FOR UPDATE', [input.reservationId]);
+      await blocker.query('SELECT id FROM reservations WHERE id = $1 FOR UPDATE', [
+        input.reservationId,
+      ]);
       const response = checkout().then((value) => value);
       pending = [response];
       await waitForBlockedReservations(1);

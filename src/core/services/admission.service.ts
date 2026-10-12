@@ -318,7 +318,8 @@ export class AdmissionService {
       // loss after this check is met by the publication, which checks and writes in one script.
       const connection = await this.currentProcess();
       if (current.phase === 'open') {
-        if (!(await this.probe(current)).ok) throw new AdmissionError('ADMISSION_RECOVERING', 503, 1000);
+        if (!(await this.probe(current)).ok)
+          throw new AdmissionError('ADMISSION_RECOVERING', 503, 1000);
         return;
       }
       accepted(await initializeAdmission(current, this.runId));

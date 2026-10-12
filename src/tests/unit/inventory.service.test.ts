@@ -17,9 +17,7 @@ describe('InventoryService.adjustAvailableSeats', () => {
   it('decrements seats atomically using a locked event row', async () => {
     const client = createClientWithAvailableSeats(10);
 
-    await expect(
-      service.adjustAvailableSeats('event-1', -3, client),
-    ).resolves.toBe(7);
+    await expect(service.adjustAvailableSeats('event-1', -3, client)).resolves.toBe(7);
 
     expect(client.query).toHaveBeenNthCalledWith(
       1,
@@ -36,9 +34,9 @@ describe('InventoryService.adjustAvailableSeats', () => {
   it('throws InsufficientInventoryError when seats would go negative', async () => {
     const client = createClientWithAvailableSeats(2);
 
-    await expect(
-      service.adjustAvailableSeats('event-1', -3, client),
-    ).rejects.toBeInstanceOf(InsufficientInventoryError);
+    await expect(service.adjustAvailableSeats('event-1', -3, client)).rejects.toBeInstanceOf(
+      InsufficientInventoryError,
+    );
 
     expect(client.query).toHaveBeenCalledTimes(1);
   });
@@ -48,8 +46,8 @@ describe('InventoryService.adjustAvailableSeats', () => {
       query: jest.fn().mockResolvedValueOnce({ rows: [] }),
     } as unknown as PoolClient;
 
-    await expect(
-      service.adjustAvailableSeats('missing-event', -1, client),
-    ).rejects.toBeInstanceOf(NotFoundError);
+    await expect(service.adjustAvailableSeats('missing-event', -1, client)).rejects.toBeInstanceOf(
+      NotFoundError,
+    );
   });
 });

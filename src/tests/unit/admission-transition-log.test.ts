@@ -34,7 +34,21 @@ const claim = (id: string, now: number) => [
 const finish = (id: string, now: number) =>
   ['waiting', 'leases', 'active', 'claims'].map((name) => lua(now, 'ZREM', key(name), id));
 const publish = (generation: string, epoch: string, now: number, runId = 'r1') => [
-  lua(now, 'HSET', control, 'generation', generation, 'epoch', epoch, 'mode', 'initializing', 'runId', runId, 'dirty', '1'),
+  lua(
+    now,
+    'HSET',
+    control,
+    'generation',
+    generation,
+    'epoch',
+    epoch,
+    'mode',
+    'initializing',
+    'runId',
+    runId,
+    'dirty',
+    '1',
+  ),
   lua(now, 'ZADD', key('active', epoch), '+inf', '__'),
   lua(now, 'ZADD', key('waiting', epoch), '+inf', '__'),
   lua(now, 'HDEL', control, 'dirty'),
@@ -98,7 +112,12 @@ describe('replay of the admission transition log', () => {
     const start = [...publish('1', EPOCH, T0), ...queue];
     expect(rules([...start, ...promote('a', T0 + 1000), ...promote('b', T0 + 1010)])).toEqual([]);
     expect(
-      rules([...start, ...promote('a', T0 + 1000), ...promote('b', T0 + 1010), ...promote('c', T0 + 1999)]),
+      rules([
+        ...start,
+        ...promote('a', T0 + 1000),
+        ...promote('b', T0 + 1010),
+        ...promote('c', T0 + 1999),
+      ]),
     ).toEqual(['rate']);
   });
 
@@ -135,7 +154,10 @@ describe('replay of the admission transition log', () => {
 
   it('reports an entry that takes a slot without having left the waiting line', () => {
     expect(
-      rules([...publish('1', EPOCH, T0), lua(T0 + 1000, 'ZADD', key('active'), String(T0 + 31000), 'ghost')]),
+      rules([
+        ...publish('1', EPOCH, T0),
+        lua(T0 + 1000, 'ZADD', key('active'), String(T0 + 31000), 'ghost'),
+      ]),
     ).toEqual(['fifo']);
   });
 
@@ -153,7 +175,12 @@ describe('replay of the admission transition log', () => {
 
   it('reports a promotion that leaves a lower sequence waiting', () => {
     expect(
-      rules([...publish('1', EPOCH, T0), ...join('a', 1), ...join('b', 2), ...promote('b', T0 + 1000)]),
+      rules([
+        ...publish('1', EPOCH, T0),
+        ...join('a', 1),
+        ...join('b', 2),
+        ...promote('b', T0 + 1000),
+      ]),
     ).toEqual(['fifo']);
   });
 
@@ -173,17 +200,29 @@ describe('replay of the admission transition log', () => {
     expect(rules([...publish('1', EPOCH, T0), ...join('a', 1), ...join('b', 1)])).toEqual(['fifo']);
     // Also once the first holder has left the line: the order of the two can no longer be told.
     expect(
-      rules([...publish('1', EPOCH, T0), ...join('a', 1), ...promote('a', T0 + 1000), ...join('b', 1, T0 + 2000)]),
+      rules([
+        ...publish('1', EPOCH, T0),
+        ...join('a', 1),
+        ...promote('a', T0 + 1000),
+        ...join('b', 1, T0 + 2000),
+      ]),
     ).toEqual(['fifo']);
-    expect(rules([...publish('1', EPOCH, T0), ...join('a', 1), ...join('a', 1), ...join('b', 2)])).toEqual([]);
+    expect(
+      rules([...publish('1', EPOCH, T0), ...join('a', 1), ...join('a', 1), ...join('b', 2)]),
+    ).toEqual([]);
   });
 
   it('reports a claim for an entry that holds no slot', () => {
+    expect(rules([...publish('1', EPOCH, T0), ...join('a', 1), ...claim('a', T0 + 1000)])).toEqual([
+      'claim-without-slot',
+    ]);
     expect(
-      rules([...publish('1', EPOCH, T0), ...join('a', 1), ...claim('a', T0 + 1000)]),
-    ).toEqual(['claim-without-slot']);
-    expect(
-      rules([...publish('1', EPOCH, T0), ...join('a', 1), ...promote('a', T0 + 1000), ...claim('a', T0 + 1500)]),
+      rules([
+        ...publish('1', EPOCH, T0),
+        ...join('a', 1),
+        ...promote('a', T0 + 1000),
+        ...claim('a', T0 + 1500),
+      ]),
     ).toEqual([]);
   });
 
@@ -208,10 +247,18 @@ describe('replay of the admission transition log', () => {
       lua(T0 + 20000, 'ZREM', key('claims'), 'a'),
     ]);
     // The violation carries the time of the removal, which is what a later check filters on.
-    expect(later.violations.map((v) => [v.rule, v.time])).toEqual([['claim-without-slot', T0 + 2000]]);
+    expect(later.violations.map((v) => [v.rule, v.time])).toEqual([
+      ['claim-without-slot', T0 + 2000],
+    ]);
     // A capture that a replaced server process cut between the two removals is not reported.
-    const restarted: MonitorEntry = { time: T0 + 2010, source: 'fixture:restart', args: ['FLUSHALL'] };
-    const cut = [...claimed, slotOnly].map(parseMonitorLine).filter((e): e is MonitorEntry => e !== null);
+    const restarted: MonitorEntry = {
+      time: T0 + 2010,
+      source: 'fixture:restart',
+      args: ['FLUSHALL'],
+    };
+    const cut = [...claimed, slotOnly]
+      .map(parseMonitorLine)
+      .filter((e): e is MonitorEntry => e !== null);
     expect(replayAdmissionLog([...cut, restarted]).violations.map((v) => v.rule)).not.toContain(
       'claim-without-slot',
     );
@@ -230,7 +277,11 @@ describe('replay of the admission transition log', () => {
     // Publishing an intact ready generation again is the idempotent case.
     expect(rules([...ready, lua(T0 + 5, 'HSET', control, 'mode', 'ready')])).toEqual([]);
     expect(
-      rules([...ready, line(T0 + 10, '172.18.0.9:40000', 'FLUSHALL'), ...publish('3', EPOCH, T0 + 20)]),
+      rules([
+        ...ready,
+        line(T0 + 10, '172.18.0.9:40000', 'FLUSHALL'),
+        ...publish('3', EPOCH, T0 + 20),
+      ]),
     ).toEqual(['generation']);
     expect(
       rules([
@@ -242,25 +293,44 @@ describe('replay of the admission transition log', () => {
   });
 
   it('reports a namespace initialized under the run id of a server process that is gone', () => {
-    const parse = (lines: string[]) => lines.map(parseMonitorLine).filter((e): e is MonitorEntry => e !== null);
+    const parse = (lines: string[]) =>
+      lines.map(parseMonitorLine).filter((e): e is MonitorEntry => e !== null);
     // The fixture marks the moment it replaced the server process; nothing of the old one is left.
-    const restarted: MonitorEntry = { time: T0 + 10, source: 'fixture:restart', args: ['FLUSHALL'] };
+    const restarted: MonitorEntry = {
+      time: T0 + 10,
+      source: 'fixture:restart',
+      args: ['FLUSHALL'],
+    };
     const before = parse(publish('1', EPOCH, T0, 'old-process'));
     expect(
-      replayAdmissionLog([...before, restarted, ...parse(publish('2', NEXT_EPOCH, T0 + 20, 'new-process'))]).violations,
+      replayAdmissionLog([
+        ...before,
+        restarted,
+        ...parse(publish('2', NEXT_EPOCH, T0 + 20, 'new-process')),
+      ]).violations,
     ).toEqual([]);
     expect(
-      replayAdmissionLog([...before, restarted, ...parse(publish('2', NEXT_EPOCH, T0 + 20, 'old-process'))])
-        .violations.map((v) => v.rule),
+      replayAdmissionLog([
+        ...before,
+        restarted,
+        ...parse(publish('2', NEXT_EPOCH, T0 + 20, 'old-process')),
+      ]).violations.map((v) => v.rule),
     ).toEqual(['run-id']);
     // An emptied server of the same process keeps its run id: that is no violation.
     expect(
-      rules([...publish('1', EPOCH, T0, 'same'), line(T0 + 10, '172.18.0.9:40000', 'FLUSHALL'), ...publish('2', NEXT_EPOCH, T0 + 20, 'same')]),
+      rules([
+        ...publish('1', EPOCH, T0, 'same'),
+        line(T0 + 10, '172.18.0.9:40000', 'FLUSHALL'),
+        ...publish('2', NEXT_EPOCH, T0 + 20, 'same'),
+      ]),
     ).toEqual([]);
   });
 
   it('lists every control change in order', () => {
-    const result = replay([...publish('1', EPOCH, T0), lua(T0 + 5, 'HSET', control, 'mode', 'frozen')]);
+    const result = replay([
+      ...publish('1', EPOCH, T0),
+      lua(T0 + 5, 'HSET', control, 'mode', 'frozen'),
+    ]);
     expect(result.controls.map((c) => [c.generation, c.epoch, c.mode])).toEqual([
       ['1', EPOCH, 'initializing'],
       ['1', EPOCH, 'ready'],
@@ -272,7 +342,15 @@ describe('replay of the admission transition log', () => {
     const unlinked = replay([
       ...publish('1', EPOCH, T0),
       ...admitted(8),
-      line(T0 + 9000, '172.18.0.9:40000', 'UNLINK', control, key('active'), key('waiting'), key('claims')),
+      line(
+        T0 + 9000,
+        '172.18.0.9:40000',
+        'UNLINK',
+        control,
+        key('active'),
+        key('waiting'),
+        key('claims'),
+      ),
       ...publish('2', NEXT_EPOCH, T0 + 9100),
       ...admitted(8, NEXT_EPOCH),
     ]);
@@ -295,6 +373,10 @@ describe('replay of the admission transition log', () => {
       line(T0, '172.18.0.9:40000', 'ZADD', 'peakpass:ratelimit:reservation:u1', String(T0), 'x'),
     ]);
     expect(result.violations).toEqual([]);
-    expect(result.namespaces.get(`${EVENT}:${EPOCH}`)).toEqual({ waiting: [], active: [], claims: [] });
+    expect(result.namespaces.get(`${EVENT}:${EPOCH}`)).toEqual({
+      waiting: [],
+      active: [],
+      claims: [],
+    });
   });
 });

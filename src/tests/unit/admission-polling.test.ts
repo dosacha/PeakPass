@@ -1428,7 +1428,10 @@ describe('join, cancel and purchase', () => {
     same.onRequest(() => same.ok(processing, 1000));
     same.controller.start();
     await same.flush();
-    expect(same.controller.view().purchase).toMatchObject({ status: 'unconfirmed', restored: true });
+    expect(same.controller.view().purchase).toMatchObject({
+      status: 'unconfirmed',
+      restored: true,
+    });
   });
 
   it('restores an unresolved purchase when only the trailing slash of the API base differs', async () => {
@@ -1447,7 +1450,10 @@ describe('join, cancel and purchase', () => {
     same.onRequest(() => same.ok(processing, 1000));
     same.controller.start();
     await same.flush();
-    expect(same.controller.view().purchase).toMatchObject({ status: 'unconfirmed', restored: true });
+    expect(same.controller.view().purchase).toMatchObject({
+      status: 'unconfirmed',
+      restored: true,
+    });
   });
 });
 

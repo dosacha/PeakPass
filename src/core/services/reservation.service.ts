@@ -106,7 +106,10 @@ export class ReservationService {
     // 단순한 입력 검증이지만 작은 DoS 벡터를 차단하는 의미가 있다.
     //
     // Lock eligibility and pricing before deducting inventory; NOW() is transaction time.
-    const tierCheckResult = await client.query<{ pricing: Array<{ id: string }>; saleEligible: boolean }>(
+    const tierCheckResult = await client.query<{
+      pricing: Array<{ id: string }>;
+      saleEligible: boolean;
+    }>(
       `SELECT pricing::jsonb as "pricing", status = 'published' AND ends_at > NOW() AS "saleEligible"
        FROM events WHERE id = $1 FOR UPDATE`,
       [input.eventId],
@@ -117,9 +120,7 @@ export class ReservationService {
     if (!tierCheckResult.rows[0].saleEligible) {
       throw new ConflictError('Event is not available for sale');
     }
-    const tierExists = tierCheckResult.rows[0].pricing.some(
-      (tier) => tier.id === input.tierId,
-    );
+    const tierExists = tierCheckResult.rows[0].pricing.some((tier) => tier.id === input.tierId);
     if (!tierExists) {
       throw new ValidationError(`Pricing tier not found: ${input.tierId}`);
     }

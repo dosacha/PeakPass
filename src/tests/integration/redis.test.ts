@@ -64,33 +64,29 @@ describe('Redis 통합 테스트', () => {
   });
 
   describe('TTL 예약', () => {
-    it(
-      '예약 홀드 TTL 만료 확인',
-      async () => {
-        const reservationId = uuid();
-        const holdData = {
-          id: reservationId,
-          userId: uuid(),
-          eventId: uuid(),
-          quantity: 2,
-          tierId: 'general',
-          expiresAt: new Date().toISOString(),
-          status: 'active',
-        };
+    it('예약 홀드 TTL 만료 확인', async () => {
+      const reservationId = uuid();
+      const holdData = {
+        id: reservationId,
+        userId: uuid(),
+        eventId: uuid(),
+        quantity: 2,
+        tierId: 'general',
+        expiresAt: new Date().toISOString(),
+        status: 'active',
+      };
 
-        await setReservationHold(reservationId, holdData, 1);
+      await setReservationHold(reservationId, holdData, 1);
 
-        const savedHold = await getReservationHold(reservationId);
-        expect(savedHold).toBeTruthy();
-        expect(savedHold?.id).toBe(reservationId);
+      const savedHold = await getReservationHold(reservationId);
+      expect(savedHold).toBeTruthy();
+      expect(savedHold?.id).toBe(reservationId);
 
-        await waitUntil(async () => (await getReservationHold(reservationId)) === null);
+      await waitUntil(async () => (await getReservationHold(reservationId)) === null);
 
-        const expiredHold = await getReservationHold(reservationId);
-        expect(expiredHold).toBeNull();
-      },
-      10000,
-    );
+      const expiredHold = await getReservationHold(reservationId);
+      expect(expiredHold).toBeNull();
+    }, 10000);
   });
 
   describe('레이트 리미팅', () => {
@@ -215,7 +211,11 @@ describe('Redis 통합 테스트', () => {
       await releaseIdempotencyLock('payment-settlement', rawKey, settlementToken!);
 
       const reacquiredCheckout = await tryAcquireIdempotencyLock('checkout', rawKey, 30);
-      const reacquiredSettlement = await tryAcquireIdempotencyLock('payment-settlement', rawKey, 30);
+      const reacquiredSettlement = await tryAcquireIdempotencyLock(
+        'payment-settlement',
+        rawKey,
+        30,
+      );
       expect(reacquiredCheckout).toBeTruthy();
       expect(reacquiredSettlement).toBeTruthy();
 

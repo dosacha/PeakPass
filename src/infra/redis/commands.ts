@@ -117,7 +117,7 @@ export async function checkRateLimit(
   try {
     return await withRedis(async (redis) => {
       const now = Date.now();
-      const [allowed, count] = await redis.eval(
+      const [allowed, count] = (await redis.eval(
         `redis.call('ZREMRANGEBYSCORE', KEYS[1], 0, ARGV[1])
          local count = redis.call('ZCARD', KEYS[1])
          if count >= tonumber(ARGV[2]) then return {0, count} end
@@ -126,9 +126,15 @@ export async function checkRateLimit(
          return {1, count + 1}`,
         {
           keys: [key],
-          arguments: [String(now - windowMs), String(limit), String(now), randomUUID(), String(Math.ceil(windowMs / 1000))],
+          arguments: [
+            String(now - windowMs),
+            String(limit),
+            String(now),
+            randomUUID(),
+            String(Math.ceil(windowMs / 1000)),
+          ],
         },
-      ) as [number, number];
+      )) as [number, number];
 
       return { allowed: allowed === 1, count, resetAt: now + windowMs, redisAvailable: true };
     });
@@ -211,10 +217,12 @@ export async function tryAcquireIdempotencyLock(
 ): Promise<string | null> {
   const key = redisKeys.idempotencyLock(scope, idempotencyKey);
   const token = randomUUID();
-  const result = await withRedis((redis) => redis.set(key, token, {
-    NX: true,
-    EX: ttlSeconds,
-  }));
+  const result = await withRedis((redis) =>
+    redis.set(key, token, {
+      NX: true,
+      EX: ttlSeconds,
+    }),
+  );
 
   return result === 'OK' ? token : null;
 }
@@ -234,13 +242,15 @@ export async function releaseIdempotencyLock(
   const key = redisKeys.idempotencyLock(scope, idempotencyKey);
 
   try {
-    await withRedis((redis) => redis.eval(
-      `if redis.call("get", KEYS[1]) == ARGV[1] then return redis.call("del", KEYS[1]) else return 0 end`,
-      {
-        keys: [key],
-        arguments: [token],
-      },
-    ));
+    await withRedis((redis) =>
+      redis.eval(
+        `if redis.call("get", KEYS[1]) == ARGV[1] then return redis.call("del", KEYS[1]) else return 0 end`,
+        {
+          keys: [key],
+          arguments: [token],
+        },
+      ),
+    );
   } catch (err) {
     logger.warn({ err, scope, idempotencyKey }, 'Failed to release idempotency lock');
   }
@@ -290,11 +300,13 @@ export async function getInventoryCount(eventId: string): Promise<number | null>
  */
 export async function invalidateEventCache(eventId: string): Promise<void> {
   try {
-    await withRedis((redis) => redis.del([
-      redisKeys.eventById(eventId),
-      redisKeys.eventAvailability(eventId),
-      redisKeys.inventoryCount(eventId),
-    ]));
+    await withRedis((redis) =>
+      redis.del([
+        redisKeys.eventById(eventId),
+        redisKeys.eventAvailability(eventId),
+        redisKeys.inventoryCount(eventId),
+      ]),
+    );
     logger.debug({ eventId }, 'Event cache invalidated');
   } catch (err) {
     logger.warn({ err }, 'Failed to invalidate event cache');

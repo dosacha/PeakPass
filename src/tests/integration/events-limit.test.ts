@@ -16,14 +16,17 @@ describe('GET /events pagination against PostgreSQL', () => {
     initLogger();
     postgres = await import('@/infra/postgres/client');
     pool = await postgres.initPostgresPool();
-    const rows = await pool.query<{ id: string }>(`
+    const rows = await pool.query<{ id: string }>(
+      `
       WITH base AS (SELECT COALESCE(MAX(starts_at), '2100-01-01'::timestamptz) AS starts_at FROM events)
       INSERT INTO events (name, starts_at, ends_at, total_seats, available_seats, status)
       SELECT $1 || n, base.starts_at + n * interval '1 day',
         base.starts_at + n * interval '1 day' + interval '1 hour', 1, 1, 'published'
       FROM base, generate_series(1, 105) AS n
       RETURNING id
-    `, [prefix]);
+    `,
+      [prefix],
+    );
     ids = rows.rows.map((row) => row.id);
     const { createApp } = await import('@/api/app');
     app = await createApp();
@@ -31,7 +34,8 @@ describe('GET /events pagination against PostgreSQL', () => {
 
   afterAll(async () => {
     if (app) await app.close();
-    if (pool && ids.length) await pool.query('DELETE FROM events WHERE id = ANY($1::uuid[])', [ids]);
+    if (pool && ids.length)
+      await pool.query('DELETE FROM events WHERE id = ANY($1::uuid[])', [ids]);
     if (postgres) await postgres.closePostgresPool();
   });
 
@@ -43,7 +47,10 @@ describe('GET /events pagination against PostgreSQL', () => {
         const response = await app.inject({ method: 'GET', url: `/events?limit=${limit}` });
         expect(response.statusCode).toBe(400);
         expect(response.json()).toMatchObject({
-          error: { code: 'VALIDATION_ERROR', details: { issues: [expect.objectContaining({ path: 'limit' })] } },
+          error: {
+            code: 'VALIDATION_ERROR',
+            details: { issues: [expect.objectContaining({ path: 'limit' })] },
+          },
         });
         expect(connect).not.toHaveBeenCalled();
       } finally {

@@ -1,6 +1,10 @@
 import { ledgerMismatches, LedgerRow, RedisEntry } from '../helpers/admission-ledger';
 
-const row = (admissionId: string, outcome: LedgerRow['outcome'], extra: Partial<LedgerRow> = {}): LedgerRow => ({
+const row = (
+  admissionId: string,
+  outcome: LedgerRow['outcome'],
+  extra: Partial<LedgerRow> = {},
+): LedgerRow => ({
   admissionId,
   operation: 'reservation',
   outcome,
@@ -8,7 +12,11 @@ const row = (admissionId: string, outcome: LedgerRow['outcome'], extra: Partial<
   errorCode: null,
   ...extra,
 });
-const entry = (admissionId: string, state: string, extra: Partial<RedisEntry> = {}): RedisEntry => ({
+const entry = (
+  admissionId: string,
+  state: string,
+  extra: Partial<RedisEntry> = {},
+): RedisEntry => ({
   admissionId,
   state,
   phase: 'idle',
@@ -25,8 +33,14 @@ describe('ledger rows against the Redis entries of one epoch', () => {
           row('abandoned', 'closed', { errorCode: 'ADMISSION_EXPIRED' }),
         ],
         [
-          entry('bought', 'consumed', { fingerprint: 'f', outcome: { kind: 'reservation', resourceId: 'r1' } }),
-          entry('sold-out', 'consumed', { fingerprint: 'f', outcome: { kind: 'rejected', code: 'INSUFFICIENT_INVENTORY' } }),
+          entry('bought', 'consumed', {
+            fingerprint: 'f',
+            outcome: { kind: 'reservation', resourceId: 'r1' },
+          }),
+          entry('sold-out', 'consumed', {
+            fingerprint: 'f',
+            outcome: { kind: 'rejected', code: 'INSUFFICIENT_INVENTORY' },
+          }),
           entry('abandoned', 'expired', { fingerprint: 'f', reason: 'ADMISSION_EXPIRED' }),
           // Never claimed: an idle admission that ran out, a cancelled one and one still waiting.
           entry('idle', 'expired'),
@@ -51,16 +65,27 @@ describe('ledger rows against the Redis entries of one epoch', () => {
   });
 
   it('reports a slot that was returned without a durable reason', () => {
-    expect(ledgerMismatches([], [entry('a', 'consumed', { fingerprint: 'f', outcome: { kind: 'reservation', resourceId: 'r1' } })])).toEqual([
-      'entry a is consumed without a ledger row',
-    ]);
+    expect(
+      ledgerMismatches(
+        [],
+        [
+          entry('a', 'consumed', {
+            fingerprint: 'f',
+            outcome: { kind: 'reservation', resourceId: 'r1' },
+          }),
+        ],
+      ),
+    ).toEqual(['entry a is consumed without a ledger row']);
     expect(ledgerMismatches([], [entry('b', 'expired', { fingerprint: 'f' })])).toEqual([
       'entry b was claimed and expired without a closed row',
     ]);
     // A claim ends consumed or closed. A claimed entry in any other state gave its slot back
     // without either; one that was never claimed needs no row.
     expect(
-      ledgerMismatches([], [entry('c', 'cancelled', { fingerprint: 'f' }), entry('d', 'cancelled')]),
+      ledgerMismatches(
+        [],
+        [entry('c', 'cancelled', { fingerprint: 'f' }), entry('d', 'cancelled')],
+      ),
     ).toEqual(['entry c was claimed and is cancelled without a ledger row']);
   });
 
@@ -71,15 +96,28 @@ describe('ledger rows against the Redis entries of one epoch', () => {
     expect(
       ledgerMismatches(
         [row('a', 'consumed', { targetId: 'r1' })],
-        [entry('a', 'consumed', { fingerprint: 'f', outcome: { kind: 'reservation', resourceId: 'r2' } })],
+        [
+          entry('a', 'consumed', {
+            fingerprint: 'f',
+            outcome: { kind: 'reservation', resourceId: 'r2' },
+          }),
+        ],
       ),
     ).toEqual(['ledger row a (consumed) does not match its entry: consumed']);
     expect(
-      ledgerMismatches([row('a', 'closed')], [entry('a', 'consumed', { fingerprint: 'f', outcome: { kind: 'reservation', resourceId: 'r1' } })]),
+      ledgerMismatches(
+        [row('a', 'closed')],
+        [
+          entry('a', 'consumed', {
+            fingerprint: 'f',
+            outcome: { kind: 'reservation', resourceId: 'r1' },
+          }),
+        ],
+      ),
     ).toEqual(['ledger row a (closed) does not match its entry: consumed']);
-    expect(ledgerMismatches([row('a', 'consumed', { targetId: 'r1' })], [entry('a', 'cancelled')])).toEqual([
-      'ledger row a (consumed) does not match its entry: cancelled',
-    ]);
+    expect(
+      ledgerMismatches([row('a', 'consumed', { targetId: 'r1' })], [entry('a', 'cancelled')]),
+    ).toEqual(['ledger row a (consumed) does not match its entry: cancelled']);
     // A closed row carries the reason its entry ended with.
     expect(
       ledgerMismatches(
@@ -92,7 +130,12 @@ describe('ledger rows against the Redis entries of one epoch', () => {
     expect(
       ledgerMismatches(
         [row('a', 'consumed', { targetId: 'r1' })],
-        [entry('a', 'consumed', { fingerprint: 'f', outcome: { kind: 'direct-checkout', resourceId: 'r1' } })],
+        [
+          entry('a', 'consumed', {
+            fingerprint: 'f',
+            outcome: { kind: 'direct-checkout', resourceId: 'r1' },
+          }),
+        ],
       ),
     ).toEqual(['ledger row a (consumed) does not match its entry: consumed']);
     expect(
@@ -104,13 +147,23 @@ describe('ledger rows against the Redis entries of one epoch', () => {
     expect(
       ledgerMismatches(
         [row('a', 'consumed', { operation: 'direct-checkout', targetId: 'o1' })],
-        [entry('a', 'consumed', { fingerprint: 'f', outcome: { kind: 'direct-checkout', resourceId: 'o1' } })],
+        [
+          entry('a', 'consumed', {
+            fingerprint: 'f',
+            outcome: { kind: 'direct-checkout', resourceId: 'o1' },
+          }),
+        ],
       ),
     ).toEqual([]);
     expect(
       ledgerMismatches(
         [row('a', 'rejected', { errorCode: 'INSUFFICIENT_INVENTORY' })],
-        [entry('a', 'consumed', { fingerprint: 'f', outcome: { kind: 'reservation', resourceId: 'r1' } })],
+        [
+          entry('a', 'consumed', {
+            fingerprint: 'f',
+            outcome: { kind: 'reservation', resourceId: 'r1' },
+          }),
+        ],
       ),
     ).toEqual(['ledger row a (rejected) does not match its entry: consumed']);
   });

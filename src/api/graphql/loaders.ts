@@ -306,9 +306,7 @@ export function createGraphQLContext(userId?: string): GraphQLContext {
           [userIds, eventIds],
         );
 
-        const ticketCountMap = new Map(
-          result.rows.map((row) => [userEventKey(row), row.count]),
-        );
+        const ticketCountMap = new Map(result.rows.map((row) => [userEventKey(row), row.count]));
 
         return keys.map((key) => ticketCountMap.get(userEventKey(key)) ?? 0);
       } finally {

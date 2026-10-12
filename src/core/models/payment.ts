@@ -10,4 +10,3 @@ export const PaymentWebhookSchema = z.object({
 });
 
 export type PaymentWebhookInput = z.infer<typeof PaymentWebhookSchema>;
-

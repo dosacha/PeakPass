@@ -173,7 +173,9 @@ describe('admission actual authenticated HTTP and epoch lifecycle', () => {
       return result;
     });
     try {
-      await expect(service.recover(eventId, null)).rejects.toMatchObject({ code: 'ADMISSION_RECOVERING' });
+      await expect(service.recover(eventId, null)).rejects.toMatchObject({
+        code: 'ADMISSION_RECOVERING',
+      });
       expect(probes).toBe(2);
     } finally {
       spy.mockRestore();
@@ -197,16 +199,26 @@ describe('admission actual authenticated HTTP and epoch lifecycle', () => {
       const result = await currentProcess();
       if (++reads === 2) {
         const id = await redis.clientId();
-        await redis.sendCommand(['CLIENT', 'KILL', 'ID', String(id), 'SKIPME', 'no']).catch(() => undefined);
-        for (let i = 0; i < 100 && !(redis.isReady && (await redis.clientId().catch(() => id)) !== id); i++)
+        await redis
+          .sendCommand(['CLIENT', 'KILL', 'ID', String(id), 'SKIPME', 'no'])
+          .catch(() => undefined);
+        for (
+          let i = 0;
+          i < 100 && !(redis.isReady && (await redis.clientId().catch(() => id)) !== id);
+          i++
+        )
           await new Promise((resolve) => setTimeout(resolve, 50));
       }
       return result;
     });
     try {
-      await expect(service.recover(eventId, null)).rejects.toMatchObject({ code: 'ADMISSION_RECOVERING' });
+      await expect(service.recover(eventId, null)).rejects.toMatchObject({
+        code: 'ADMISSION_RECOVERING',
+      });
       expect(reads).toBe(2);
-      const phase = await pool.query('SELECT phase FROM admission_events WHERE event_id=$1', [eventId]);
+      const phase = await pool.query('SELECT phase FROM admission_events WHERE event_id=$1', [
+        eventId,
+      ]);
       expect(phase.rows[0].phase).toBe('recovering');
       expect((await service.control(eventId))?.mode).toBe('initializing');
     } finally {
@@ -232,8 +244,14 @@ describe('admission actual authenticated HTTP and epoch lifecycle', () => {
       // The recovery waits for the gate. Its connection is closed by the server and opened again:
       // the same Redis process, another connection.
       const id = await redis.clientId();
-      await redis.sendCommand(['CLIENT', 'KILL', 'ID', String(id), 'SKIPME', 'no']).catch(() => undefined);
-      for (let i = 0; i < 100 && !(redis.isReady && (await redis.clientId().catch(() => id)) !== id); i++)
+      await redis
+        .sendCommand(['CLIENT', 'KILL', 'ID', String(id), 'SKIPME', 'no'])
+        .catch(() => undefined);
+      for (
+        let i = 0;
+        i < 100 && !(redis.isReady && (await redis.clientId().catch(() => id)) !== id);
+        i++
+      )
         await new Promise((resolve) => setTimeout(resolve, 50));
       expect(service.isReady()).toBe(false);
       await first.query('COMMIT');

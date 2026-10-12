@@ -147,7 +147,11 @@ export function replayAdmissionLog(
     unslotted = unslotted.filter(({ ns, id, member, time }) => {
       if (args[0]?.toUpperCase() === 'ZREM' && args.includes(member, 2)) return true;
       if (ns.claims.has(member) && !ns.active.has(member))
-        report('claim-without-slot', time, `${member} kept its claim after its slot was removed in ${id}`);
+        report(
+          'claim-without-slot',
+          time,
+          `${member} kept its claim after its slot was removed in ${id}`,
+        );
       return false;
     });
   };
@@ -161,7 +165,11 @@ export function replayAdmissionLog(
       if (fields[i] !== 'runId') continue;
       // The run id names the Redis process that holds the namespace.
       if (gone.has(fields[i + 1]))
-        report('run-id', time, `event ${eventId} was initialized under the run id of a process that is gone`);
+        report(
+          'run-id',
+          time,
+          `event ${eventId} was initialized under the run id of a process that is gone`,
+        );
       else alive.add(fields[i + 1]);
     }
     // The dirty bit and a repeated publication of an intact ready generation change nothing here.
@@ -177,11 +185,16 @@ export function replayAdmissionLog(
     const generation = BigInt(control.generation || '0');
     const where = `event ${eventId} generation ${control.generation} epoch ${control.epoch}`;
     if (control.mode === 'frozen') {
-      if (last && last.generation === generation && last.epoch === control.epoch) last.closed = true;
+      if (last && last.generation === generation && last.epoch === control.epoch)
+        last.closed = true;
       return;
     }
     if (last && generation < last.generation) {
-      report('generation', time, `${control.mode} below published generation ${last.generation}: ${where}`);
+      report(
+        'generation',
+        time,
+        `${control.mode} below published generation ${last.generation}: ${where}`,
+      );
       return;
     }
     if (control.mode !== 'ready') return;
@@ -189,7 +202,11 @@ export function replayAdmissionLog(
       if (last.epoch !== control.epoch)
         report('generation', time, `published generation reused for another epoch: ${where}`);
       else if (last.closed)
-        report('generation', time, `published generation opened again after it was lost or frozen: ${where}`);
+        report(
+          'generation',
+          time,
+          `published generation opened again after it was lost or frozen: ${where}`,
+        );
       return;
     }
     published.set(eventId, { generation, epoch: control.epoch, closed: false });
@@ -216,7 +233,8 @@ export function replayAdmissionLog(
         if (!key) continue;
         if (key[2]) lose(key[1]);
         // A namespace is retired as a whole: its control structures go in the same command.
-        else if (key[4] === 'active' || key[4] === 'waiting') namespaces.delete(`${key[1]}:${key[3]}`);
+        else if (key[4] === 'active' || key[4] === 'waiting')
+          namespaces.delete(`${key[1]}:${key[3]}`);
       }
       continue;
     }
@@ -241,7 +259,8 @@ export function replayAdmissionLog(
           // takes it out of every set: an entry that left the line that way was not promoted.
           ns.left.delete(member);
           if (structure === 'claims') ns.claims.delete(member);
-          else if (ns.active.delete(member) && ns.claims.has(member)) unslotted.push({ ns, id, member, time });
+          else if (ns.active.delete(member) && ns.claims.has(member))
+            unslotted.push({ ns, id, member, time });
         }
       }
       continue;
@@ -259,23 +278,38 @@ export function replayAdmissionLog(
       const holder = ns.sequences.get(sequence);
       // §4: a sequence is given once in an epoch. Two entries that share one have no order.
       if (holder !== undefined && holder !== member)
-        report('fifo', time, `sequence ${sequence} was given to ${holder} and to ${member} in ${id}`);
+        report(
+          'fifo',
+          time,
+          `sequence ${sequence} was given to ${holder} and to ${member} in ${id}`,
+        );
       ns.sequences.set(sequence, member);
       ns.waiting.set(member, sequence);
     } else if (structure === 'active') {
       promotions++;
       const sequence = ns.left.get(member);
-      if (ns.promoted.has(member)) report('repromotion', time, `${member} entered active again in ${id}`);
+      if (ns.promoted.has(member))
+        report('repromotion', time, `${member} entered active again in ${id}`);
       else if (sequence === undefined)
         report('fifo', time, `${member} entered active without having left waiting in ${id}`);
-      const ahead = [...ns.waiting].filter(([, other]) => sequence !== undefined && other < sequence);
+      const ahead = [...ns.waiting].filter(
+        ([, other]) => sequence !== undefined && other < sequence,
+      );
       if (ahead.length)
-        report('fifo', time, `${member} (sequence ${sequence}) was promoted before ${ahead.map(([m]) => m).join(', ')} in ${id}`);
+        report(
+          'fifo',
+          time,
+          `${member} (sequence ${sequence}) was promoted before ${ahead.map(([m]) => m).join(', ')} in ${id}`,
+        );
       ns.left.delete(member);
       ns.promoted.add(member);
       ns.active.add(member);
       if (ns.active.size > profile.capacity)
-        report('capacity', time, `${ns.active.size} entries in use in ${id}, capacity ${profile.capacity}`);
+        report(
+          'capacity',
+          time,
+          `${ns.active.size} entries in use in ${id}, capacity ${profile.capacity}`,
+        );
       // The slot's score is the script's `now` plus the admission TTL. The rate is counted from
       // these instants, not from the window the product keeps for itself. Like the capacity it is
       // the bound of one epoch: §4 keeps the promotion history in the epoch's namespace, and a
@@ -284,9 +318,14 @@ export function replayAdmissionLog(
       ns.window.push(now);
       const inSecond = ns.window.filter((t) => t > now - 1000 && t <= now).length;
       if (inSecond > profile.rate)
-        report('rate', time, `${inSecond} promotions in (${now - 1000}, ${now}] in ${id}, rate ${profile.rate}`);
+        report(
+          'rate',
+          time,
+          `${inSecond} promotions in (${now - 1000}, ${now}] in ${id}, rate ${profile.rate}`,
+        );
     } else if (structure === 'claims') {
-      if (!ns.active.has(member)) report('claim-without-slot', time, `${member} claimed without a slot in ${id}`);
+      if (!ns.active.has(member))
+        report('claim-without-slot', time, `${member} claimed without a slot in ${id}`);
       ns.claims.add(member);
     }
   }

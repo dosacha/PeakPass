@@ -461,7 +461,9 @@ describe('admission purchase gate on owned PostgreSQL, Redis and loopback HTTP',
         expect(response.body).toEqual(admissionError('ADMISSION_UNAVAILABLE', 1000));
       }
       const committed = first.filter((response) => response.status === 201).length;
-      process.stdout.write(JSON.stringify({ concurrentAdmittedPurchases: { buyers, committed } }) + '\n');
+      process.stdout.write(
+        JSON.stringify({ concurrentAdmittedPurchases: { buyers, committed } }) + '\n',
+      );
       expect(await fx.state()).toMatchObject({ available: 20 - committed, results: committed });
 
       // The same request, sent again without contention, completes each unfinished purchase once.
@@ -1541,7 +1543,11 @@ describe('admission purchase gate on owned PostgreSQL, Redis and loopback HTTP',
     // The case above refuses through an instance that lost its Redis reflection. These reach the
     // same confirmation through the other refusals of a new occupation. Like it, each needs the
     // admission lock within the 1 s lock timeout once the holder commits.
-    it.each(['an overdue claim', 'the feature read as off in this process', 'a frozen namespace'] as const)(
+    it.each([
+      'an overdue claim',
+      'the feature read as off in this process',
+      'a frozen namespace',
+    ] as const)(
       'replays the committed result when %s refuses a request whose snapshot predates it',
       async (refusal) => {
         fx = await fixture();
@@ -1618,7 +1624,8 @@ describe('admission purchase gate on owned PostgreSQL, Redis and loopback HTTP',
           // The second request was refused on a snapshot that could not see the reservation, and
           // read the policy again in a fresh transaction that replayed it.
           expect(policyReads).toHaveBeenCalledTimes(2);
-          if (refusal === 'the feature read as off in this process') expect(claims).toHaveBeenCalledTimes(1);
+          if (refusal === 'the feature read as off in this process')
+            expect(claims).toHaveBeenCalledTimes(1);
           else
             expect(refused).toEqual([
               expect.objectContaining(

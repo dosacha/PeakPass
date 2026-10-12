@@ -16,7 +16,10 @@ type SeedEventRow = {
 // Reserved seed identities; legacy random rows are intentionally left untouched.
 const eventIds = ['a3ae4dfe-160b-5ec7-9a08-125b9235b45f', '4ed183c2-ab4d-54a8-8404-d4f5b932e9a6'];
 // Simplification: fixture names identify reserved IDs; a renamed fixture has to be reconciled by hand.
-const eventNames = new Map([[eventIds[0], 'Node.js Workshop'], [eventIds[1], 'Advanced GraphQL']]);
+const eventNames = new Map([
+  [eventIds[0], 'Node.js Workshop'],
+  [eventIds[1], 'Advanced GraphQL'],
+]);
 
 async function seedDatabase() {
   loadConfig();
@@ -30,7 +33,8 @@ async function seedDatabase() {
     logger.info('Seeding database...');
 
     const existingEvents = await pool.query<SeedEventRow>(
-      'SELECT id, name FROM events WHERE id = ANY($1::uuid[])', [eventIds],
+      'SELECT id, name FROM events WHERE id = ANY($1::uuid[])',
+      [eventIds],
     );
     const collision = existingEvents.rows.find((event) => eventNames.get(event.id) !== event.name);
     if (collision) {
@@ -103,7 +107,8 @@ async function seedDatabase() {
       SELECT id, name
       FROM events
       WHERE id = ANY($1::uuid[])
-      `, [eventIds],
+      `,
+      [eventIds],
     );
 
     const seededEventByName = new Map(eventResult.rows.map((event) => [event.name, event.id]));

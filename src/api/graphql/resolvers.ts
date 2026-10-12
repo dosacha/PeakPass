@@ -158,8 +158,16 @@ export const resolvers = {
       const safeOffset = clampOffset(offset);
 
       try {
-        logger.info({ userId: context.userId, limit: safeLimit, offset: safeOffset }, 'Query: myOrders');
-        const orders = await orderService.getOrdersByUserId(context.userId, safeLimit, safeOffset, client);
+        logger.info(
+          { userId: context.userId, limit: safeLimit, offset: safeOffset },
+          'Query: myOrders',
+        );
+        const orders = await orderService.getOrdersByUserId(
+          context.userId,
+          safeLimit,
+          safeOffset,
+          client,
+        );
         return orders.map((order) => ({
           id: order.id,
           userId: order.userId,
@@ -172,7 +180,10 @@ export const resolvers = {
           updatedAt: toIsoString(order.updatedAt),
         }));
       } catch (err) {
-        logger.error({ err, userId: context.userId, limit: safeLimit, offset: safeOffset }, 'Query failed: myOrders');
+        logger.error(
+          { err, userId: context.userId, limit: safeLimit, offset: safeOffset },
+          'Query failed: myOrders',
+        );
         throw toGraphQLError(err as Error);
       } finally {
         client.release();
@@ -195,21 +206,28 @@ export const resolvers = {
       const safeOffset = clampOffset(offset);
 
       try {
-        logger.info({ userId: context.userId, limit: safeLimit, offset: safeOffset }, 'Query: myTickets');
-        return await ticketService.getTicketsByUserId(context.userId, safeLimit, safeOffset, client);
+        logger.info(
+          { userId: context.userId, limit: safeLimit, offset: safeOffset },
+          'Query: myTickets',
+        );
+        return await ticketService.getTicketsByUserId(
+          context.userId,
+          safeLimit,
+          safeOffset,
+          client,
+        );
       } catch (err) {
-        logger.error({ err, userId: context.userId, limit: safeLimit, offset: safeOffset }, 'Query failed: myTickets');
+        logger.error(
+          { err, userId: context.userId, limit: safeLimit, offset: safeOffset },
+          'Query failed: myTickets',
+        );
         throw toGraphQLError(err as Error);
       } finally {
         client.release();
       }
     },
 
-    ticketByCode: async (
-      _: unknown,
-      { code }: { code: string },
-      _context: GraphQLContext,
-    ) => {
+    ticketByCode: async (_: unknown, { code }: { code: string }, _context: GraphQLContext) => {
       const client = await acquireClient();
 
       try {
@@ -278,11 +296,7 @@ export const resolvers = {
         eventId: parent.id,
       });
     },
-    myTicketCount: async (
-      parent: GraphQLEventParent,
-      _: unknown,
-      context: GraphQLContext,
-    ) => {
+    myTicketCount: async (parent: GraphQLEventParent, _: unknown, context: GraphQLContext) => {
       if (!context.userId) {
         return 0;
       }

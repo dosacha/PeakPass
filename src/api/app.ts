@@ -46,35 +46,37 @@ export async function createApp() {
   await fastify.register(corsPlugin, { origin: true });
 
   fastify.removeContentTypeParser('application/json');
-  fastify.addContentTypeParser(
-    'application/json',
-    { parseAs: 'buffer' },
-    (request, body, done) => {
-      const buffer = Buffer.isBuffer(body) ? body : Buffer.from(body);
-      (request as FastifyRequest).rawBody = buffer;
+  fastify.addContentTypeParser('application/json', { parseAs: 'buffer' }, (request, body, done) => {
+    const buffer = Buffer.isBuffer(body) ? body : Buffer.from(body);
+    (request as FastifyRequest).rawBody = buffer;
 
-      if (buffer.length === 0) {
-        done(null, {});
-        return;
-      }
+    if (buffer.length === 0) {
+      done(null, {});
+      return;
+    }
 
-      try {
-        done(null, JSON.parse(buffer.toString('utf8')));
-      } catch (err) {
-        const error = err instanceof SyntaxError
+    try {
+      done(null, JSON.parse(buffer.toString('utf8')));
+    } catch (err) {
+      const error =
+        err instanceof SyntaxError
           ? new AppError('BAD_REQUEST', 400, 'Invalid JSON body')
-          : err instanceof Error ? err : new Error('Invalid JSON body');
-        done(error, undefined);
-      }
-    },
-  );
+          : err instanceof Error
+            ? err
+            : new Error('Invalid JSON body');
+      done(error, undefined);
+    }
+  });
 
   fastify.addHook('onRequest', async (request) => {
     request.id = (request.headers['x-request-id'] as string) || randomUUID();
   });
 
   fastify.addHook('onRequest', async (request) => {
-    logger.info({ requestId: request.id, method: request.method, url: request.url }, 'Request started');
+    logger.info(
+      { requestId: request.id, method: request.method, url: request.url },
+      'Request started',
+    );
   });
 
   const { webhookSignatureMiddleware } = await import('./middleware/webhook-signature');
@@ -143,6 +145,6 @@ export async function createApp() {
   await registerDemoSessionRoutes(fastify);
   const { registerAdmissionRoutes } = await import('./rest/admissions');
   await fastify.register(registerAdmissionRoutes);
-  
+
   return fastify;
 }

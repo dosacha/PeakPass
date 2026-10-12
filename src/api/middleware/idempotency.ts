@@ -71,10 +71,7 @@ async function sendCachedResult(
   return reply.code(getCachedStatusCode(cachedResult)).send(cachedResult.body);
 }
 
-export async function idempotencyMiddleware(
-  request: FastifyRequest,
-  reply: FastifyReply,
-) {
+export async function idempotencyMiddleware(request: FastifyRequest, reply: FastifyReply) {
   if (request.method !== 'POST') {
     return;
   }

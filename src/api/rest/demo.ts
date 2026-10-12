@@ -30,9 +30,11 @@ type DemoSession = {
   expiresAt: string;
 };
 
-const DemoSettlementSchema = z.object({
-  orderId: z.string().uuid(),
-}).strict();
+const DemoSettlementSchema = z
+  .object({
+    orderId: z.string().uuid(),
+  })
+  .strict();
 
 export type DemoSettlementRequest = {
   orderId: string;
@@ -62,14 +64,10 @@ export async function findDemoUserByEmail(email: string): Promise<DemoUser | nul
 
 export function createDemoSession(user: DemoUser, config: Config): DemoSession {
   const expiresAt = new Date(Date.now() + config.DEMO_SESSION_TTL_SECONDS * 1000).toISOString();
-  const token = jwt.sign(
-    { email: user.email, role: 'demo' },
-    config.JWT_SECRET,
-    {
-      subject: user.id,
-      expiresIn: config.DEMO_SESSION_TTL_SECONDS,
-    },
-  );
+  const token = jwt.sign({ email: user.email, role: 'demo' }, config.JWT_SECRET, {
+    subject: user.id,
+    expiresIn: config.DEMO_SESSION_TTL_SECONDS,
+  });
 
   return {
     userId: user.id,
@@ -169,10 +167,7 @@ export async function registerDemoSessionRoutes(
     }
 
     const session = createDemoSession(user, config);
-    logger.info(
-      { requestId: request.id, userId: user.id },
-      'Issued live demo session',
-    );
+    logger.info({ requestId: request.id, userId: user.id }, 'Issued live demo session');
 
     return reply.header('Cache-Control', 'no-store').send(session);
   });

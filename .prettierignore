@@ -1,0 +1,2 @@
+# The load-test harness pins the SHA256 of this file (load-test/flash-sale-check.mjs).
+src/tests/helpers/admission-ledger.ts

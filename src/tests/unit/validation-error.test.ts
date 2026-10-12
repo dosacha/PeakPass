@@ -37,13 +37,15 @@ describe('API validation and demo route protection', () => {
     };
     handleValidationError(issues, reply as never, 'request-id');
     expect(reply.status).toHaveBeenCalledWith(400);
-    expect(send).toHaveBeenCalledWith(expect.objectContaining({
-      error: expect.objectContaining({
-        code: 'VALIDATION_ERROR',
-        message: 'Request validation failed',
-        details: { issues },
+    expect(send).toHaveBeenCalledWith(
+      expect.objectContaining({
+        error: expect.objectContaining({
+          code: 'VALIDATION_ERROR',
+          message: 'Request validation failed',
+          details: { issues },
+        }),
       }),
-    }));
+    );
   });
 
   it('applies a dedicated ten-per-minute rate limit to public demo sessions', async () => {

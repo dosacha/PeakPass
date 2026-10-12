@@ -48,10 +48,16 @@ export async function initPostgresPool(): Promise<Pool> {
   if (config.DB_POOL_SAMPLE_INTERVAL_MS > 0) {
     sampleTimer = setInterval(() => {
       if (!pool) return;
-      logger.info({
-        metric: 'postgres_pool', total: pool.totalCount, idle: pool.idleCount,
-        checkedOut: pool.totalCount - pool.idleCount, waiting: pool.waitingCount,
-      }, 'PostgreSQL pool sample');
+      logger.info(
+        {
+          metric: 'postgres_pool',
+          total: pool.totalCount,
+          idle: pool.idleCount,
+          checkedOut: pool.totalCount - pool.idleCount,
+          waiting: pool.waitingCount,
+        },
+        'PostgreSQL pool sample',
+      );
     }, config.DB_POOL_SAMPLE_INTERVAL_MS);
     sampleTimer.unref();
   }

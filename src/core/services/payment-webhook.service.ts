@@ -26,9 +26,7 @@ import { getLogger } from '@/infra/logger';
  * order 행을 FOR UPDATE로 잠그는 SELECT가 본 서비스 진입부에 있다.
  */
 
-type PaymentTransition =
-  | { kind: 'settle' }
-  | { kind: 'fail' };
+type PaymentTransition = { kind: 'settle' } | { kind: 'fail' };
 
 type WebhookOutcome =
   | { kind: 'expired'; order: Order; paymentStatus: string; duplicate: boolean }
@@ -58,7 +56,13 @@ export class PaymentWebhookService {
       throw new NotFoundError('Order', input.orderId);
     }
 
-    await this.reserveCallbackKey(order.id, input.providerTransactionId, input.status, idempotencyKey, client);
+    await this.reserveCallbackKey(
+      order.id,
+      input.providerTransactionId,
+      input.status,
+      idempotencyKey,
+      client,
+    );
 
     const transition: PaymentTransition =
       input.status === 'settled' ? { kind: 'settle' } : { kind: 'fail' };
@@ -67,20 +71,37 @@ export class PaymentWebhookService {
     return this.mapOutcomeToResponse(outcome);
   }
 
-  private async reserveCallbackKey(orderId: string, providerTransactionId: string, status: PaymentWebhookInput['status'], idempotencyKey: string, client: PoolClient): Promise<void> {
+  private async reserveCallbackKey(
+    orderId: string,
+    providerTransactionId: string,
+    status: PaymentWebhookInput['status'],
+    idempotencyKey: string,
+    client: PoolClient,
+  ): Promise<void> {
     // Reserve every accepted callback, including early terminal replays and
     // failure-to-success corrections. Rejected transitions roll this back too.
-    const inserted = await client.query(`INSERT INTO payment_callback_keys (idempotency_key, order_id, provider_transaction_id, callback_status)
+    const inserted = await client.query(
+      `INSERT INTO payment_callback_keys (idempotency_key, order_id, provider_transaction_id, callback_status)
       VALUES ($1, $2, $3, $4) ON CONFLICT (idempotency_key) DO NOTHING RETURNING idempotency_key`,
-    [idempotencyKey, orderId, providerTransactionId, status]);
+      [idempotencyKey, orderId, providerTransactionId, status],
+    );
     if (inserted.rowCount) return;
-    const result = await client.query<{ order_id: string; provider_transaction_id: string; callback_status: string | null }>(
+    const result = await client.query<{
+      order_id: string;
+      provider_transaction_id: string;
+      callback_status: string | null;
+    }>(
       `SELECT order_id, provider_transaction_id, callback_status FROM payment_callback_keys WHERE idempotency_key=$1`,
       [idempotencyKey],
     );
     const existing = result.rows[0];
     // NULL is an unverifiable legacy request, not permission to bind a new status on replay.
-    if (!existing || existing.order_id !== orderId || existing.provider_transaction_id !== providerTransactionId || existing.callback_status !== status) {
+    if (
+      !existing ||
+      existing.order_id !== orderId ||
+      existing.provider_transaction_id !== providerTransactionId ||
+      existing.callback_status !== status
+    ) {
       throw new ConflictError('Idempotency key already used for a different payment callback');
     }
   }
@@ -94,8 +115,14 @@ export class PaymentWebhookService {
   ): Promise<WebhookOutcome> {
     if (order.status === 'expired') {
       // Provider success is a durable financial fact, even when seats have already been returned.
-      const record = await this.insertPaymentRecord(order.id, input.status,
-        input.providerTransactionId, idempotencyKey, client, input.status === 'settled');
+      const record = await this.insertPaymentRecord(
+        order.id,
+        input.status,
+        input.providerTransactionId,
+        idempotencyKey,
+        client,
+        input.status === 'settled',
+      );
       return { kind: 'expired', order, paymentStatus: record.status, duplicate: !record.changed };
     }
     if (transition.kind === 'settle') {
@@ -130,9 +157,10 @@ export class PaymentWebhookService {
 
     const paidOrder = await this.markOrderAsPaid(order.id, client);
     const existingTickets = await this.ticketService.getTicketsByOrderId(order.id, client);
-    const tickets = existingTickets.length > 0
-      ? existingTickets
-      : await this.issueTicketsForOrder(paidOrder, client);
+    const tickets =
+      existingTickets.length > 0
+        ? existingTickets
+        : await this.issueTicketsForOrder(paidOrder, client);
 
     return { kind: 'newly_settled', order: paidOrder, tickets };
   }
@@ -182,7 +210,12 @@ export class PaymentWebhookService {
   ): CheckoutResult & { paymentStatus: string; duplicate: boolean } {
     switch (outcome.kind) {
       case 'expired':
-        return { order: outcome.order, tickets: [], paymentStatus: outcome.paymentStatus, duplicate: outcome.duplicate };
+        return {
+          order: outcome.order,
+          tickets: [],
+          paymentStatus: outcome.paymentStatus,
+          duplicate: outcome.duplicate,
+        };
       case 'idempotent_settled':
         return {
           order: outcome.order,
@@ -319,7 +352,10 @@ export class PaymentWebhookService {
       tickets.push(ticketResult.rows[0]);
     }
 
-    this.logger.info({ orderId: order.id, ticketCount: tickets.length }, 'Tickets issued after settlement');
+    this.logger.info(
+      { orderId: order.id, ticketCount: tickets.length },
+      'Tickets issued after settlement',
+    );
     return tickets;
   }
 
@@ -360,9 +396,15 @@ export class PaymentWebhookService {
       [uuid(), orderId, status, providerTransactionId, idempotencyKey, reconciliationRequired],
     );
     if (result.rows[0]) return { changed: true, status: result.rows[0].status };
-    const existing = await client.query<{ id: string; orderId: string; status: string; reconciliationRequired: boolean }>(
+    const existing = await client.query<{
+      id: string;
+      orderId: string;
+      status: string;
+      reconciliationRequired: boolean;
+    }>(
       `SELECT id, order_id as "orderId", status, reconciliation_required as "reconciliationRequired"
-       FROM payment_records WHERE provider_transaction_id=$1`, [providerTransactionId],
+       FROM payment_records WHERE provider_transaction_id=$1`,
+      [providerTransactionId],
     );
     const row = existing.rows[0];
     if (!row) {
@@ -371,8 +413,11 @@ export class PaymentWebhookService {
 
     if (row.orderId === orderId) {
       if (reconciliationRequired && (row.status !== 'settled' || !row.reconciliationRequired)) {
-        await client.query(`UPDATE payment_records SET status='settled', reconciliation_required=true,
-          webhook_received_at=NOW() WHERE id=$1`, [row.id]);
+        await client.query(
+          `UPDATE payment_records SET status='settled', reconciliation_required=true,
+          webhook_received_at=NOW() WHERE id=$1`,
+          [row.id],
+        );
         return { changed: true, status: 'settled' };
       }
       return { changed: false, status: row.status };

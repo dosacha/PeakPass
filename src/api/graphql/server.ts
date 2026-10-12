@@ -45,7 +45,10 @@ export async function registerGraphQLRoute(
     const context = createGraphQLContext((request as { user?: { id?: string } }).user?.id);
 
     try {
-      logger.debug({ query: query.slice(0, 100), userId: context.userId }, 'GraphQL query received');
+      logger.debug(
+        { query: query.slice(0, 100), userId: context.userId },
+        'GraphQL query received',
+      );
 
       const result = await apollo.executeOperation(
         {

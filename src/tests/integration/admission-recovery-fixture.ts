@@ -32,7 +32,10 @@ async function main() {
     const query = client.query.bind(client);
     let pending = '';
     client.query = (async (sql: string, ...args: unknown[]) => {
-      const result = await (query as unknown as (...args:unknown[])=>Promise<unknown>)(sql, ...args);
+      const result = await (query as unknown as (...args: unknown[]) => Promise<unknown>)(
+        sql,
+        ...args,
+      );
       if (sql.includes('UPDATE admission_events SET generation')) pending = 'barrier';
       if (sql.includes("UPDATE admission_events SET phase='open'")) pending = 'open';
       if (sql === 'COMMIT' && pending === stage) await pause();

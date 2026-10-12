@@ -45,7 +45,10 @@ describe('available seat ceiling constraint (R03-B, migration 007)', () => {
     await pool.query('DELETE FROM users');
   });
 
-  function insertEvent(totalSeats: number, availableSeats: number): Promise<unknown> & { id: string } {
+  function insertEvent(
+    totalSeats: number,
+    availableSeats: number,
+  ): Promise<unknown> & { id: string } {
     const id = uuid();
     const promise = pool.query(
       `

@@ -9,11 +9,7 @@ export class InventoryService {
    * The event row is locked with FOR UPDATE so every inventory path uses the
    * same race-free accounting rule.
    */
-  async adjustAvailableSeats(
-    eventId: string,
-    delta: number,
-    client: PoolClient,
-  ): Promise<number> {
+  async adjustAvailableSeats(eventId: string, delta: number, client: PoolClient): Promise<number> {
     const lockResult = await client.query<{ available_seats: number }>(
       `SELECT available_seats FROM events WHERE id = $1 FOR UPDATE`,
       [eventId],
@@ -30,10 +26,7 @@ export class InventoryService {
       throw new InsufficientInventoryError(current, Math.abs(delta));
     }
 
-    await client.query(
-      `UPDATE events SET available_seats = $1 WHERE id = $2`,
-      [next, eventId],
-    );
+    await client.query(`UPDATE events SET available_seats = $1 WHERE id = $2`, [next, eventId]);
 
     return next;
   }

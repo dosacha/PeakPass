@@ -62,8 +62,12 @@ export async function registerEventRoutes(app: FastifyInstance) {
         try {
           await client.query('ROLLBACK');
         } catch (rollbackError) {
-          releaseError = rollbackError instanceof Error ? rollbackError : new Error(String(rollbackError));
-          logger.error({ err: rollbackError, requestId: request.id }, 'Failed to roll back event creation');
+          releaseError =
+            rollbackError instanceof Error ? rollbackError : new Error(String(rollbackError));
+          logger.error(
+            { err: rollbackError, requestId: request.id },
+            'Failed to roll back event creation',
+          );
         }
         throw err;
       } finally {

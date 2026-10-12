@@ -12,16 +12,14 @@ const MIN_SECRET_LENGTH = 32;
 //
 // export하는 이유: 테스트가 inline 재정의 대신 production parser를 직접 검증하도록 함.
 export const booleanFromEnv = (defaultValue: boolean) =>
-  z
-    .union([z.string(), z.boolean(), z.undefined()])
-    .transform((v) => {
-      if (typeof v === 'boolean') return v;
-      if (v === undefined || v === '') return defaultValue;
-      const normalized = v.toLowerCase();
-      if (normalized === 'true' || normalized === '1') return true;
-      if (normalized === 'false' || normalized === '0') return false;
-      return defaultValue;
-    });
+  z.union([z.string(), z.boolean(), z.undefined()]).transform((v) => {
+    if (typeof v === 'boolean') return v;
+    if (v === undefined || v === '') return defaultValue;
+    const normalized = v.toLowerCase();
+    if (normalized === 'true' || normalized === '1') return true;
+    if (normalized === 'false' || normalized === '0') return false;
+    return defaultValue;
+  });
 
 const envSchema = z.object({
   NODE_ENV: z.enum(['development', 'production', 'test']).default('development'),
@@ -51,7 +49,12 @@ const envSchema = z.object({
   JWT_SECRET: z.string().min(MIN_SECRET_LENGTH).default(DEVELOPMENT_JWT_SECRET),
   ORDER_PAYMENT_WINDOW_MINUTES: z.coerce.number().finite().positive().default(10),
   ORDER_SWEEP_INTERVAL_MS: z.coerce.number().int().positive().max(2147483647).default(500),
-  ORDER_SWEEP_BATCH_SIZE: z.coerce.number().int().positive().max(Number.MAX_SAFE_INTEGER).default(20),
+  ORDER_SWEEP_BATCH_SIZE: z.coerce
+    .number()
+    .int()
+    .positive()
+    .max(Number.MAX_SAFE_INTEGER)
+    .default(20),
 
   // 외부 서비스 설정
   PAYMENT_SERVICE_URL: z.string().url().default('https://api.payment-provider.example.com'),

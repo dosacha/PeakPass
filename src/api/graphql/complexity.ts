@@ -87,22 +87,36 @@ function selectionComplexity(
   for (const selection of selectionSet.selections) {
     if (selection.kind === Kind.FIELD) {
       const fieldName = selection.name.value;
-      const field = fieldName === '__typename' ? TypeNameMetaFieldDef
-        : fieldName === '__schema' && type === context.schema.getQueryType() ? SchemaMetaFieldDef
-          : fieldName === '__type' && type === context.schema.getQueryType() ? TypeMetaFieldDef
-            : isObjectType(type) || isInterfaceType(type) ? type.getFields()[fieldName] : undefined;
+      const field =
+        fieldName === '__typename'
+          ? TypeNameMetaFieldDef
+          : fieldName === '__schema' && type === context.schema.getQueryType()
+            ? SchemaMetaFieldDef
+            : fieldName === '__type' && type === context.schema.getQueryType()
+              ? TypeMetaFieldDef
+              : isObjectType(type) || isInterfaceType(type)
+                ? type.getFields()[fieldName]
+                : undefined;
       const args = field ? getArgumentValues(field, selection, context.variables) : {};
       const rule = complexityRulesMap[type.name]?.[fieldName]?.complexity ?? 1;
       const baseCost = typeof rule === 'function' ? rule({ args }) : rule;
       const returnType = field ? getNamedType(field.type) : undefined;
       let nestedCost = 0;
       if (selection.selectionSet && returnType && isCompositeType(returnType)) {
-        nestedCost = selectionComplexity(selection.selectionSet, returnType, context, depth + 1, fragmentPath);
+        nestedCost = selectionComplexity(
+          selection.selectionSet,
+          returnType,
+          context,
+          depth + 1,
+          fragmentPath,
+        );
       }
       const outputType = field && isNonNullType(field.type) ? field.type.ofType : field?.type;
       // Simplification: an unpaginated list is estimated at 10 items. A tier-count bound or a measurement should replace it if the estimate matters.
-      const cardinality = outputType && isListType(outputType)
-        ? numericLimit(args.limit, typeof rule === 'function' ? baseCost : 10) : 1;
+      const cardinality =
+        outputType && isListType(outputType)
+          ? numericLimit(args.limit, typeof rule === 'function' ? baseCost : 10)
+          : 1;
       total += baseCost + cardinality * nestedCost;
     } else {
       const name = selection.kind === Kind.FRAGMENT_SPREAD ? selection.name.value : undefined;
@@ -112,8 +126,14 @@ function selectionComplexity(
       const condition = fragment.typeCondition;
       const fragmentType = condition ? context.schema.getType(condition.name.value) : type;
       if (fragmentType && isCompositeType(fragmentType)) {
-        total += selectionComplexity(fragment.selectionSet, fragmentType, context, depth,
-          name ? new Set([...fragmentPath, name]) : fragmentPath, fragmentDepth + 1);
+        total += selectionComplexity(
+          fragment.selectionSet,
+          fragmentType,
+          context,
+          depth,
+          name ? new Set([...fragmentPath, name]) : fragmentPath,
+          fragmentDepth + 1,
+        );
       }
     }
     if (total > context.maxComplexity) {
@@ -131,8 +151,12 @@ export function calculateFieldComplexity(
   depth = 0,
   maxDepth = 10,
 ): number {
-  return selectionComplexity({ kind: Kind.SELECTION_SET, selections: [node] }, type,
-    { schema, variables, fragments: new Map(), maxComplexity: Infinity, maxDepth }, depth);
+  return selectionComplexity(
+    { kind: Kind.SELECTION_SET, selections: [node] },
+    type,
+    { schema, variables, fragments: new Map(), maxComplexity: Infinity, maxDepth },
+    depth,
+  );
 }
 
 // Validate only the selected operation, using the same variable/argument defaults as execution.
@@ -149,20 +173,37 @@ export function validateQueryComplexity(
       extensions: { code: 'OPERATION_RESOLUTION_FAILURE', http: { status: 400 } },
     });
   }
-  const effectiveVariables = getVariableValues(schema, operation.variableDefinitions ?? [], variables);
+  const effectiveVariables = getVariableValues(
+    schema,
+    operation.variableDefinitions ?? [],
+    variables,
+  );
   if (effectiveVariables.errors) {
     throw new GraphQLError(effectiveVariables.errors[0].message, {
       extensions: { code: 'BAD_USER_INPUT', http: { status: 400 } },
     });
   }
-  const rootType = operation.operation === 'query' ? schema.getQueryType()
-    : operation.operation === 'mutation' ? schema.getMutationType() : schema.getSubscriptionType();
+  const rootType =
+    operation.operation === 'query'
+      ? schema.getQueryType()
+      : operation.operation === 'mutation'
+        ? schema.getMutationType()
+        : schema.getSubscriptionType();
   if (!rootType) return;
-  const fragments = new Map(document.definitions
-    .filter((definition): definition is FragmentDefinitionNode => definition.kind === Kind.FRAGMENT_DEFINITION)
-    .map((definition) => [definition.name.value, definition]));
+  const fragments = new Map(
+    document.definitions
+      .filter(
+        (definition): definition is FragmentDefinitionNode =>
+          definition.kind === Kind.FRAGMENT_DEFINITION,
+      )
+      .map((definition) => [definition.name.value, definition]),
+  );
   selectionComplexity(operation.selectionSet, rootType, {
-    schema, variables: effectiveVariables.coerced, fragments, maxComplexity, maxDepth: 10,
+    schema,
+    variables: effectiveVariables.coerced,
+    fragments,
+    maxComplexity,
+    maxDepth: 10,
   });
 }
 
@@ -184,7 +225,13 @@ export function createComplexityPlugin<TContext extends BaseContext = BaseContex
         async didResolveOperation({ document, schema, request }) {
           try {
             const variables = (request.variables ?? {}) as Record<string, unknown>;
-            validateQueryComplexity(document, schema, variables, maxComplexity, request.operationName ?? undefined);
+            validateQueryComplexity(
+              document,
+              schema,
+              variables,
+              maxComplexity,
+              request.operationName ?? undefined,
+            );
           } catch (err) {
             if (err instanceof GraphQLError) {
               throw err;
