@@ -1,18 +1,21 @@
 import { z } from 'zod';
 
 /**
- * The id of a row that comes from outside, lower-cased: the subject of a JWT, an id in a path,
- * the id fields of a request body (reservation, checkout with its Idempotency-Key, settlement,
- * demo settlement, the admission join and the admission fields of a purchase) and the id argument
- * of the GraphQL event query.
+ * A UUID that comes from outside, lower-cased.
  *
- * PostgreSQL compares UUIDs without case, but a string comparison and a Map lookup do not, so an
- * id is brought to the form PostgreSQL returns where it enters. All of them go through this one
- * schema: they accept the same form, and none passes a malformed id on to PostgreSQL (SQLSTATE
- * 22P02).
+ * PostgreSQL compares UUIDs without case, but a string comparison and a Map lookup do not. A
+ * value this schema has parsed is in the form PostgreSQL returns, and is one PostgreSQL accepts
+ * as a UUID. A field of a path, a body or a GraphQL argument that is validated as a UUID is
+ * parsed here, and the subject of a JWT is read through it.
  *
- * Not for an Idempotency-Key of a settlement. That key is stored as text and is the string as it
- * was sent; the demo settlement checks its shape only.
+ * What stays as sent:
+ * - a JWT subject this schema does not accept (see `extractUserFromToken`);
+ * - the Idempotency-Key header. The Redis lock and the cached answer of the idempotency
+ *   middleware use the header as sent, and so does a settlement. A checkout parses its key here
+ *   before the key reaches PostgreSQL;
+ * - a field that is not validated as a UUID, such as `tierId` (an entry of an event's pricing,
+ *   not a row) and the transaction id of a payment provider. It is compared as sent even when it
+ *   has the shape of a UUID.
  */
 export const uuid = z
   .string()

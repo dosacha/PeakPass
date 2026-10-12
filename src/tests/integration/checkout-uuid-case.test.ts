@@ -4,6 +4,7 @@ import type { FastifyInstance } from 'fastify';
 import type { Pool } from 'pg';
 import { initPostgresPool, closePostgresPool } from '@/infra/postgres/client';
 import { initRedis, closeRedis } from '@/infra/redis/client';
+import { getReservationHold } from '@/infra/redis/commands';
 import { getConfig } from '@/infra/config';
 
 // What these tests read of a reservation (top level) and of a checkout answer (`order`).
@@ -143,6 +144,7 @@ describe('purchase requests whose UUIDs are sent in upper case', () => {
       quantity: 1,
     });
     expect(reservation.status).toBe(201);
+    expect(await getReservationHold(reservation.body.id)).not.toBeNull();
     await pool.query(`UPDATE reservations SET expires_at=NOW()-INTERVAL '1 minute' WHERE id=$1`, [
       reservation.body.id,
     ]);
@@ -170,5 +172,7 @@ describe('purchase requests whose UUIDs are sent in upper case', () => {
     );
     expect(state.rows[0]).toEqual({ status: 'expired', available: 10 });
     expect(await orderCount()).toBe(0);
+    // The hold in Redis is keyed by the id as a string. It goes only if the id was lower-cased.
+    expect(await getReservationHold(reservation.body.id)).toBeNull();
   });
 });

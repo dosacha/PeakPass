@@ -427,11 +427,15 @@ describe('durable terminal callback idempotency keys', () => {
     ).toBe(9998);
   });
 
-  it('replays the same uppercase UUID callback after Redis loss using the canonical order identity', async () => {
+  it('replays an uppercase UUID callback from the cache when re-sent in lower case and after Redis loss using the canonical order identity', async () => {
     const order = await data.order(),
       provider = uuid(),
       key = uuid();
-    expect((await callback(order.toUpperCase(), 'settled', provider, key)).status).toBe(200);
+    const first = await callback(order.toUpperCase(), 'settled', provider, key);
+    expect(first).toMatchObject({ status: 200, body: { duplicate: false } });
+    // The cached answer is bound to its request by a fingerprint of the fields. The order id is
+    // lower-cased before the fingerprint is taken, so the same callback in lower case is a replay.
+    expect(await callback(order, 'settled', provider, key)).toEqual(first);
     await clearResults();
     expect(await callback(order.toUpperCase(), 'settled', provider, key)).toMatchObject({
       status: 200,

@@ -33,9 +33,8 @@ describe('UUIDs that enter with a request', () => {
     expect(extractUserFromToken(jwt.sign({ sub: 'Service-Account' }, JWT_SECRET))?.id).toBe(
       'Service-Account',
     );
-    // PostgreSQL accepts this form, the schema does not: it stays as sent. It then fails the
-    // string comparisons of the REST routes, while a query that only filters by it still finds
-    // the user's rows.
+    // PostgreSQL accepts this form, the schema does not: it stays as sent. What its consumers
+    // then answer is listed at extractUserFromToken.
     const unhyphenated = UPPER.replace(/-/g, '');
     expect(extractUserFromToken(jwt.sign({ sub: unhyphenated }, JWT_SECRET))?.id).toBe(
       unhyphenated,
@@ -56,7 +55,7 @@ describe('UUIDs that enter with a request', () => {
     });
   });
 
-  it('lower-cases every UUID field of the two create requests', () => {
+  it('lower-cases the ids of the two create requests and leaves tierId as sent', () => {
     expect(
       CreateOrderSchema.parse({
         eventId: UPPER,

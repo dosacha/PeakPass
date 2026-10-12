@@ -103,7 +103,7 @@ describe('demo settlement on real PostgreSQL and loopback HTTP', () => {
     return result.rows[0];
   }
 
-  it('issues the tickets once: a replay of the same key and a new key add none', async () => {
+  it('issues the tickets once: a replay of the same key, a new key and the order named in upper case add none', async () => {
     const { token, orderId } = await buyerWithPendingOrder();
     const key = uuid();
 
