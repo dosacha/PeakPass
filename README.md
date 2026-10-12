@@ -26,8 +26,8 @@ PeakPass는 예약, 주문 생성, 결제 정산 webhook이 같은 재고와 주
 
 대기열은 실패를 대기로 바꿨고 처리량을 늘리지는 않았습니다. 이 표는 아래 조건 위에 서 있습니다.
 
-- 대기열 없는 경로의 실패는 용량 부족이 아니라 SERIALIZABLE transaction이 직렬화 실패 재시도 3회를 다 쓴 500입니다. 격리 수준을 내리거나 재시도를 늘린 경우는 재지 않았습니다.
-- 초당 50명은 대기열 없는 경로가 불안정해지는 가장 낮은 도착률로 고른 조건입니다. 초당 10명에서는 대기열 없이도 전원이 결제했습니다.
+- 대기열 없는 경로의 실패는 용량 부족이 아니라 SERIALIZABLE transaction이 직렬화 실패로 3회의 시도(재시도 2회)를 다 쓴 500입니다. 격리 수준을 내리거나 시도 횟수를 늘린 경우는 재지 않았습니다.
+- 초당 50명은 이 비교의 pilot에서 시험한 세 단계(초당 10·25·50명) 가운데 대기열 없는 경로가 안정적이지 않았던 가장 낮은 단계입니다. 초당 10명에서는 대기열 없이도 전원이 결제했고, 초당 25명은 그 pilot에서는 안정이었지만 앞선 쓰기 기준선에서는 3회 중 2회가 과부하였습니다.
 - 대기열 없는 쪽의 부하 발생기는 실패한 요청을 한 번만 다시 보냅니다. 주문까지 만들어지고 정산 webhook만 실패해 미결제로 남은 구매자가 1,000명 중 377–386명입니다.
 - 초당 2명이라는 입장량은 측정으로 찾은 값이 아니라 처음 정한 가정입니다.
 - 로컬 host 한 대, 앱 인스턴스 1개의 합성 부하이며 운영 성과가 아닙니다.
@@ -68,7 +68,7 @@ PeakPass는 예약, 주문 생성, 결제 정산 webhook이 같은 재고와 주
 - **정산 webhook.** `POST /webhooks/payments/settlement`가 주문을 `paid`로 바꾸고 이때 처음 티켓을 발급합니다. HMAC 서명과 timestamp를 검증합니다.
 - **중복 webhook.** 같은 Idempotency-Key의 재전송은 저장한 응답을 그대로 돌려주고, 다른 key로 온 같은 결제는 주문 행 잠금 뒤 이미 `paid`인 것을 확인해 기존 티켓을 반환합니다.
 - **초과 판매 방지.** 이벤트 행을 `FOR UPDATE`로 잠그고 차감하며, `available_seats`는 DB CHECK로 하한과 상한이 함께 강제됩니다. 수량은 이벤트 단위로 지킵니다. tier별 수량은 강제하지 않습니다.
-- **Rate limit.** Redis sliding window로 구매 경로와 GraphQL을 서로 다른 한도로 제한합니다. Redis에 닿지 않으면 503이 기본값입니다.
+- **Rate limit.** Redis sliding window로 구매 요청(예약·checkout 생성, 정산 webhook)과 GraphQL을 서로 다른 한도로 제한합니다. 어느 한도를 쓸지는 route가 선언하고, 예약·주문 조회는 한도 대상이 아닙니다. Redis에 닿지 않으면 503이 기본값입니다.
 - **입장 제어.** 보호하도록 지정한 이벤트는 구매 전에 대기열을 거칩니다. Redis가 등록 순서대로 초당 정해진 수만 입장시키고, 입장 하나는 PostgreSQL 원장 한 행으로 예약 또는 주문 하나에만 쓰입니다. 대기 화면은 polling으로 상태를 읽고 순번이 먼 사용자는 조회 간격을 늘립니다. 기본으로 꺼져 있고(`ENABLE_ADMISSION=false`) 동시에 보호하는 이벤트는 1개입니다. 설계 선택과 한계는 [ADMISSION_DESIGN_AND_OPERATIONS.md](docs/ADMISSION_DESIGN_AND_OPERATIONS.md)에 있습니다.
 - **조회.** GraphQL `myOrders`, `myTickets`는 JWT가 필요합니다. `ticketByCode`는 인증 없이 티켓 번호로 게이트 검증용 정보만 돌려줍니다.
 
@@ -76,7 +76,7 @@ PeakPass는 예약, 주문 생성, 결제 정산 webhook이 같은 재고와 주
 
 - 좌석을 바꾸는 코드는 한 곳이고 항상 이벤트 행 잠금 뒤에 실행됩니다.
 - `available_seats`는 DB CHECK로 0 미만과 `total_seats` 초과가 모두 막힙니다.
-- checkout, 정산, 입장 필드가 있는 예약은 SERIALIZABLE(재시도 3회), 입장 필드가 없는 예약은 READ COMMITTED입니다.
+- checkout, 정산, 입장 필드가 있는 예약은 SERIALIZABLE(최대 3회 시도), 입장 필드가 없는 예약은 READ COMMITTED입니다.
 - 같은 Idempotency-Key의 checkout은 PostgreSQL advisory lock과 `orders.idempotency_key` UNIQUE로 주문 하나에 모입니다. Redis lock은 최적화입니다.
 - checkout은 주문만 만들고 티켓은 정산 뒤에만 발급합니다.
 - 모든 status 컬럼은 애플리케이션 모델과 같은 허용 값 집합을 DB CHECK로 가집니다. 전이 순서는 애플리케이션 transaction이 책임집니다.

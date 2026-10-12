@@ -49,10 +49,10 @@ FOR UPDATE
 ### 격리 수준과 행 잠금이 각각 하는 일
 
 - **행 잠금**이 초과 판매를 막습니다. 좌석을 바꾸는 코드는 `InventoryService.adjustAvailableSeats` 하나이고, 항상 이벤트 행을 `FOR UPDATE`로 잠근 뒤 남은 좌석을 확인하고 차감합니다. DB의 CHECK(`available_seats >= 0`)가 그 뒤의 방어선입니다.
-- **격리 수준은 경로마다 다릅니다.** checkout, settlement webhook, 입장 필드가 있는 예약은 SERIALIZABLE이고 직렬화 실패(SQLSTATE 40001)와 deadlock(40P01)을 3회까지 다시 시도합니다(`serializableTransactionWithRetry`). 입장 필드가 없는 예약은 READ COMMITTED입니다.
-- **두 격리 수준은 경합할 때 다르게 끝납니다.** READ COMMITTED의 예약은 행 잠금을 기다렸다가 최신 좌석 수를 보고 진행하므로, 경합의 패자는 품절(409)로 끝납니다. SERIALIZABLE transaction은 기다리던 행이 그 사이에 바뀌면 직렬화 실패로 끝나고 처음부터 다시 시도합니다. 3회 안에 끝내지 못하면 입장 필드가 없는 요청은 500, 입장 필드가 있는 구매는 503 `ADMISSION_UNAVAILABLE`이 됩니다. 통합 테스트 `concurrency.test.ts`가 이 차이를 그대로 보입니다. 3석에 5명이 동시에 구매하면 예약의 패자 2명은 모두 품절이고, checkout의 패자 2명은 품절이거나 재시도 소진입니다. 어느 쪽이든 좌석은 3석만 팔립니다.
+- **격리 수준은 경로마다 다릅니다.** checkout, settlement webhook, 입장 필드가 있는 예약은 SERIALIZABLE이고 직렬화 실패(SQLSTATE 40001)나 deadlock(40P01)이 나면 최대 3회까지 시도합니다(첫 시도와 재시도 2회, `serializableTransactionWithRetry`). 입장 필드가 없는 예약은 READ COMMITTED입니다.
+- **두 격리 수준은 경합할 때 다르게 끝납니다.** READ COMMITTED의 예약은 행 잠금을 기다렸다가 최신 좌석 수를 보고 진행하므로, 경합의 패자는 품절(409)로 끝납니다. SERIALIZABLE transaction은 기다리던 행이 그 사이에 바뀌면 직렬화 실패로 끝나고 처음부터 다시 시도합니다. 3회 안에 끝내지 못하면 입장 필드가 없는 요청은 500, 입장 필드가 있는 구매는 503 `ADMISSION_UNAVAILABLE`이 됩니다. 통합 테스트 `concurrency.test.ts`가 이 차이를 그대로 보입니다. 3석에 5명이 동시에 구매하면 두 경로 모두 정확히 3석이 팔립니다. 예약의 패자 2명은 모두 품절이고, checkout의 패자 2명은 품절이거나 시도 3회를 다 쓴 직렬화 실패입니다.
 - **SERIALIZABLE이 지금 맡고 있는 것.** 같은 Idempotency-Key의 checkout이 겹치면 advisory lock을 기다린 요청은 낡은 snapshot으로 진행하고, PostgreSQL은 그 INSERT를 직렬화 실패로 보고했고 재시도가 기존 주문을 읽어 반환했습니다(같은 key의 checkout 세 개를 겹친 테스트의 관측입니다. unique 위반 23505가 나올 수 없다는 증명은 아닙니다). 중복 정산도 같은 방식으로 주문 행 잠금 뒤 재시도에서 `paid`를 확인합니다.
-- **비용과 결정.** 구매가 몰리면 직렬화 실패가 재시도 3회를 넘겨 실패로 드러납니다. 부하 비교에서 대기열 없는 경로가 무너진 원인이 이것입니다([PERFORMANCE_REPORT.md](./PERFORMANCE_REPORT.md)). 행 잠금만으로 충분한지, 격리 수준을 READ COMMITTED로 내리거나 재시도를 늘리면 어떻게 되는지는 측정하지 않았습니다. 2026-10-10에 이 실패를 재현 테스트(`admission-serialization-repro.test.ts`, opt-in)로 조사한 뒤 제품 코드를 바꾸지 않기로 정했습니다. 격리 수준과 재시도 정책은 입장 제어 계약 §5에 고정돼 있어, 바꾸면 장애 검증과 부하 측정을 다시 해야 하기 때문입니다([#27](https://github.com/dosacha/PeakPass/issues/27)).
+- **비용과 결정.** 구매가 몰리면 직렬화 실패가 시도 3회를 넘겨 실패로 드러납니다. 부하 비교에서 대기열 없는 경로가 무너진 원인이 이것입니다([PERFORMANCE_REPORT.md](./PERFORMANCE_REPORT.md)). 행 잠금만으로 충분한지, 격리 수준을 READ COMMITTED로 내리거나 재시도를 늘리면 어떻게 되는지는 측정하지 않았습니다. 2026-10-10에 이 실패를 재현 테스트(`admission-serialization-repro.test.ts`, opt-in)로 조사한 뒤 제품 코드를 바꾸지 않기로 정했습니다. 격리 수준과 재시도 정책은 입장 제어 계약 §5에 고정돼 있어, 바꾸면 장애 검증과 부하 측정을 다시 해야 하기 때문입니다([#27](https://github.com/dosacha/PeakPass/issues/27)).
 
 ### 4. 주문 생성과 재고 차감
 

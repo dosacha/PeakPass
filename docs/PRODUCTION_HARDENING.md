@@ -50,7 +50,7 @@
 
 - 환경 변수는 시작할 때 schema로 검증하고, 형식이 맞지 않으면 시작하지 않습니다(`src/infra/config.ts`).
 - `NODE_ENV=production`이면 아래 조합을 거부합니다. 운영 이미지(`Dockerfile`)는 `NODE_ENV=production`을 기본으로 둡니다.
-  - `JWT_SECRET`이 없거나 개발용 기본값
+  - `JWT_SECRET`이 없거나, 개발용 기본값이거나, 예전 `.env.example`에 실려 있던 값
   - `WEBHOOK_SIGNING_SECRET`이 없거나 32자 미만
   - `ENFORCE_AUTH_USER_MATCH=false`, `RATE_LIMIT_FAIL_MODE=open`, `ENABLE_RATE_LIMITING=false`
 - 분기마다 거절 테스트가 있습니다(`src/tests/unit/production-invariants.test.ts`).

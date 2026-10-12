@@ -30,11 +30,12 @@ PeakPass에서 Redis는 성능과 편의성을 높이기 위한 보조 계층입
 - Redis miss면 DB에서 `status`, `expires_at`를 다시 확인함
 - checkout 성공 후 reservation hold를 즉시 삭제해 stale active 상태를 줄임
 
-현재 checkout 경로는 reservation을 `UPDATE ... WHERE status='active' AND expires_at > NOW() RETURNING`의 단일 atomic 쿼리로 검증·전환하므로 Redis hold를 *읽지 않습니다*. Redis hold의 read 경로는 단 한 곳, `GET /reservations/:id`(`ReservationService.getReservationWithClient`)뿐입니다. 목적은 GET 응답 가속과 클라이언트가 만료 시각(`expiresAt`)을 빠르게 표시하기 위한 것이며, hold가 stale해도 정합성에는 영향이 없습니다(정합성 판단은 모두 DB 트랜잭션 안에서 수행됨). hold가 없거나 만료됐으면 DB에서 다시 읽습니다. 다만 기본 설정(`RATE_LIMIT_FAIL_MODE=closed`)에서는 Redis에 닿지 않으면 이 경로도 rate limiter가 먼저 503으로 답하므로, DB로 넘어가는 것은 hold만 없는 경우와 fail-open 설정에서입니다.
+현재 checkout 경로는 reservation을 `UPDATE ... WHERE status='active' AND expires_at > NOW() RETURNING`의 단일 atomic 쿼리로 검증·전환하므로 Redis hold를 *읽지 않습니다*. Redis hold의 read 경로는 단 한 곳, `GET /reservations/:id`(`ReservationService.getReservationWithClient`)뿐입니다. 목적은 GET 응답 가속과 클라이언트가 만료 시각(`expiresAt`)을 빠르게 표시하기 위한 것이며, hold가 stale해도 정합성에는 영향이 없습니다(정합성 판단은 모두 DB 트랜잭션 안에서 수행됨). hold가 없거나 만료됐거나 Redis에 닿지 않으면 DB에서 다시 읽습니다. 이 조회는 rate limit 대상이 아니므로 Redis가 없어도 limiter의 503에 걸리지 않습니다(코드 판독. Redis를 멈춘 상태로 실행해 본 것은 아닙니다).
 
 ## 2. rate limiting
 
-- 대상: `reservation`, `checkout`, `settlement webhook`(write 한도 `RATE_LIMIT_*`), GraphQL(별도 한도 `GRAPHQL_RATE_LIMIT_*`), 데모 세션·데모 정산(각자의 한도)
+- 대상: `POST /reservations`, `POST /checkouts`, settlement webhook(write 한도 `RATE_LIMIT_*`), `POST /graphql`(별도 한도 `GRAPHQL_RATE_LIMIT_*`), 데모 세션·데모 정산(각자의 한도)
+- 어느 한도를 쓸지는 route가 `config.rateLimit`으로 선언한다. 요청 경로의 문자열로 고르지 않으므로 인코딩된 경로(`/%63heckouts`)도 같은 한도에 잡히고, 예약·주문 조회(`GET /reservations/:id`, `GET /checkouts/:orderId`)는 구매 한도를 쓰지 않는다
 - 기준: 인증 사용자 ID 우선, 없으면 IP fallback
 - 구현 방식: Redis sorted set 기반 sliding window
 
