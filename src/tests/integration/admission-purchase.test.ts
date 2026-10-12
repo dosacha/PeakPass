@@ -435,6 +435,48 @@ describe('admission purchase gate on owned PostgreSQL, Redis and loopback HTTP',
       expect(await slots(redis, fx.eventId, admission.admissionEpoch)).toBe(0);
     });
 
+    it('lets admitted buyers purchase at the same time: each commits or gets the retryable 503, and the same request sent again completes it', async () => {
+      const buyers = 6;
+      fx = await fixture(20, true, buyers);
+      // Promotion is serial (R per second); the purchases below start together. Nothing is
+      // injected: whatever serialization failure PostgreSQL reports here is a real one.
+      const purchases: { admission: Admission; send: () => ReturnType<typeof reserve> }[] = [];
+      for (const [index, user] of fx.users.entries()) {
+        const admission = await admit(service, fx.eventId, user);
+        const key = randomUUID();
+        purchases.push({
+          admission,
+          send: () => (index % 2 === 0 ? reserve(user, admission) : checkout(user, key, admission)),
+        });
+      }
+      const epoch = purchases[0].admission.admissionEpoch;
+      expect(await slots(redis, fx.eventId, epoch)).toBe(buyers);
+
+      const first = await Promise.all(purchases.map((purchase) => purchase.send()));
+      // A purchase that keeps losing the event row runs out of attempts and answers the 503 of
+      // contract §5. How many do depends on timing and is not asserted; no other answer is allowed.
+      for (const response of first) {
+        if (response.status === 201) continue;
+        expect(response.status).toBe(503);
+        expect(response.body).toEqual(admissionError('ADMISSION_UNAVAILABLE', 1000));
+      }
+      const committed = first.filter((response) => response.status === 201).length;
+      process.stdout.write(JSON.stringify({ concurrentAdmittedPurchases: { buyers, committed } }) + '\n');
+      expect(await fx.state()).toMatchObject({ available: 20 - committed, results: committed });
+
+      // The same request, sent again without contention, completes each unfinished purchase once.
+      for (const [index, response] of first.entries()) {
+        if (response.status === 503) expect((await purchases[index].send()).status).toBe(201);
+      }
+      expect(await fx.state()).toMatchObject({
+        available: 20 - buyers,
+        reservations: buyers / 2,
+        orders: buyers / 2,
+        results: buyers,
+      });
+      expect(await slots(redis, fx.eventId, epoch)).toBe(0);
+    });
+
     it('answers 503 without a second PostgreSQL connection when the Redis control is missing', async () => {
       fx = await fixture();
       const [user] = fx.users,

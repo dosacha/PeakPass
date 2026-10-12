@@ -84,7 +84,13 @@ describe('admission limits with actual Redis and bounded synthetic fixtures', ()
           expect(result.ok).toBe(true);
           for (const id of result.promoted ?? []) promoted.push({ id, at: result.now });
         }
-        if (round < 3) await new Promise((resolve) => setTimeout(resolve, 1050));
+        // One more tick later in the same second, while buyers still wait and C has room. It is
+        // recorded like the others: a window shorter than one second, or a budget that refills
+        // within it, promotes here and breaks the rolling bound below.
+        await new Promise((resolve) => setTimeout(resolve, 600));
+        const sameSecond = await runAdmission(eventId, epoch, 'tick');
+        for (const id of sameSecond.promoted ?? []) promoted.push({ id, at: sameSecond.now });
+        if (round < 3) await new Promise((resolve) => setTimeout(resolve, 450));
       }
       expect(promoted.map((p) => p.id)).toEqual(entries.slice(0, 8).map((e) => e.admissionId));
       for (const p of promoted)
@@ -94,6 +100,9 @@ describe('admission limits with actual Redis and bounded synthetic fixtures', ()
       await new Promise((resolve) => setTimeout(resolve, 1100));
       expect((await runAdmission(eventId, epoch, 'tick')).promoted).toEqual([]);
       for (const e of entries.slice(0, 4)) await command('cancel', e);
+      // More than two seconds pass without a tick. The idle time is not banked: the next second
+      // still admits R, and a second tick in it admits nobody although C has room for two more.
+      await new Promise((resolve) => setTimeout(resolve, 2100));
       expect((await runAdmission(eventId, epoch, 'tick')).promoted).toHaveLength(2);
       expect((await runAdmission(eventId, epoch, 'tick')).promoted).toEqual([]);
       process.stdout.write(
