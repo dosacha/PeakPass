@@ -68,7 +68,7 @@ PeakPass는 예약, 주문 생성, 결제 정산 webhook이 같은 재고와 주
 - **정산 webhook.** `POST /webhooks/payments/settlement`가 주문을 `paid`로 바꾸고 이때 처음 티켓을 발급합니다. HMAC 서명과 timestamp를 검증합니다.
 - **중복 webhook.** 같은 Idempotency-Key의 재전송은 저장한 응답을 그대로 돌려주고, 다른 key로 온 같은 결제는 주문 행 잠금 뒤 이미 `paid`인 것을 확인해 기존 티켓을 반환합니다.
 - **초과 판매 방지.** 이벤트 행을 `FOR UPDATE`로 잠그고 차감하며, `available_seats`는 DB CHECK로 하한과 상한이 함께 강제됩니다. 수량은 이벤트 단위로 지킵니다. tier별 수량은 강제하지 않습니다.
-- **Rate limit.** Redis sliding window로 구매 요청(예약·checkout 생성, 정산 webhook)과 GraphQL을 서로 다른 한도로 제한합니다. 어느 한도를 쓸지는 route가 선언하고, 예약·주문 조회는 한도 대상이 아닙니다. Redis에 닿지 않으면 503이 기본값입니다.
+- **Rate limit.** Redis sliding window로 구매 요청(예약·checkout 생성, 정산 webhook)과 GraphQL을 서로 다른 한도로 제한합니다. 어느 한도를 쓸지는 route가 선언합니다. 예약·주문 조회도 생성 요청과 같은 한도를 나눠 씁니다(알려진 한계). Redis에 닿지 않으면 503이 기본값입니다.
 - **입장 제어.** 보호하도록 지정한 이벤트는 구매 전에 대기열을 거칩니다. Redis가 등록 순서대로 초당 정해진 수만 입장시키고, 입장 하나는 PostgreSQL 원장 한 행으로 예약 또는 주문 하나에만 쓰입니다. 대기 화면은 polling으로 상태를 읽고 순번이 먼 사용자는 조회 간격을 늘립니다. 기본으로 꺼져 있고(`ENABLE_ADMISSION=false`) 동시에 보호하는 이벤트는 1개입니다. 설계 선택과 한계는 [ADMISSION_DESIGN_AND_OPERATIONS.md](docs/ADMISSION_DESIGN_AND_OPERATIONS.md)에 있습니다.
 - **조회.** GraphQL `myOrders`, `myTickets`는 JWT가 필요합니다. `ticketByCode`는 인증 없이 티켓 번호로 게이트 검증용 정보만 돌려줍니다.
 
