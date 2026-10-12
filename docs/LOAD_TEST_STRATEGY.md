@@ -134,7 +134,7 @@ npm run load-test:sustained
 - browse 시나리오에서 p95가 안정적이면 GraphQL(DataLoader batching)과 PostgreSQL 직접 조회가 부하를 감당하는 것으로 봅니다. (이벤트/재고 read-through cache는 현재 미구현)
 - event detail spike에서 tail latency가 급격히 올라가면 그때 read-through cache 도입을 검토합니다.
 - rate limit 시나리오에서 429가 높고 `*_unexpected_errors`가 0%이면 rate limit이 의도대로 동작하는 것으로 봅니다.
-- payment callback 부하에서 duplicate 응답은 늘 수 있지만 티켓 수가 늘면 안 됩니다.
+- payment callback 부하에서는 duplicate 응답이 늘어도 예기치 않은 오류가 없어야 합니다. 이 스크립트는 응답만 보고 티켓 수는 세지 않습니다. 티켓이 늘지 않는다는 근거는 통합 테스트입니다.
 
 ## 권장 실행 순서
 

@@ -6,15 +6,15 @@
 
 | 묶음 | 시기 | 무엇을 쟀나 | 어디에 있나 |
 |---|---|---|---|
-| A/B/C 비교 (P8) | 2026-10-08–09 | 같은 도착 조건에서 대기열 없음 / 대기열 + fixed polling / 대기열 + adaptive polling | 아래 "입장 제어 A/B/C 비교" |
-| 쓰기 기준선 (P2) | 2026-10-01–02 | 대기열이 없는 구매 경로의 도착률별 동작 | [FLASH_SALE_BASELINE.md](./FLASH_SALE_BASELINE.md) |
+| 입장 제어 A/B/C 비교 | 2026-10-08–09 | 같은 도착 조건에서 대기열 없음 / 대기열 + fixed polling / 대기열 + adaptive polling | 아래 "입장 제어 A/B/C 비교" |
+| 쓰기 기준선 | 2026-10-01–02 | 대기열이 없는 구매 경로의 도착률별 동작 | 아래 "쓰기 기준선" |
 | micro-benchmark | 2026-06-03 | 조회, rate limit, webhook 재시도를 시나리오별로 | 아래 "micro-benchmark" 이하 |
 
 모두 로컬 Docker 환경의 합성 부하입니다. 운영 성과가 아닙니다.
 
-## 입장 제어 A/B/C 비교 (P8, 2026-10-08–09)
+## 입장 제어 A/B/C 비교 (2026-10-08–09)
 
-같은 commit, 같은 Compose 파일, 같은 도착 조건에서 이벤트의 보호 여부와 polling 방식만 바꿔 세 arm을 3회씩 측정했습니다. 프로토콜과 전체 표는 [ISSUE_17_VALIDATION.md](./ISSUE_17_VALIDATION.md), 지표 정의는 [FLASH_SALE_EVIDENCE.md](./FLASH_SALE_EVIDENCE.md), 원본은 `load-test/results/flash-sale-abc-v3/index.json`에 있습니다.
+같은 commit, 같은 Compose 파일, 같은 도착 조건에서 세 가지 조건을 3회씩 측정했습니다. 이 문서는 조건 하나를 arm이라고 부릅니다. A는 대기열 없음, B는 대기열과 고정 간격(fixed) polling, C는 같은 대기열과 적응형(adaptive) polling입니다. arm 사이에 다른 것은 이벤트의 보호 여부와 polling 방식, 그리고 그에 따라 달라지는 구매 요청의 재전송 규칙입니다(아래 "재전송 규칙"). 프로토콜과 전체 표는 [ISSUE_17_VALIDATION.md](./ISSUE_17_VALIDATION.md), 지표 정의는 [FLASH_SALE_EVIDENCE.md](./FLASH_SALE_EVIDENCE.md), 원본은 `load-test/results/flash-sale-abc-v3/index.json`에 있습니다.
 
 ### 조건
 
@@ -22,11 +22,26 @@
 |---|---|
 | 측정 commit | `6f9568f780219ea8e28e026072c448a38e8e069b` |
 | 도착 | 초당 50명 × 20초, 구매자 1,000명. 처음 5초의 250명은 warmup, 나머지 750명이 측정 cohort |
+| 도착률을 고른 규칙 | 대기열 없는 A가 안정적이지 않은 가장 낮은 단계. 조건을 고르려고 한 pilot에서 A는 초당 10명일 때 300/300, 초당 25명일 때 749/750, 초당 50명일 때 140/750을 결제했습니다(cohort 기준, 각 1회). 즉 이 조건은 A가 무너지는 지점으로 고른 것이고, 그보다 낮은 도착률에서는 대기열 없이도 결제가 끝났습니다. pilot 수치는 조건을 고른 근거로만 적습니다 |
+| 격리 수준과 재시도 | checkout, 정산 webhook, 입장 필드가 있는 예약은 SERIALIZABLE이고 직렬화 실패(SQLSTATE 40001)를 3회까지 시도합니다. 입장 필드가 없는 예약은 READ COMMITTED입니다 |
+| rate limit | `RATE_LIMIT_MAX_REQUESTS=1000000`(제품 기본값은 사용자당 5회/분). 구매 한도와 webhook 한도가 결과에 섞이지 않게 올린 값이며, limiter는 켜져 있습니다 |
 | 발생기 | k6, VU 1,000, drain 900초(horizon 920초). 구매자 하나가 페이지의 polling controller를 그대로 실행 |
 | 재고와 여정 | 2,000석, 수량 2, 예약 경로와 직접 checkout 경로를 번갈아 |
 | profile | `admission-v1-seed`: 초당 승격 R 2, batch 2, 동시 입장 C 8, 입장 TTL 30초 |
 | 환경 | 로컬 host 한 대. 앱 1개(1 CPU / 512 MiB), PostgreSQL 16(1 CPU / 512 MiB), Redis 7(0.5 CPU / 256 MiB) |
 | 실행 | 정식 9회(A/B/C × 3)와 숨김 탭 20% 층 관측 2회. 11회 모두 첫 시도에 valid |
+
+### 재전송 규칙
+
+구매자가 실패한 요청을 다시 보내는 규칙이 arm마다 다릅니다. A의 구매자는 k6 스크립트의 규칙을, B와 C의 첫 구매 요청은 페이지의 polling controller의 규칙을 따릅니다(`load-test/flash-sale.js`, `frontend/admission-polling.js`).
+
+| | A 대기열 없음 | B·C 대기열 |
+|---|---|---|
+| 첫 구매 요청 | 예약은 다시 보내지 않습니다. 직접 checkout은 100ms 뒤 1회 | controller가 최대 4회 더 보냅니다(1·2·4·8초에 ±20%, 서버가 요청한 대기보다 짧지 않게). 예약도 다시 보냅니다 |
+| 다시 보내는 조건 | 무응답, 5xx, `IDEMPOTENCY_IN_PROGRESS` | 무응답, 429, 5xx, `ADMISSION_IN_PROGRESS` |
+| 예약 뒤의 checkout, 정산 webhook | 100ms 뒤 1회, 그 뒤 포기 | 같음 |
+
+C의 결과는 이 차이에 기대지 않았습니다. C에서 첫 구매 요청이 실패한 것은 세 run에서 1, 0, 1건입니다(B는 13, 24, 10건. index의 `purchase.firstRequest.firstAttemptFailures`). A의 결과에는 이 규칙이 들어 있습니다(아래 "해석").
 
 ### 결과 (3회 중앙값 [최소–최대])
 
@@ -44,30 +59,62 @@
 | 입장 인지 지연의 상한 p95 (전체 1,000명. 승격→발생기 안 controller의 적용, 요청 송신 기준 상한) | – | 2,720ms [2,653–2,723] | 1,002ms [987–1,004] |
 | status 요청 수 (전체 1,000명) | – | 249,395 [249,181–249,444] | 55,983 [55,938–56,061] |
 | 1초 동안의 status 요청 최대 (전체 1,000명) | – | 971 [958–975] | 232 [222–236] |
-| 결제 수 ÷ horizon 920초 (cohort 750명) | 0.130/s [0.120–0.161] | 0.815/s | 0.815/s |
+| 결제 수 ÷ horizon 920초 (cohort 750명) | 해당 없음 | 0.815/s | 0.815/s |
 
-분모는 행마다 괄호에 적었습니다. "cohort"는 warmup 250명을 제외한 측정 cohort 750명이고, "전체"는 warmup을 포함한 1,000명입니다. 시도를 세는 행(구매 시도 실패율, 500·503 응답 수)은 예약·checkout·정산 요청 가운데 하네스가 일부러 보내는 replay를 뺀 것만 셉니다. 결제 완료, 구매 시도 실패율, 입장 인지 뒤 paid, 도착→결제 완료 시간, 결제 수 ÷ horizon이 cohort 값입니다. warmup을 포함한 1,000명 전체로는 A의 결제자가 125명(12.50%) [113–156]이고, C의 구매 시도 실패는 세 run에서 1, 0, 1건(2,501 / 2,500 / 2,501건 중)입니다. 500·503 응답 수, 승격 달성률, 입장 인지 지연, status 요청 수와 그 1초 최대는 전체의 값입니다. 결제 수 ÷ horizon의 920초는 scenario 시작부터의 도착 20초 + drain 900초입니다(index의 `condition.horizonSeconds`). index의 `analysis.horizon`은 warmup 5초 뒤부터의 915초이고 warmup 구매자의 결제까지 세므로 다른 값입니다.
+분모는 행마다 괄호에 적었습니다. "cohort"는 warmup 250명을 제외한 측정 cohort 750명이고, "전체"는 warmup을 포함한 1,000명입니다. 시도를 세는 행(구매 시도 실패율, 500·503 응답 수)은 예약·checkout·정산 요청 가운데 하네스가 일부러 보내는 replay를 뺀 것만 셉니다. 결제 완료, 구매 시도 실패율, 입장 인지 뒤 paid, 도착→결제 완료 시간, 결제 수 ÷ horizon이 cohort 값입니다. warmup을 포함한 1,000명 전체로는 A의 결제자가 125명(12.50%) [113–156]이고, C의 구매 시도 실패는 세 run에서 1, 0, 1건(2,501 / 2,500 / 2,501건 중)입니다. 500·503 응답 수, 승격 달성률, 입장 인지 지연, status 요청 수와 그 1초 최대는 전체의 값입니다. 결제 수 ÷ horizon의 920초는 scenario 시작부터의 도착 20초 + drain 900초입니다(index의 `condition.horizonSeconds`). index의 `analysis.horizon`은 warmup 5초 뒤부터의 915초이고 warmup 구매자의 결제까지 세므로 다른 값입니다. A는 이 행에서 뺐습니다. A의 구매자는 재전송을 1회만 하므로 도착 뒤 곧 결제되거나 500으로 끝나고(결제자의 도착→결제 완료 p99가 2.4초), 그 수를 drain 900초가 포함된 920초로 나눈 값(0.130/s)은 B·C의 값과 같은 뜻이 아닙니다.
 
 11회 모두 최종 SQL 검사가 0행이고, 원장과 Redis가 일치하며, 어느 1초에도 승격이 R을 넘지 않았습니다.
 
 ### 해석
 
 - **A는 이 조건에서 과부하입니다.** 측정 cohort의 16.00%만 결제했고 나머지는 500으로 끝났습니다. A의 도착→결제 완료 시간 1.1초는 결제에 성공한 소수의 값입니다.
+- **A의 500은 직렬화 재시도를 다 쓴 응답입니다.** checkout과 정산 webhook은 SERIALIZABLE transaction입니다. 같은 이벤트 행을 두고 겹친 transaction은 앞선 것이 끝나기를 기다린 뒤 직렬화 실패(SQLSTATE 40001)로 끝나고, 3회 안에 성공하지 못하면 500이 됩니다(`src/infra/postgres/client.ts`). 세 run에서 예약된 재시도 4,405 / 4,495 / 4,484건이 모두 40001이었습니다(ZIP의 `app-metrics.json`). 500은 checkout에서 1,074 / 1,147 / 1,173건, 정산에서 833 / 830 / 802건 나왔습니다(전체 1,000명, replay 제외. index의 `analysis.all.responses`). 같은 좌석 차감을 하는 예약은 입장 필드가 없으면 READ COMMITTED라 행 잠금을 기다렸다가 진행했고, 세 run 모두 500건이 전부 201이었습니다. 500 하나하나의 원인이 담긴 앱 로그는 보관본에 없어 건별로 대조하지는 못했습니다.
+- **그래서 16.00%는 "대기열이 없으면"의 값이 아니라 "이 격리 수준과 재시도 설정에서"의 값입니다.** checkout과 정산을 READ COMMITTED로 내린 A, 재시도 횟수를 늘린 A는 측정하지 않았습니다. 대기열은 이 실패를 없애는 한 가지 방법으로 측정됐고, 다른 방법과 견준 적은 없습니다.
+- **16.00%에는 하네스의 재전송 규칙도 들어 있습니다.** 아래 표처럼 A의 구매자 1,000명 가운데 절반쯤은 주문까지 만들어졌습니다. 그중 대부분은 정산 webhook이 첫 요청과 100ms 뒤의 재전송에서 모두 500을 받아 주문이 pending으로 남았습니다. 실제 결제사는 webhook을 더 오래 다시 보내므로 이들 중 일부는 결제됐을 수 있습니다. 그 경우의 결제율은 재지 않았습니다.
+
+  | A의 구매자 1,000명 (run별, warmup 포함) | `p8-a-01` | `p8-a-02` | `p8-a-03` |
+  |---|---|---|---|
+  | 결제 완료 | 156 | 125 | 113 |
+  | 주문은 만들어졌으나 pending | 381 | 386 | 377 |
+  | 주문이 만들어지지 않음 | 463 | 489 | 510 |
+
+  위 두 행은 index의 `sqlCounts`이고, 셋째 행은 1,000에서 둘을 뺀 값입니다. 결과 표의 16.00%는 cohort 750명 기준이고 이 표는 warmup을 포함한 1,000명 기준이라 분모가 다릅니다.
 - **대기열은 실패를 대기로 바꿨습니다.** B와 C는 cohort 전원이 결제했습니다. 대신 R 2/s로 1,000명을 받으려면 최소 500초가 걸리고, cohort의 도착→결제 완료 시간 중앙값이 C 306.8초, B 503.8초입니다. 이 값은 대기열에서 기다린 시간에 입장 인지 지연과 구매·정산 시간을 더한 것입니다.
+- **이 대기는 DB의 처리 한계가 아니라 R 2라는 가정에서 나옵니다.** R 2(초당 2명 승격)는 측정으로 찾은 값이 아니라 처음에 정한 가정입니다. pilot에서 R을 4, 5, 10, 20으로 올린 후보는 구매 시도 실패율 기준(1% 이하)을 맞추지 못해 탈락했고, 그 실패는 입장한 구매자끼리 겹친 구매의 직렬화 실패였습니다. 후보는 모두 fixed polling arm에서만 시험했습니다.
+- **동시 입장 상한 C 8은 정식 run에서 한 번도 닿지 않았습니다.** 동시에 입장해 있던 수의 표본 최대는 B 5, 5, 4, C 3, 3, 4였고 입장 만료는 0건이었습니다(index의 `queue.samples.active.max`, `admission.foregroundExpired`). 유입을 누른 것은 R이고, C와 입장 TTL의 효과는 이 측정에 나타나지 않았습니다.
 - **대기열이 처리량을 늘린 것은 아닙니다.** B와 C의 cohort 결제 수 ÷ horizon은 0.815/s로 같습니다. 이 값은 "750명이 920초 안에 모두 결제했다"는 뜻일 뿐이고 두 arm을 구분하지 못합니다.
-- **B와 C의 차이는 polling 방식 하나입니다.** fixed polling의 status 요청이 같은 1 CPU 인스턴스의 scheduler를 늦춘 것으로 읽습니다(승격 달성률 67.92% 대 98.01%). tick 간격 자체는 재지 않았습니다.
-- **B의 503**(전체 시도 기준 15건 [10–26])은 입장 필드가 있는 구매가 직렬화 재시도를 다 쓰고 받은 응답입니다([#27](https://github.com/dosacha/PeakPass/issues/27)). controller가 같은 identity로 다시 보냈고 503으로 끝난 구매자는 없습니다. 다시 보낸 요청이 한 번 더 503을 받은 경우가 `p8-b-01`과 `p8-b-02`에서 2건씩 있었고(위 15건, 26건에 포함. 두 run 모두 구매 2건의 것이고 네 건 다 warmup cohort), 그 구매도 이후 재전송에서 성공했습니다. cohort의 실패 0.32%(중앙값 run `p8-b-01`의 6/1,881)의 응답 코드별 구성은 index에 없어 로컬 원본 `k6-raw.jsonl`에서 세었습니다(2026-10-10, 분석기의 `purchase.measuredCohort`와 같은 규칙. 이 파일은 저장소에 없고 크기와 SHA256만 index의 `localOnly`에 있습니다): 503 `ADMISSION_UNAVAILABLE` 5건(직접 checkout의 첫 요청)과 500 `INTERNAL_ERROR` 1건(예약 경로의 checkout. 입장 필드가 없는 기존 요청)이고, 서로 다른 구매자 6명의 것이며 여섯 건 모두 바로 다음 재전송에서 성공했습니다. 그 run에는 전체 시도 기준으로 503 15건과 500 1건이 있었습니다.
+- **B와 C의 차이는 polling 방식 하나입니다.** fixed polling의 status 요청이 같은 1 CPU 인스턴스의 scheduler를 늦춘 것으로 읽습니다(승격 달성률 67.92% 대 98.01%). tick 간격 자체는 재지 않았습니다. 두 arm의 도착→결제 완료 시간 차이(중앙값 197.0초)는 화면이 늦게 갱신돼서가 아니라 승격이 늦어져서 생긴 것으로 읽습니다. scheduler를 별도 프로세스로 떼는 대안은 시험하지 않았습니다.
+- **B의 503**(전체 시도 기준 15건 [10–26])은 입장 필드가 있는 구매가 직렬화 재시도를 다 쓰고 받은 응답입니다([#27](https://github.com/dosacha/PeakPass/issues/27)). controller가 같은 identity로 다시 보냈고 503으로 끝난 구매자는 없습니다. 다시 보낸 요청이 한 번 더 503을 받은 경우가 `p8-b-01`과 `p8-b-02`에서 2건씩 있었고(위 15건, 26건에 포함. 두 run 모두 구매 2건의 것이고 네 건 다 warmup cohort), 그 구매도 이후 재전송에서 성공했습니다. cohort의 실패 0.32%(중앙값 run `p8-b-01`의 6/1,881)의 응답 코드별 구성은 index에 없어 로컬 원본 `k6-raw.jsonl`에서 세었습니다(2026-10-10, 분석기의 `purchase.measuredCohort`와 같은 규칙. 이 파일은 저장소에 없고 크기와 SHA256만 index의 `localOnly`에 있습니다. 로컬 원본은 2026-10-11에 지워서 이 집계는 다시 만들 수 없습니다): 503 `ADMISSION_UNAVAILABLE` 5건(직접 checkout의 첫 요청)과 500 `INTERNAL_ERROR` 1건(예약 경로의 checkout. 입장 필드가 없는 기존 요청)이고, 서로 다른 구매자 6명의 것이며 여섯 건 모두 바로 다음 재전송에서 성공했습니다. 그 run에는 전체 시도 기준으로 503 15건과 500 1건이 있었습니다.
 
 ### 한계
 
 1. host 한 대, 앱 인스턴스 1개, 도착 조건 1개, arm당 3회입니다. 최소–최대는 신뢰구간이 아닙니다.
 2. 입장 인지 지연은 k6 안에서 controller가 기록한 값입니다. 브라우저에서의 입장 인지 지연은 판정하지 않았습니다. 승격 시각은 서버 시계의 값이고, 그것을 알려 준 응답의 서버 시각이 요청 송신과 수신 사이 어느 순간인지는 알 수 없어 지연을 하한과 상한으로 기록하며, 표의 값은 상한입니다(정의는 [RESUME_EVIDENCE.md](./RESUME_EVIDENCE.md)의 "읽는 법").
 3. 정식 run은 전원 전면 탭이고 이탈과 취소가 없습니다. 숨김 탭 20%는 층 관측 2회로만 봤고 통계에 넣지 않았습니다.
-4. P2 기준선(v2.6)과의 개선·회귀는 판정하지 않았습니다. commit, Redis 설정, VU, drain이 다릅니다.
-5. seed profile은 실험 가정이며 운영 권고값이 아닙니다. 분 단위 대기가 받아들일 만한지는 정하지 않았습니다.
+4. 쓰기 기준선(v2.6)과의 개선·회귀는 판정하지 않았습니다. commit, Redis 설정, VU, drain이 다릅니다.
+5. seed profile은 실험 가정이며 운영 권고값이 아닙니다. 분 단위 대기는 2026-10-10에 그대로 받아들이기로 정했고 다시 측정하지 않습니다([#34](https://github.com/dosacha/PeakPass/issues/34)).
 6. profile을 고른 pilot의 수치는 조건 선택용이며 결과로 인용하지 않습니다.
+7. 재지 않은 대조: 격리 수준이나 재시도 횟수를 바꾼 A, 대기열 arm과 같은 재전송을 준 A, adaptive polling에서 R을 올린 대기열, scheduler를 분리한 구성.
+8. 정식 run의 k6 원본(`k6-raw.jsonl`)과 앱 로그(`app.jsonl`)는 2026-10-11에 지웠습니다. 저장소의 ZIP에는 처음부터 들어 있지 않았으므로, 지금은 ZIP만으로 분석기를 다시 돌릴 수 없습니다. 남아 있는 것은 index의 값과 ZIP의 나머지 산출물(최종 DB 상태, 앱 지표, 검증 결과)입니다.
 
-남은 항목은 [#34](https://github.com/dosacha/PeakPass/issues/34)에 있습니다. 설계 선택과 운영 절차는 [ADMISSION_DESIGN_AND_OPERATIONS.md](./ADMISSION_DESIGN_AND_OPERATIONS.md)에 있습니다.
+고치지 않고 받아들인 항목과 설계 선택은 [ADMISSION_DESIGN_AND_OPERATIONS.md](./ADMISSION_DESIGN_AND_OPERATIONS.md)에 있습니다.
+
+## 쓰기 기준선 (2026-10-01–02)
+
+대기열을 만들기 전에, 대기열이 없는 구매 경로가 도착률에 따라 어떻게 동작하는지 먼저 쟀습니다. 조건은 30초 측정 창, 수량 2, 예약 경로와 직접 checkout 경로를 번갈아, 앱 1개(1 CPU / 512 MiB), PostgreSQL 16, Redis 7, 로컬 host 한 대이고, 도착률마다 3회입니다. 위 A/B/C 비교와는 commit과 설정이 달라 수치를 서로 비교하지 않습니다.
+
+| 조건 | 판정 (3회) | 측정 cohort의 결제 완료 (run별) |
+|---|---|---|
+| 재고 충분, 초당 2명 | 안정 ×3 | 60/60, 60/60, 60/60 |
+| 재고 충분, 초당 10명 | 안정 ×3 | 300/300, 300/300, 300/300 |
+| 재고 충분, 초당 25명 | 과부하, 과부하, 안정 | 739/750, 628/750, 748/750 |
+| 재고 60석, 초당 10명 (300명) | 재고 제한 ×3 | 30/300, 30/300, 30/300. 나머지 270명은 품절 거절 |
+
+- 초당 2명과 10명은 세 번 모두 안정 기준을 만족했습니다. 초당 25명은 3회 중 2회가 과부하여서 안정 구간으로 보지 않습니다. 포화 지점이나 최대 처리량을 찾은 결과는 아닙니다.
+- 초당 25명의 run에서도 직렬화 재시도(40001)가 예약됐습니다. 재시도, pool 대기, 잠금 대기가 부하와 함께 관측됐지만 병목이 DB 하나라고 단정하지 않았습니다.
+- 재고 60석 조건은 정합성 관측입니다. 세 번 모두 30명이 결제하고 티켓 60장이 발급됐으며 남은 좌석은 0이었습니다.
+
+값은 `load-test/results/flash-sale-baseline-v261/index.json`의 `runs[].analysis.cohort`에 있습니다. 측정을 고쳐 다시 한 경과와 검증 기록은 [FLASH_SALE_BASELINE.md](./FLASH_SALE_BASELINE.md)에 있습니다.
 
 ## micro-benchmark (2026-06-03)
 
@@ -92,7 +139,7 @@
 ### spike
 
 - 특정 이벤트 상세 조회가 몰릴 때 tail latency 확인
-- hot read 경로의 cache 효율과 DB 부하 확인
+- hot read 경로의 DB 부하 확인 (이벤트·재고 read-through cache는 구현돼 있지 않습니다)
 
 ### sustained
 
@@ -101,8 +148,8 @@
 
 ### payment callbacks
 
-- 같은 settlement webhook이 반복될 때 duplicate 처리 확인
-- 이미 처리된 order에 대해 추가 티켓이 발급되지 않는지 확인
+- 같은 settlement webhook이 반복될 때 응답 상태와 duplicate 처리, 지연을 확인
+- 스크립트는 응답만 보고 티켓 수는 세지 않습니다. 티켓이 늘지 않는다는 근거는 통합 테스트(`route-contract.test.ts`의 T04, `webhook-idempotency.test.ts`)입니다
 
 ### graphql rate limit
 
@@ -136,14 +183,14 @@
 - baseline에서 p95가 안정적임
 - spike 이후 빠르게 회복함
 - reservation 부하 중 429가 비정상적으로 치솟지 않음
-- callback 부하 중 duplicate 응답은 나오더라도 티켓 수는 증가하지 않음
+- callback 부하 중 duplicate 응답이 나오고 예기치 않은 오류가 없음
 
 ## 나쁜 신호 예시
 
 - browse p95가 급격히 늘어남
 - event detail spike 이후 recovery가 느려짐
 - reservation 부하에서 429 없이 DB 에러가 먼저 늘어남
-- callback 재시도에서 새 티켓이 추가 생성됨
+- callback 재시도에서 200이 아닌 응답이나 settled가 아닌 상태가 섞임
 
 ## 현재 메모
 
@@ -201,7 +248,7 @@ docker compose exec redis redis-cli FLUSHDB
 
 ### 시나리오 부하 모델
 
-`load-test/sustained.js`는 **단일 `LOAD_TEST_USER_ID`를 다수 VU가 공유하는** micro-benchmark 형태입니다. 같은 user / 같은 event / 같은 tier에 대한 reservation 요청이 다수 VU에서 들어가므로, 측정 결과는 *동일 row에 대한 lock 경합* 시나리오에 가깝습니다. distinct user N명이 같은 event에 몰리는 flash-sale 모델은 이후 P2 기준선과 위 A/B/C 비교에서 측정했습니다.
+`load-test/sustained.js`는 **단일 `LOAD_TEST_USER_ID`를 다수 VU가 공유하는** micro-benchmark 형태입니다. 같은 user / 같은 event / 같은 tier에 대한 reservation 요청이 다수 VU에서 들어가므로, 측정 결과는 *동일 row에 대한 lock 경합* 시나리오에 가깝습니다. distinct user N명이 같은 event에 몰리는 flash-sale 모델은 이후 쓰기 기준선과 위 A/B/C 비교에서 측정했습니다.
 
 이 형태로 측정해도 **단일 event row에 대한 lock 직렬화 비용**은 의미 있는 정보이고, GraphQL read p95가 흔들리지 않는지·rate limit on / off가 throughput에 어떻게 반영되는지는 확인 가능합니다. 다만 본 결과를 "실서비스 환경의 flash-sale RPS 추정치"로 일반화하지 말아 주세요.
 
@@ -225,9 +272,9 @@ docker compose exec redis redis-cli FLUSHDB
 - **reservation rate limit**: 기본 설정에서 99.93%가 rate-limited 되었고, 예기치 않은 오류는 0%임. write limiter가 fail-fast로 동작함
 - **HTTP failed 해석**: rate limit 시나리오에서 `http_req_failed`가 99%대로 나오는 것은 429가 k6의 HTTP failed response로 집계되기 때문이며, 성공 기준은 커스텀 unexpected error 지표임
 
-### 본 측정의 한계 (정직한 disclaimer)
+### 이 측정의 한계
 
-1. 단일 user 부하 모델이라 *서로 다른 user가 같은 event에 몰리는* 실제 flash-sale의 lock 분포와 다름. 진짜 oversell 방어 검증은 `src/tests/integration/concurrency.test.ts`에서 5명의 distinct user로 수행함
+1. 단일 user 부하 모델이라 *서로 다른 user가 같은 event에 몰리는* 실제 flash-sale의 lock 분포와 다름. oversell 방어는 통합 테스트(`src/tests/integration/concurrency.test.ts`: 3석에 서로 다른 5명이 동시에 구매하고 거절 사유까지 확인)로 검증함
 2. `ENFORCE_AUTH_USER_MATCH=false`로 측정함. 권장값(`true`)에서는 JWT 발급 흐름이 추가되며 이는 현 부하 스크립트가 모델링하지 않음
 3. 단일 노드 Docker Compose 환경. 분산 환경의 cold connection, cross-region latency, DB 연결 풀 동작 등은 측정 범위 밖
 4. PostgreSQL / Redis 자체의 메모리·디스크 한계는 시나리오 길이(최대 10분)로는 의미 있게 드러나지 않음
