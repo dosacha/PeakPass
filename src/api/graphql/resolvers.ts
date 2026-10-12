@@ -4,7 +4,8 @@ import { EventService } from '@/core/services/event.service';
 import { OrderService } from '@/core/services/order.service';
 import { TicketService } from '@/core/services/ticket.service';
 import { getLogger } from '@/infra/logger';
-import { AppError } from '@/core/errors';
+import { AppError, ValidationError } from '@/core/errors';
+import { uuid } from '@/core/models/uuid';
 import { getPostgresPool } from '@/infra/postgres/client';
 
 const logger = getLogger();
@@ -122,9 +123,18 @@ export const resolvers = {
     },
 
     event: async (_: unknown, { id }: { id: string }, context: GraphQLContext) => {
+      // UUID가 아닌 id를 loader에 넣으면 같은 batch의 쿼리 전체가 22P02로 실패해, 함께 요청된
+      // 정상 id까지 오류가 된다. REST와 같이 입력 오류로 먼저 거절한다.
+      const parsed = uuid.safeParse(id);
+      if (!parsed.success) {
+        throw toGraphQLError(new ValidationError('Event id must be a UUID'));
+      }
+
       try {
         logger.info({ id }, 'Query: event');
-        return await context.loaders.eventLoader.load(id);
+        // loader는 PostgreSQL이 돌려준 소문자 id로 결과를 찾는다. 대문자로 온 id를 그대로 넘기면
+        // 있는 이벤트도 null이 된다.
+        return await context.loaders.eventLoader.load(parsed.data);
       } catch (err) {
         logger.error({ err, id }, 'Query failed: event');
         throw toGraphQLError(err as Error);
@@ -142,14 +152,21 @@ export const resolvers = {
         });
       }
 
-      const pool = getPostgresPool();
-      const client = await pool.connect();
+      const client = await getPostgresPool().connect();
       const safeLimit = clampLimit(limit, 10, MAX_LIMIT_ORDERS);
       const safeOffset = clampOffset(offset);
 
       try {
-        logger.info({ userId: context.userId, limit: safeLimit, offset: safeOffset }, 'Query: myOrders');
-        const orders = await orderService.getOrdersByUserId(context.userId, safeLimit, safeOffset, client);
+        logger.info(
+          { userId: context.userId, limit: safeLimit, offset: safeOffset },
+          'Query: myOrders',
+        );
+        const orders = await orderService.getOrdersByUserId(
+          context.userId,
+          safeLimit,
+          safeOffset,
+          client,
+        );
         return orders.map((order) => ({
           id: order.id,
           userId: order.userId,
@@ -162,7 +179,10 @@ export const resolvers = {
           updatedAt: toIsoString(order.updatedAt),
         }));
       } catch (err) {
-        logger.error({ err, userId: context.userId, limit: safeLimit, offset: safeOffset }, 'Query failed: myOrders');
+        logger.error(
+          { err, userId: context.userId, limit: safeLimit, offset: safeOffset },
+          'Query failed: myOrders',
+        );
         throw toGraphQLError(err as Error);
       } finally {
         client.release();
@@ -180,29 +200,34 @@ export const resolvers = {
         });
       }
 
-      const pool = getPostgresPool();
-      const client = await pool.connect();
+      const client = await getPostgresPool().connect();
       const safeLimit = clampLimit(limit, 20, MAX_LIMIT_TICKETS);
       const safeOffset = clampOffset(offset);
 
       try {
-        logger.info({ userId: context.userId, limit: safeLimit, offset: safeOffset }, 'Query: myTickets');
-        return await ticketService.getTicketsByUserId(context.userId, safeLimit, safeOffset, client);
+        logger.info(
+          { userId: context.userId, limit: safeLimit, offset: safeOffset },
+          'Query: myTickets',
+        );
+        return await ticketService.getTicketsByUserId(
+          context.userId,
+          safeLimit,
+          safeOffset,
+          client,
+        );
       } catch (err) {
-        logger.error({ err, userId: context.userId, limit: safeLimit, offset: safeOffset }, 'Query failed: myTickets');
+        logger.error(
+          { err, userId: context.userId, limit: safeLimit, offset: safeOffset },
+          'Query failed: myTickets',
+        );
         throw toGraphQLError(err as Error);
       } finally {
         client.release();
       }
     },
 
-    ticketByCode: async (
-      _: unknown,
-      { code }: { code: string },
-      _context: GraphQLContext,
-    ) => {
-      const pool = getPostgresPool();
-      const client = await pool.connect();
+    ticketByCode: async (_: unknown, { code }: { code: string }, _context: GraphQLContext) => {
+      const client = await getPostgresPool().connect();
 
       try {
         logger.info({ code }, 'Query: ticketByCode');
@@ -270,11 +295,7 @@ export const resolvers = {
         eventId: parent.id,
       });
     },
-    myTicketCount: async (
-      parent: GraphQLEventParent,
-      _: unknown,
-      context: GraphQLContext,
-    ) => {
+    myTicketCount: async (parent: GraphQLEventParent, _: unknown, context: GraphQLContext) => {
       if (!context.userId) {
         return 0;
       }

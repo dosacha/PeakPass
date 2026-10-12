@@ -2,7 +2,7 @@
   "revision": "flash-sale-v3.0",
   "analysisRevision": "flash-sale-analysis-v3.1",
   "issue": 17,
-  "note": "Formal and layer runs: one archive each without k6-raw.jsonl and app.jsonl, which stay in the ignored result folder of the work tree with the size and SHA256 given under localOnly. Every other run is local only.",
+  "note": "Formal and layer runs: one archive each without k6-raw.jsonl and app.jsonl. Those two files, and every artifact of the other runs, were kept only in the ignored result folder of the work tree and were deleted on 2026-10-11; their size and SHA256 remain under localOnly. The analysis cannot be run again from an archive alone.",
   "condition": {
     "users": 1000,
     "rate": 50,

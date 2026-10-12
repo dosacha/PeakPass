@@ -8,7 +8,9 @@ let socketAbort: AbortController | null = null;
 let shuttingDown = false;
 let connectionVersion = 0;
 
-export function getRedisConnectionVersion(): number { return connectionVersion; }
+export function getRedisConnectionVersion(): number {
+  return connectionVersion;
+}
 
 export async function initRedis(): Promise<RedisClientType> {
   if (shuttingDown) throw new Error('Redis is shutting down');
@@ -44,7 +46,9 @@ export async function initRedis(): Promise<RedisClientType> {
     if (!shuttingDown) logger.error({ err }, 'Redis connection error');
   });
   client.on('connect', () => logger.info('Redis connected'));
-  client.on('ready', () => { connectionVersion++; });
+  client.on('ready', () => {
+    connectionVersion++;
+  });
 
   // Bound acquisition, including a TCP peer that accepts but never completes the Redis handshake.
   const timeout = setTimeout(() => abort.abort(), 5000);
@@ -128,8 +132,7 @@ export const redisKeys = {
   rateLimitGraphql: (userId: string) => `peakpass:ratelimit:graphql:${userId}`,
   rateLimitDemoSession: (ip: string) => `peakpass:ratelimit:demo-session:${ip}`,
   rateLimitDemoSettlement: (userId: string) => `peakpass:ratelimit:demo-settlement:${userId}`,
-  idempotencyKey: (scope: IdempotencyScope, key: string) =>
-    `peakpass:idempotency:${scope}:${key}`,
+  idempotencyKey: (scope: IdempotencyScope, key: string) => `peakpass:idempotency:${scope}:${key}`,
   idempotencyLock: (scope: IdempotencyScope, key: string) =>
     `peakpass:idempotency:lock:${scope}:${key}`,
   inventoryCount: (eventId: string) => `peakpass:inventory:${eventId}:count`,

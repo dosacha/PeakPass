@@ -9,60 +9,70 @@ import { storeIdempotencyResult } from '@/api/middleware/idempotency';
 export async function registerPaymentRoutes(app: FastifyInstance) {
   const logger = getLogger();
 
-  app.post<{ Body: unknown }>('/webhooks/payments/settlement', async (request, reply) => {
-    const idempotencyKey = request.idempotencyKey;
+  app.post<{ Body: unknown }>(
+    '/webhooks/payments/settlement',
+    { config: { rateLimit: 'webhook', idempotency: 'payment-settlement' } },
+    async (request, reply) => {
+      const idempotencyKey = request.idempotencyKey;
 
-    try {
-      const input = PaymentWebhookSchema.parse(request.body);
+      try {
+        const input = PaymentWebhookSchema.parse(request.body);
 
-      if (!idempotencyKey) {
-        return reply.code(400).send({
-          error: {
-            code: 'MISSING_IDEMPOTENCY_KEY',
-            message: 'Idempotency-Key header is required',
+        if (!idempotencyKey) {
+          return reply.code(400).send({
+            error: {
+              code: 'MISSING_IDEMPOTENCY_KEY',
+              message: 'Idempotency-Key header is required',
+            },
+          });
+        }
+
+        logger.info(
+          {
+            orderId: input.orderId,
+            providerTransactionId: input.providerTransactionId,
+            status: input.status,
+            idempotencyKey,
           },
-        });
-      }
-
-      logger.info(
-        {
-          orderId: input.orderId,
-          providerTransactionId: input.providerTransactionId,
-          status: input.status,
-          idempotencyKey,
-        },
-        'Payment settlement webhook received',
-      );
-
-      const result = await serializableTransactionWithRetry(async (client) => {
-        const paymentWebhookService = new PaymentWebhookService();
-        return paymentWebhookService.processPaymentWebhook(input, idempotencyKey, client);
-      });
-
-      await invalidateEventCache(result.order.eventId);
-      if (request.idempotencyScope) {
-        await storeIdempotencyResult(result, 200, request.idempotencyScope, idempotencyKey, input);
-      }
-
-      logger.info(
-        {
-          orderId: result.order.id,
-          paymentStatus: result.paymentStatus,
-          duplicate: result.duplicate,
-          ticketCount: result.tickets.length,
-        },
-        'Payment settlement webhook processed',
-      );
-
-      return reply.code(200).send(result);
-    } finally {
-      if (request.idempotencyLockToken && idempotencyKey && request.idempotencyScope) {
-        await releaseIdempotencyLock(
-          request.idempotencyScope,
-          idempotencyKey,
-          request.idempotencyLockToken,
+          'Payment settlement webhook received',
         );
+
+        const result = await serializableTransactionWithRetry(async (client) => {
+          const paymentWebhookService = new PaymentWebhookService();
+          return paymentWebhookService.processPaymentWebhook(input, idempotencyKey, client);
+        });
+
+        await invalidateEventCache(result.order.eventId);
+        if (request.idempotencyScope) {
+          await storeIdempotencyResult(
+            result,
+            200,
+            request.idempotencyScope,
+            idempotencyKey,
+            input,
+          );
+        }
+
+        logger.info(
+          {
+            orderId: result.order.id,
+            paymentStatus: result.paymentStatus,
+            duplicate: result.duplicate,
+            ticketCount: result.tickets.length,
+          },
+          'Payment settlement webhook processed',
+        );
+
+        return reply.code(200).send(result);
+      } finally {
+        if (request.idempotencyLockToken && idempotencyKey && request.idempotencyScope) {
+          await releaseIdempotencyLock(
+            request.idempotencyScope,
+            idempotencyKey,
+            request.idempotencyLockToken,
+          );
+        }
       }
-    }
-  });
+    },
+  );
 }

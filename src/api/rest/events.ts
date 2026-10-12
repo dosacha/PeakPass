@@ -5,6 +5,10 @@ import { CreateEventSchema, GetEventsSchema } from '@/core/models/event';
 import { ValidationError } from '@/core/errors';
 import { getConfig } from '@/infra/config';
 import { getLogger } from '@/infra/logger';
+import { z } from 'zod';
+import { uuid } from '@/core/models/uuid';
+
+const IdParamsSchema = z.object({ id: uuid });
 
 export async function registerEventRoutes(app: FastifyInstance) {
   const logger = getLogger();
@@ -24,7 +28,7 @@ export async function registerEventRoutes(app: FastifyInstance) {
     //   - ENABLE_ADMIN_EVENT_WRITE=true + ENFORCE_AUTH_USER_MATCH=false (demo):
     //     flag만으로 통과 (k6/seed 등 demo 흐름용)
     //
-    // 별도 admin 도메인이 본 프로젝트의 학습 스코프 밖이므로 단순한 flag+role 조합만 둔다.
+    // 별도 admin 도메인이 이 프로젝트의 범위 밖이므로 단순한 flag+role 조합만 둔다.
     if (!config.ENABLE_ADMIN_EVENT_WRITE) {
       return reply.code(403).send({
         error: {
@@ -59,8 +63,12 @@ export async function registerEventRoutes(app: FastifyInstance) {
         try {
           await client.query('ROLLBACK');
         } catch (rollbackError) {
-          releaseError = rollbackError instanceof Error ? rollbackError : new Error(String(rollbackError));
-          logger.error({ err: rollbackError, requestId: request.id }, 'Failed to roll back event creation');
+          releaseError =
+            rollbackError instanceof Error ? rollbackError : new Error(String(rollbackError));
+          logger.error(
+            { err: rollbackError, requestId: request.id },
+            'Failed to roll back event creation',
+          );
         }
         throw err;
       } finally {
@@ -98,7 +106,8 @@ export async function registerEventRoutes(app: FastifyInstance) {
   });
 
   app.get<{ Params: { id: string } }>('/events/:id', async (request, reply) => {
-    const { id } = request.params;
+    // UUID가 아닌 id는 DB까지 가면 22P02로 500이 된다. 입력 오류(400)로 먼저 끝낸다.
+    const { id } = IdParamsSchema.parse(request.params);
     const client = await pool.connect();
 
     try {

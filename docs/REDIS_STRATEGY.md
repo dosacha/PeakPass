@@ -30,12 +30,13 @@ PeakPass에서 Redis는 성능과 편의성을 높이기 위한 보조 계층입
 - Redis miss면 DB에서 `status`, `expires_at`를 다시 확인함
 - checkout 성공 후 reservation hold를 즉시 삭제해 stale active 상태를 줄임
 
-현재 checkout 경로는 reservation을 `UPDATE ... WHERE status='active' AND expires_at > NOW() RETURNING`의 단일 atomic 쿼리로 검증·전환하므로 Redis hold를 *읽지 않습니다*. Redis hold의 read 경로는 단 한 곳, `GET /reservations/:id`(`ReservationService.getReservationWithClient`)뿐입니다. 목적은 GET 응답 가속과 클라이언트가 만료 시각(`expiresAt`)을 빠르게 표시하기 위한 것이며, hold가 stale해도 정합성에는 영향이 없습니다(정합성 판단은 모두 DB 트랜잭션 안에서 수행됨). Redis 장애 시 DB fallback이 자동으로 동작합니다.
+현재 checkout 경로는 reservation을 `UPDATE ... WHERE status='active' AND expires_at > NOW() RETURNING`의 단일 atomic 쿼리로 검증·전환하므로 Redis hold를 *읽지 않습니다*. Redis hold의 read 경로는 단 한 곳, `GET /reservations/:id`(`ReservationService.getReservationWithClient`)뿐입니다. 목적은 GET 응답 가속과 클라이언트가 만료 시각(`expiresAt`)을 빠르게 표시하기 위한 것이며, hold가 stale해도 정합성에는 영향이 없습니다(정합성 판단은 모두 DB 트랜잭션 안에서 수행됨). hold가 없거나 만료됐으면 DB에서 다시 읽습니다. 다만 이 조회도 rate limit 대상이라, 기본 설정(`RATE_LIMIT_FAIL_MODE=closed`)에서 Redis에 닿지 않으면 limiter가 먼저 503으로 답합니다. DB로 넘어가는 것은 hold만 없는 경우와 fail-open 설정에서입니다.
 
 ## 2. rate limiting
 
-- 대상: `reservation`, `checkout`, `settlement webhook`(write 한도 `RATE_LIMIT_*`), GraphQL(별도 한도 `GRAPHQL_RATE_LIMIT_*`), 데모 세션·데모 정산(각자의 한도)
-- 기준: 인증 사용자 ID 우선, 없으면 IP fallback
+- 대상: 예약의 생성과 조회(`POST /reservations`, `GET /reservations/:id`), 주문의 생성과 조회(`POST /checkouts`, `GET /checkouts/:orderId`), settlement webhook(이상 write 한도 `RATE_LIMIT_*`), `POST /graphql`(별도 한도 `GRAPHQL_RATE_LIMIT_*`), 데모 세션·데모 정산(각자의 한도)
+- 어느 한도를 쓸지는 route가 `config.rateLimit`으로 선언한다. 요청 경로의 문자열로 고르지 않으므로 인코딩된 경로(`/%63heckouts`)도 같은 한도에 잡힌다. 카운터는 action마다 따로다. 예약 조회는 예약 생성과, 주문 조회는 checkout 생성과 같은 카운터를 쓴다. 예약을 여러 번 조회하면 그만큼 예약 생성의 한도가 줄어드는 알려진 한계이고(주문 조회와 checkout도 같다), 입장 제어 계약 §2·§6이 조회의 기존 limiter 정책을 고정하고 있어 그대로 뒀다
+- 기준: 인증 사용자 ID 우선, 없으면 IP. 데모 세션 발급(`POST /demo/session`)은 항상 IP
 - 구현 방식: Redis sorted set 기반 sliding window
 
 관련 흐름은 [rateLimit.ts](../src/api/middleware/rateLimit.ts)와 [app.ts](../src/api/app.ts)에서 연결합니다.
@@ -62,6 +63,13 @@ PeakPass에서 Redis는 성능과 편의성을 높이기 위한 보조 계층입
 ### 멱등성 lock과 fencing token
 
 처리 중인 요청을 표시하기 위해 별도의 `idempotency:lock:{scope}:{key}`를 사용합니다. lock 획득 시 `randomUUID()`로 발급한 owner token을 value로 저장하고, 해제 시 Lua script로 `GET == token` 확인 후에만 `DEL`합니다. TTL 만료 후 다른 요청이 같은 key의 lock을 잡은 상태에서 원래 요청이 release를 호출해도 token mismatch로 no-op이 되어 lock 분실 사고를 막습니다. lock 역시 scope별로 분리되어, 한 command의 in-flight lock이 다른 command를 막지 않습니다.
+
+이 lock은 최적화이고 정합성 장치가 아닙니다. command마다 lock을 얻지 못했을 때의 동작이 다릅니다([idempotency.ts](../src/api/middleware/idempotency.ts)).
+
+- **checkout.** 다른 요청이 lock을 쥐고 있거나 Redis에 닿지 않아도 거절하지 않고 진행합니다. 같은 key의 동시 checkout을 주문 1건으로 모으는 것은 PostgreSQL입니다. advisory lock(`pg_advisory_xact_lock`)이 줄을 세우고, 기다린 요청은 직렬화 실패(SQLSTATE 40001) 뒤 재시도에서 기존 주문을 읽어 그대로 반환합니다. `orders.idempotency_key` UNIQUE는 그 뒤의 방어선입니다.
+- **settlement webhook.** lock을 얻지 못하면 100ms 뒤 결과 cache를 다시 보고, 없으면 409 `IDEMPOTENCY_IN_PROGRESS`로 답합니다. Redis에 닿지 않으면 lock 없이 진행합니다.
+
+"Redis lock 없이도 같은 key의 checkout이 주문 1건으로 모인다"의 근거는 route 단위 통합 테스트 T03(`src/tests/integration/route-contract.test.ts`)입니다. 이 테스트는 Redis를 멈추는 것이 아니라 lock 획득 실패를 주입하고, rate limiter를 fail-open으로 둔 설정에서 돕니다.
 
 ## 이벤트/재고 read-through cache는 미구현
 

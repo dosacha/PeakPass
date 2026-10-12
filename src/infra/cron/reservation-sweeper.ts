@@ -19,7 +19,10 @@ const MAX_PER_SWEEP = 200;
  * 반환된 timer는 stopReservationSweeper에 전달해 graceful shutdown 시 정지한다.
  */
 export function startReservationSweeper(): NodeJS.Timeout {
-  logger.info({ intervalMs: SWEEP_INTERVAL_MS, maxPerSweep: MAX_PER_SWEEP }, 'Reservation sweeper started');
+  logger.info(
+    { intervalMs: SWEEP_INTERVAL_MS, maxPerSweep: MAX_PER_SWEEP },
+    'Reservation sweeper started',
+  );
 
   const handle = setInterval(async () => {
     try {

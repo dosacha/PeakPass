@@ -4,6 +4,7 @@ import jwt from 'jsonwebtoken';
 import { getConfig } from '@/infra/config';
 import { ForbiddenError, UnauthorizedError } from '@/core/errors';
 import { AdmissionError, AdmissionRef, parsePurchaseAdmission } from '@/core/models/admission';
+import { uuid } from '@/core/models/uuid';
 
 export interface AuthUser {
   id: string;
@@ -17,8 +18,17 @@ export function extractUserFromToken(token: string): AuthUser | null {
 
   try {
     const decoded = jwt.verify(token, config.JWT_SECRET) as jwt.JwtPayload;
+    // UUID는 대소문자를 구분하지 않지만 문자열 비교와 Map 조회는 구분한다. 주체가 UUID면
+    // PostgreSQL이 돌려주는 소문자 형태로 맞춘다. 그래야 소유권 비교와 DataLoader 조회가 같은
+    // 사용자를 같은 값으로 본다.
+    // 이 schema가 UUID로 보지 않는 주체는 그대로 둔다. 하이픈 없는 32자리처럼 PostgreSQL은 UUID로
+    // 받는 형태도 여기에 든다. 그런 주체에 대한 답은 쓰는 곳마다 다르고 여기서 맞추지 않는다:
+    // 문자열 비교는 불일치, Map 조회는 누락, 입장 제어 route는 401이고, 주체를 SQL 조건으로
+    // 넘기는 곳은 PostgreSQL이 받으면 그 사용자의 행을 찾고 못 받으면 오류(22P02)로 끝난다.
+    const subject = String(decoded.sub || decoded.id);
+    const normalized = uuid.safeParse(subject);
     return {
-      id: String(decoded.sub || decoded.id),
+      id: normalized.success ? normalized.data : subject,
       email: String(decoded.email || ''),
       role: decoded.role ? String(decoded.role) : undefined,
     };
@@ -46,7 +56,7 @@ export async function jwtAuthMiddleware(request: FastifyRequest, reply: FastifyR
 
   const user = extractUserFromToken(token);
   if (!user) {
-    // 토큰을 *보낸 의도*가 있었는데 invalid → 정직하게 401로 거절.
+    // 토큰을 *보낸 의도*가 있었는데 invalid → 401로 거절.
     // (토큰 미존재와 토큰 변조/만료를 구분하지 않으면 escalation 시도가
     //  ENFORCE_AUTH_USER_MATCH=false 환경에서 silent로 통과한다.)
     logger.warn({ requestId: request.id }, 'Authorization header present but JWT is invalid');
@@ -74,15 +84,14 @@ export async function jwtAuthMiddleware(request: FastifyRequest, reply: FastifyR
  *
  * 운영 환경에서는 ENFORCE_AUTH_USER_MATCH=true 권장.
  */
-export function assertBodyUserMatchesAuth(
-  request: FastifyRequest,
-  bodyUserId: string,
-): void {
+export function assertBodyUserMatchesAuth(request: FastifyRequest, bodyUserId: string): void {
   const cfg = getConfig();
   const logger = getLogger();
   const authUser = request.user;
 
   if (authUser) {
+    // 본문의 userId는 생성 schema가 소문자로 맞춘 UUID다. 주체도 UUID면 토큰을 읽을 때 같은
+    // 형태가 됐으므로 여기서 다시 바꾸지 않는다. schema가 UUID로 보지 않는 주체는 403이다.
     if (authUser.id !== bodyUserId) {
       logger.warn(
         { authUserId: authUser.id, bodyUserId, requestId: request.id },

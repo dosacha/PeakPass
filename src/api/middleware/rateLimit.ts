@@ -20,7 +20,7 @@ const logger = getLogger();
 //
 // 결제 경로의 폭주 방어 layer가 leak되는 위험이 단순 503보다 크므로 default 'closed'를
 // 권장. production에서는 config가 fail-closed를 강제한다.
-type RateLimitAction =
+export type RateLimitAction =
   | 'checkout'
   | 'reservation'
   | 'webhook'
@@ -28,102 +28,68 @@ type RateLimitAction =
   | 'demoSession'
   | 'demoSettlement';
 
-interface RouteRateLimit {
-  action: RateLimitAction;
-  limit: number;
-  windowMs: number;
+declare module 'fastify' {
+  interface FastifyContextConfig {
+    /** 이 route에 적용할 rate limit. 선언하지 않은 route는 한도 대상이 아니다. */
+    rateLimit?: RateLimitAction;
+  }
 }
 
 /**
- * URL을 보고 적용할 rate limit 정책을 결정한다.
- * 매치 안 되면 null (rate limit 미적용 경로).
+ * action별 한도. 어느 route가 어느 action인지는 route가 `config.rateLimit`으로 선언한다.
+ *
+ * 요청 경로의 문자열로 고르지 않는다. Fastify는 경로를 디코딩한 뒤 route를 고르므로, raw URL로
+ * 판정하면 `/%63heckouts`가 `/checkouts` handler에 닿으면서 한도를 건너뛴다.
+ *
+ * 예약·주문 조회(`GET /reservations/:id`, `GET /checkouts/:orderId`)는 생성 요청과 같은 action을
+ * 선언한다. 카운터는 action마다 따로여서 예약 조회는 예약 생성과, 주문 조회는 checkout 생성과
+ * 같은 카운터를 쓴다. 알려진 한계이고, 입장 제어 계약이 기존 limiter 정책을 고정하고 있어
+ * 그대로 둔다.
  *
  * GraphQL은 별도 한도를 사용한다. write 경로의 5/60s를 그대로 쓰면 화면 1개 렌더링에
  * 호출되는 events/event/myOrders 등이 1초도 안 되어 한도를 소진한다.
  */
-export function resolveRouteRateLimit(url: string): RouteRateLimit | null {
+export function rateLimitFor(action: RateLimitAction): { limit: number; windowMs: number } {
   const config = getConfig();
 
-  if (url.split('?')[0] === '/demo/session') {
-    if (!config.ENABLE_DEMO_SESSION) {
-      return null;
-    }
-
-    return {
-      action: 'demoSession',
-      limit: 10,
-      windowMs: 60_000,
-    };
+  switch (action) {
+    case 'demoSession':
+    case 'demoSettlement':
+      return { limit: 10, windowMs: 60_000 };
+    case 'graphql':
+      return {
+        limit: config.GRAPHQL_RATE_LIMIT_MAX_REQUESTS,
+        windowMs: config.GRAPHQL_RATE_LIMIT_WINDOW_MS,
+      };
+    default:
+      return { limit: config.RATE_LIMIT_MAX_REQUESTS, windowMs: config.RATE_LIMIT_WINDOW_MS };
   }
-
-  if (url.split('?')[0] === '/demo/settlement') {
-    if (!config.ENABLE_DEMO_SESSION) {
-      return null;
-    }
-
-    return {
-      action: 'demoSettlement',
-      limit: 10,
-      windowMs: 60_000,
-    };
-  }
-
-  if (url.includes('/checkouts')) {
-    return {
-      action: 'checkout',
-      limit: config.RATE_LIMIT_MAX_REQUESTS,
-      windowMs: config.RATE_LIMIT_WINDOW_MS,
-    };
-  }
-  if (url.includes('/reservations')) {
-    return {
-      action: 'reservation',
-      limit: config.RATE_LIMIT_MAX_REQUESTS,
-      windowMs: config.RATE_LIMIT_WINDOW_MS,
-    };
-  }
-  if (url.includes('/webhooks')) {
-    return {
-      action: 'webhook',
-      limit: config.RATE_LIMIT_MAX_REQUESTS,
-      windowMs: config.RATE_LIMIT_WINDOW_MS,
-    };
-  }
-  if (url.includes('/graphql')) {
-    return {
-      action: 'graphql',
-      limit: config.GRAPHQL_RATE_LIMIT_MAX_REQUESTS,
-      windowMs: config.GRAPHQL_RATE_LIMIT_WINDOW_MS,
-    };
-  }
-
-  return null;
 }
 
-export async function rateLimitMiddleware(
-  request: FastifyRequest,
-  reply: FastifyReply,
-) {
+export async function rateLimitMiddleware(request: FastifyRequest, reply: FastifyReply) {
   const config = getConfig();
 
   if (!config.ENABLE_RATE_LIMITING) {
     return;
   }
 
-  const route = resolveRouteRateLimit(request.url);
-  if (!route) {
+  // 매칭된 route가 없는 요청(404)과 선언하지 않은 route는 한도 대상이 아니다.
+  const action = request.routeOptions.config.rateLimit;
+  if (!action) {
     return;
   }
+  const { limit, windowMs } = rateLimitFor(action);
 
-  const userId = route.action === 'demoSession'
-    ? request.ip || 'anonymous'
-    : request.user?.id || request.ip || 'anonymous';
+  const userId =
+    action === 'demoSession'
+      ? request.ip || 'anonymous'
+      : request.user?.id || request.ip || 'anonymous';
 
   const { allowed, count, resetAt, redisAvailable } = await checkRateLimit(
     userId,
-    route.action,
-    route.limit,
-    route.windowMs,
+    action,
+    limit,
+    windowMs,
     config.RATE_LIMIT_FAIL_MODE,
   );
 
@@ -131,7 +97,7 @@ export async function rateLimitMiddleware(
   // X-RateLimit-* 헤더를 박는 건 의미가 어긋나므로 503을 먼저 반환한다.
   if (!redisAvailable && config.RATE_LIMIT_FAIL_MODE === 'closed') {
     logger.error(
-      { userId, action: route.action, requestId: request.id },
+      { userId, action, requestId: request.id },
       'Rate limit Redis unavailable; rejecting (fail-closed)',
     );
     return reply.code(503).send({
@@ -142,21 +108,21 @@ export async function rateLimitMiddleware(
     });
   }
 
-  reply.header('X-RateLimit-Limit', route.limit);
-  reply.header('X-RateLimit-Remaining', Math.max(0, route.limit - count));
+  reply.header('X-RateLimit-Limit', limit);
+  reply.header('X-RateLimit-Remaining', Math.max(0, limit - count));
   reply.header('X-RateLimit-Reset', new Date(resetAt).toISOString());
 
   if (!allowed) {
     logger.warn(
       {
         userId,
-        action: route.action,
-        limit: route.limit,
+        action,
+        limit,
         requestId: request.id,
       },
       'Rate limit exceeded',
     );
 
-    throw new RateLimitExceededError(route.limit, route.windowMs);
+    throw new RateLimitExceededError(limit, windowMs);
   }
 }

@@ -37,27 +37,22 @@ describe('API validation and demo route protection', () => {
     };
     handleValidationError(issues, reply as never, 'request-id');
     expect(reply.status).toHaveBeenCalledWith(400);
-    expect(send).toHaveBeenCalledWith(expect.objectContaining({
-      error: expect.objectContaining({
-        code: 'VALIDATION_ERROR',
-        message: 'Request validation failed',
-        details: { issues },
+    expect(send).toHaveBeenCalledWith(
+      expect.objectContaining({
+        error: expect.objectContaining({
+          code: 'VALIDATION_ERROR',
+          message: 'Request validation failed',
+          details: { issues },
+        }),
       }),
-    }));
+    );
   });
 
-  it('applies a dedicated ten-per-minute rate limit to public demo sessions', async () => {
-    process.env.ENABLE_DEMO_SESSION = 'true';
-    const { resolveRouteRateLimit } = await import('@/api/middleware/rateLimit');
-    expect(resolveRouteRateLimit('/demo/session')).toEqual({
-      action: 'demoSession',
-      limit: 10,
-      windowMs: 60_000,
-    });
-    expect(resolveRouteRateLimit('/demo/settlement')).toEqual({
-      action: 'demoSettlement',
-      limit: 10,
-      windowMs: 60_000,
-    });
+  // Which routes use these limits is checked on the real application in
+  // encoded-route-middleware.test.ts.
+  it('gives the two demo actions a limit of ten per minute', async () => {
+    const { rateLimitFor } = await import('@/api/middleware/rateLimit');
+    expect(rateLimitFor('demoSession')).toEqual({ limit: 10, windowMs: 60_000 });
+    expect(rateLimitFor('demoSettlement')).toEqual({ limit: 10, windowMs: 60_000 });
   });
 });

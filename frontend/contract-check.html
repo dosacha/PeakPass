@@ -1,8 +1,8 @@
 <!doctype html>
 <html lang="en">
 <meta charset="utf-8">
-<title>Task21 frontend contract check</title>
-<h1>Task21 frontend contract check</h1>
+<title>Frontend contract check</title>
+<h1>Frontend contract check</h1>
 <p>Run: python -m http.server 8765 --bind 127.0.0.1 --directory frontend, then open this page.</p>
 <pre id="results">Loading production page…</pre>
 <div id="cases"></div>
@@ -11,7 +11,7 @@
 const output = document.getElementById("results");
 fetch("index.html", { cache: "no-store" }).then(response => response.text()).then(html => {
   document.getElementById("app").srcdoc = html.replace(/src="(?!https?:)([^"]+)"/g,
-    (_, path) => `src="${path}?task21=${Date.now()}"`);
+    (_, path) => `src="${path}?v=${Date.now()}"`);
 }).catch(error => { output.textContent = `ERROR loading production page: ${error.message}`; });
 const lines = [];
 let failed = 0;
@@ -85,7 +85,7 @@ const timer = setInterval(async () => {
   });
   lines.push(`${failed ? "FAIL" : "PASS"}: ${lines.length - failed}/${lines.length} checks`);
   output.textContent = lines.join("\n");
-  document.title = `${failed ? "FAIL" : "PASS"} Task21 frontend contract check`;
+  document.title = `${failed ? "FAIL" : "PASS"} Frontend contract check`;
 }, 100);
 setTimeout(() => { if (!lines.length) { clearInterval(timer); output.textContent = "ERROR: production React/Babel scripts did not load within 20 seconds"; } }, 20000);
 </script>

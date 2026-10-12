@@ -109,8 +109,8 @@ describe('admission actual process interruption and product startup', () => {
       }
     }
   }
-  // The product process itself, with its own scheduler when enabled. P5 replaced the P4 guard:
-  // a protected policy no longer blocks startup because both purchase paths are gated.
+  // The product process itself, with its own scheduler when enabled. Startup does not refuse a protected policy:
+  // both purchase paths are gated, so nothing is sold without an admission.
   async function startProduct(enabled: boolean) {
     const probe = createServer();
     await new Promise<void>((resolve) => probe.listen(0, '127.0.0.1', resolve));

@@ -1,215 +1,117 @@
-# 🎟️ PeakPass
+# PeakPass
 
-> 고트래픽 워크숍·세미나를 위한 티켓팅 및 디지털 패스 발급 플랫폼
+> 짧은 시간에 구매자가 몰리는 이벤트의 티켓 예약·결제 백엔드
 
-## 📣 프로젝트 소개
+워크숍, 세미나, 컨퍼런스처럼 판매가 열리는 순간 구매자가 몰리는 이벤트에서는 두 가지 사고가 자주 납니다. 한 자리가 두 명에게 팔리는 초과 판매(oversell)와, 같은 결제 webhook이 두 번 들어와 티켓이 중복 발급되는 일입니다.
 
-워크숍, 세미나, 컨퍼런스처럼 **짧은 시간에 트래픽이 몰리는 이벤트**에서는 두 가지 사고가 자주 일어납니다.
-하나는 한 자리에 두 명이 결제되는 **oversell**, 다른 하나는 같은 결제 webhook이 두 번 들어와 **티켓이 중복 발급**되는 일입니다.
+PeakPass는 예약, 주문 생성, 결제 정산 webhook이 같은 재고와 주문을 바꾸는 상황에서 PostgreSQL transaction과 제약으로 정합성을 지키고, 구매자가 몰릴 때는 Redis 대기열로 구매 경로에 들어오는 사람 수를 줄이는 백엔드입니다. 재고와 주문의 기준은 항상 PostgreSQL입니다.
 
-PeakPass는 이런 환경에서 **재고 정합성과 결제 멱등성을 보장하는 백엔드**가 어떻게 동작해야 하는지를 직접 구현하고, 부하 테스트와 문서까지 함께 검증한 백엔드 프로젝트입니다.
+공개 데모 서버는 운영하지 않습니다(2026-10-10 기준). 아래 내용은 모두 로컬에서 실행하고 측정한 것입니다.
 
-구매자가 한꺼번에 몰릴 때는 **Redis 대기열과 입장량 제한, 적응형 polling**으로 구매 경로에 들어오는 사람 수를 조절합니다. 재고와 주문의 기준은 그때도 PostgreSQL입니다.
+## 결과
 
-Node.js 백엔드 운영, PostgreSQL 트랜잭션, Redis 실사용, GraphQL read-side, k6 부하 테스트까지 — 한 도메인 안에서 백엔드의 핵심 요소를 일관되게 설명할 수 있도록 구성했습니다.
+**정합성은 통합 테스트로 고정했습니다.** 실제 PostgreSQL과 Redis를 쓰고 CI에서 돕니다.
 
-## 🔗 엔드포인트
+- 3석에 서로 다른 5명이 동시에 구매해도 3석만 팔립니다(`src/tests/integration/concurrency.test.ts`).
+- 같은 결제의 정산 webhook 5건이 서로 다른 Idempotency-Key로 동시에 와도 티켓과 정산 기록은 한 번만 만들어집니다(`route-contract.test.ts`의 T04).
+- 입장 하나는 예약 또는 주문 하나에만 쓰입니다. PostgreSQL 원장의 PK·UNIQUE·UPDATE 금지 trigger로 강제합니다(migration 013).
 
-공개 데모 서버(`peak-pass.com`)는 비용 때문에 운영하지 않습니다(2026-10-10 기준). 아래 엔드포인트는 로컬에서 띄운 서버(`http://localhost:3000`)의 경로입니다.
+**유입 제어는 같은 조건의 부하 비교로 측정했습니다.** 초당 50명이 20초 동안 도착하는 조건(구매자 1,000명, 처음 5초의 250명을 뺀 750명 기준, 3회 중앙값)입니다.
 
-| 엔드포인트 | 경로 |
-| --- | --- |
-| Health Check | `GET /health` |
-| Readiness Check | `GET /ready` |
-| REST (write-side) | `POST /reservations`, `POST /checkouts`, `POST /webhooks/payments/settlement` |
-| GraphQL (read-side) | `POST /graphql` |
-
-### Live demo sessions
-
-The browser demo can obtain a short-lived token for one fixed seed user through
-`POST /demo/session`. It is disabled by default and must be explicitly enabled
-with `ENABLE_DEMO_SESSION=true`, including in production. The endpoint always
-uses `DEMO_USER_EMAIL`; clients cannot select a user, email, or role. Its JWT is
-kept only in browser memory and is not a substitute for real user login or
-production access control.
-
-When enabled, `POST /demo/settlement` accepts the live demo JWT and a demo-user
-owned order ID to exercise the same settlement domain service without exposing
-the webhook signing secret. The actual `/webhooks/payments/settlement` endpoint
-continues to require its HMAC signature.
-
-> 이 문서의 `curl` 명령은 로컬 서버(`http://localhost:3000`) 기준입니다. `myOrders`·`myTickets`는 JWT가 필요하고, production 설정은 예약·checkout에도 JWT를, settlement webhook에 HMAC 서명을 요구합니다.
-
-GraphQL 쿼리는 `POST /graphql`로 보냅니다. `NODE_ENV`가 `production`이 아니면 `GET /graphql` route도 등록됩니다. 이 route가 응답하는 페이지는 브라우저에서 화면을 그리지 못합니다(2026-10-11 확인: 전역 CSP의 `script-src 'self'`가 페이지의 CDN 스크립트를 막습니다. [#39](https://github.com/dosacha/PeakPass/issues/39), 고치지 않기로 함).
-
-```bash
-curl -X POST http://localhost:3000/graphql \
-  -H "Content-Type: application/json" \
-  -d '{"query":"query { events { id name } }"}'
-```
-
-## 🎯 프로젝트 목표
-
-- Node.js + TypeScript 기반 백엔드 서비스 구현
-- Fastify 기반 **REST write-side**와 **GraphQL read-side** 분리
-- PostgreSQL을 **source of truth**로 유지
-- Redis를 hold TTL · rate limit · idempotency lock과 webhook 결과 캐시 · 입장 대기열에 **운영 용도로** 사용
-- 동시성 하에서 oversell을 막는 트랜잭션 흐름 구현
-- 구매가 몰릴 때 유입을 제어하는 입장 대기열과 polling 구현
-- k6 기반 부하 테스트 시나리오와 같은 조건의 비교 측정 제공
-
-## ⚙️ 기술 스택
-
-| 영역 | 사용 기술 |
-| --- | --- |
-| **Language & Runtime** | Node.js, TypeScript |
-| **Web Framework** | Fastify (REST), GraphQL |
-| **Database** | PostgreSQL |
-| **Cache & In-memory** | Redis |
-| **Testing** | Jest (단위·통합·동시성), k6 (부하 테스트) |
-| **Quality** | ESLint, Prettier |
-
-## 🏗️ 아키텍처 개요
-
-PeakPass는 **상태를 바꾸는 명령**과 **데이터를 읽는 조회**를 의도적으로 다른 프로토콜로 분리했습니다. 이는 단일 PostgreSQL 위의 **protocol-level read/write separation**이며, 별도 read database나 event sourcing을 두는 완전한 CQRS는 아닙니다.
-
-### REST는 명령(Write) 처리
-
-- `POST /reservations` — 예약 hold 생성
-- `POST /checkouts` — 주문 생성 (결제 대기)
-- `POST /webhooks/payments/settlement` — 결제 정산 webhook 처리
-
-> 상태 전이가 핵심인 명령은 REST로 유지합니다. **멱등성 키, HTTP 상태 코드, 트랜잭션 경계**가 가장 단순하게 드러나는 표현이기 때문입니다.
-
-### GraphQL은 조회(Read) 처리
-
-- `events`, `event` — 이벤트 목록 / 상세 조회
-- `myOrders`, `myTickets` — 내 주문 / 내 티켓 조회
-- `ticketByCode` — 티켓 코드로 단건 조회
-
-> 조회 조합이 많은 read-side는 GraphQL로 분리해, 클라이언트가 필요한 필드만 골라서 가져갈 수 있게 했습니다.
-
-일부 단건 REST 조회(`GET /events`, `GET /events/:id`, `GET /reservations/:id`, `GET /checkouts/:orderId`)는 헬스체크·데모·소유자 확인 용도로 병존합니다. "모든 조회가 GraphQL"은 아니고, **상태 변경 command가 REST 전용**이라는 것이 분리의 핵심입니다.
-
-### PostgreSQL이 정합성 기준
-
-재고 차감, 주문 생성, 정산 완료 처리, 티켓 발급, 예약 상태 전환 — **정합성이 필요한 모든 흐름은 PostgreSQL 트랜잭션 안에서** 처리합니다.
-
-### Redis는 보조 계층
-
-- 예약 hold 조회 가속과 만료 시각 표시 (TTL)
-- rate limiting
-- settlement webhook의 idempotency 결과 캐시 (checkout 재시도는 캐시 없이 PostgreSQL의 기존 주문을 반환)
-- command별 in-flight idempotency lock
-- 입장 대기열의 순서, 입장 자격, 입장 예산 (기능을 켠 경우. 전용 Redis 필요)
-
-> Redis는 빠른 조회와 보조 역할을 맡지만, **source of truth는 아닙니다.** 부작용은 가능한 한 commit 이후에만 반영하며, Redis가 중단돼도 정합성 판단은 PostgreSQL(advisory lock, UNIQUE·CHECK 제약)에서 이뤄집니다. 이벤트/재고에 대한 read-through 캐시는 현재 구현되어 있지 않습니다.
-
-## 🛠️ 주요 기능
-
-### ✅ 이벤트 조회
-
-GraphQL로 이벤트 목록과 상세 정보를 조회할 수 있습니다. 필요한 필드만 골라서 가져갈 수 있고, DataLoader로 N+1 문제를 방지했습니다.
-
-### ✅ 예약 Hold 생성
-
-`POST /reservations`로 잠깐 자리를 잡아둘 수 있습니다. 만료 시각은 DB에 기록되고 Redis TTL hold는 조회 가속용입니다. **Redis TTL 만료 자체가 좌석을 복구하지는 않으며**, 만료된 예약의 좌석 복구는 background sweeper와 checkout 경로의 lazy expiration이 DB 트랜잭션 안에서 수행합니다. 결제까지 가지 않은 자리는 이 경로로 다른 사용자에게 다시 열립니다.
-
-### ✅ 체크아웃 (주문 생성)
-
-`POST /checkouts`로 주문을 생성합니다. 이 시점에서는 **티켓이 발급되지 않고**, 주문 상태는 `pending`으로만 기록됩니다. 결제가 정산되기 전에는 절대로 티켓이 나가지 않도록 분리했습니다.
-
-### ✅ 결제 Webhook 처리 (정산 → 티켓 발급)
-
-`POST /webhooks/payments/settlement`로 결제 webhook이 들어오면 주문 상태를 `paid`로 바꾸고, **이때 처음으로 티켓이 발급**됩니다. 한 webhook = 하나의 트랜잭션 경계입니다.
-
-### ✅ 중복 Webhook 방어 (멱등성)
-
-같은 `Idempotency-Key`로 webhook이 다시 들어오면 캐시된 기존 응답을 그대로 재생하고, 다른 `Idempotency-Key`로 같은 `providerTransactionId`가 재시도되면 `duplicate: true`로 수렴합니다. 어느 경로든 **티켓 개수는 절대 늘어나지 않습니다.** 결제사가 retry 정책을 가지고 있을 때 반드시 필요한 동작입니다.
-
-### ✅ 동시성 제어 (Oversell 방지)
-
-`SELECT ... FOR UPDATE`로 이벤트 재고 행을 잠그고(checkout·settlement와 입장 필드가 있는 예약은 `SERIALIZABLE`, 입장 필드가 없는 예약은 READ COMMITTED), `available_seats`는 DB CHECK로 하한(`>= 0`)과 상한(`<= total_seats`)이 함께 강제됩니다. **동시 예약·checkout 요청이 몰려도 한 자리가 두 명에게 팔리지 않는 것은 통합 테스트로 검증**했으며, k6 시나리오는 같은 행에 대한 lock 경합과 rate limit 동작을 관찰하는 용도입니다.
-
-### ✅ Rate Limiting
-
-Redis sliding window 기반 rate limit으로 write 경로(reservation/checkout/webhook)와 GraphQL read 경로를 서로 다른 한도로 보호합니다. Redis 장애 시에는 fail-closed(503)가 기본값입니다.
-
-### ✅ 입장 제어 (대기열 · 입장량 제한 · polling)
-
-보호하도록 지정한 이벤트는 구매 전에 대기열을 거칩니다. Redis가 등록 순서대로 초당 정해진 수만 입장시키고 동시에 입장해 있는 수를 제한하며, 입장 하나는 PostgreSQL 원장 한 행으로 예약 또는 주문 하나에만 쓰입니다. 대기 화면은 polling으로 상태를 읽고, 순번이 먼 사용자는 조회 간격을 늘립니다. Redis에 닿지 않으면 신규 입장과 신규 구매는 닫히고(fail-closed), 이미 만들어진 예약과 주문은 입장 자격을 다시 요구하지 않습니다.
-
-기능은 기본으로 꺼져 있고(`ENABLE_ADMISSION=false`), 동시에 보호하는 이벤트는 1개입니다. 로컬 측정 조건(초당 50명 × 20초, 1,000명)에서 warmup 250명을 제외한 측정 cohort 750명을 기준으로, 대기열이 없으면 16.00%만 결제했고, 대기열과 적응형 polling을 두면 750명 전원이 결제하는 대신 도착부터 결제 완료까지 걸린 시간의 중앙값이 306.8초였습니다(같은 대기열에 고정 간격 polling을 쓰면 503.8초, 모두 3회 중앙값). 운영 성과가 아닌 로컬 단일 인스턴스 측정이며, 조건과 한계는 [성능 보고서](docs/PERFORMANCE_REPORT.md)에, 설계 선택과 운영 절차는 [ADMISSION_DESIGN_AND_OPERATIONS.md](docs/ADMISSION_DESIGN_AND_OPERATIONS.md)에 있습니다.
-
-### ✅ 내 주문 / 내 티켓 조회
-
-GraphQL `myOrders`, `myTickets`로 사용자가 본인의 주문과 티켓을 조회할 수 있습니다(JWT 인증 기반). `ticketByCode`는 인증 없이 티켓 코드로 게이트 검증용 공개 DTO만 반환합니다.
-
-### ✅ 부하 테스트 시나리오 (k6)
-
-시나리오별 micro-benchmark와 flash-sale 하네스 두 종류가 있습니다. 아래 4개는 micro-benchmark이고, rate limit 전용 시나리오 2개가 더 있습니다.
-
-| 시나리오 | 대상 | 목적 |
+| | 대기열 없음 | 대기열 + 적응형 polling |
 | --- | --- | --- |
-| `baseline` | `/health`, GraphQL `events`, GraphQL `event` | 일반 browse 트래픽의 기준선 |
-| `spike` | GraphQL `event` | 인기 이벤트 상세 집중 조회 시 tail latency |
-| `sustained` | `POST /reservations` | flash-sale 예약 부하 / 429 비율 |
-| `callbacks` | `POST /webhooks/payments/settlement` | duplicate webhook에도 티켓 중복 발급이 없는지 |
+| 결제 완료 | 16.00% | 100% |
+| 구매 시도 실패율 | 61.75% | 0% |
+| 도착→결제 완료 시간 중앙값 | 1.1초 (결제한 사람만) | 306.8초 |
 
-성능 보고서의 write 측정은 단일 user / 단일 event / 단일 tier를 공유하는 micro-benchmark입니다. 같은 row에 대한 lock 경합과 rate limit 동작을 보기 위한 결과이며, 실서비스 flash-sale RPS로 일반화하지 않습니다.
+대기열은 실패를 대기로 바꿨고 처리량을 늘리지는 않았습니다. 이 표는 아래 조건 위에 서 있습니다.
 
-서로 다른 구매자가 한 이벤트에 몰리는 쓰기 부하는 flash-sale 하네스(`npm run load-test:flash-sale`)로 측정합니다. 실행마다 전용 PostgreSQL·Redis·앱을 띄우고, 대기열 없음 / 대기열 + fixed polling / 대기열 + adaptive polling을 같은 조건에서 비교할 수 있습니다. 실행 방법은 [load-test/README.md](load-test/README.md)에 있습니다.
+- 대기열 없는 경로의 실패는 용량 부족이 아니라 SERIALIZABLE transaction이 직렬화 실패로 3회의 시도(재시도 2회)를 다 쓴 500입니다. 격리 수준을 내리거나 시도 횟수를 늘린 경우는 재지 않았습니다.
+- 초당 50명은 이 비교의 pilot에서 시험한 세 단계(초당 10·25·50명) 가운데 대기열 없는 경로가 안정적이지 않았던 가장 낮은 단계입니다. 초당 10명에서는 대기열 없이도 전원이 결제했고, 초당 25명은 그 pilot에서는 안정이었지만 앞선 쓰기 기준선에서는 3회 중 2회가 과부하였습니다.
+- 대기열 없는 쪽의 부하 발생기는 실패한 요청을 한 번만 다시 보냅니다. 주문까지 만들어지고 정산 webhook만 실패해 미결제로 남은 구매자가 1,000명 중 377–386명입니다.
+- 초당 2명이라는 입장량은 측정으로 찾은 값이 아니라 처음 정한 가정입니다.
+- 로컬 host 한 대, 앱 인스턴스 1개의 합성 부하이며 운영 성과가 아닙니다.
 
-## 🔒 핵심 정합성 포인트
+조건, 전체 표, 해석은 [성능 보고서](docs/PERFORMANCE_REPORT.md)에, 문장마다의 근거는 [RESUME_EVIDENCE.md](docs/RESUME_EVIDENCE.md)에 있습니다.
 
-PeakPass에서 절대 양보하지 않은 규칙들입니다.
+## 먼저 나올 질문
 
-- `Idempotency-Key` 기반 **중복 재시도 방어** — Redis in-flight lock은 command(checkout / payment-settlement)별 namespace로 분리하고, 결과 캐시는 settlement webhook에만 사용
-- Redis가 중단돼도 `pg_advisory_xact_lock` + `orders.idempotency_key UNIQUE`로 **PostgreSQL이 최종 멱등성을 보장**
-- checkout·settlement와 입장 필드가 있는 예약은 `SERIALIZABLE`, 입장 필드가 없는 예약은 READ COMMITTED + 행 잠금
-- `SELECT ... FOR UPDATE` 기반 이벤트 재고 **행 잠금**
-- `available_seats`는 DB CHECK로 **0 미만·`total_seats` 초과가 모두 차단**됨 (상한은 defense-in-depth)
-- `payment_records.idempotency_key`는 **record 종류(checkout pending / settlement terminal)별 partial UNIQUE**
-- 모든 status 컬럼은 애플리케이션 모델과 동일한 **DB CHECK 허용 집합**을 가짐 (전이 순서 자체는 애플리케이션 트랜잭션 책임)
-- checkout 시점에는 주문만 생성 → 티켓은 **settlement 이후에만** 발급
-- duplicate settlement webhook에도 **티켓이 중복 발급되지 않음**
-- Redis 부작용은 가능한 한 **commit 이후에만** 반영
+**대기열 없는 경로는 왜 실패했나.** checkout과 정산은 SERIALIZABLE로 실행합니다. 같은 이벤트 행을 두고 겹친 transaction은 앞선 것이 끝나면 직렬화 실패로 끝나 처음부터 다시 시도하고, 3회 안에 끝내지 못하면 500이 됩니다. 구매자가 몰릴수록 이 실패가 쌓입니다.
 
-## 📂 디렉터리 구조
+**행 잠금이 있는데 SERIALIZABLE까지 쓰는 이유는.** 초과 판매를 막는 것은 이벤트 행의 `FOR UPDATE` 잠금입니다. SERIALIZABLE은 같은 Idempotency-Key의 checkout과 중복 정산이 재시도에서 기존 결과를 보게 하는 데 쓰이고 있습니다. 행 잠금만으로 충분한지, 격리 수준을 내리면 어떻게 되는지는 측정하지 않았습니다. 2026-10-10에 이 실패를 조사한 뒤 바꾸지 않기로 정했습니다. 격리 수준과 재시도 정책이 입장 제어 계약에 고정돼 있어, 바꾸면 장애 검증과 부하 측정을 다시 해야 하기 때문입니다([TRANSACTION_CONSISTENCY.md](docs/TRANSACTION_CONSISTENCY.md), [#27](https://github.com/dosacha/PeakPass/issues/27)).
+
+**왜 초당 2명만 입장시키나. 5분 대기는 DB의 한계인가.** 아닙니다. 초당 2명은 처음 정한 가정이고, 입장량을 올린 후보는 입장한 구매자끼리의 직렬화 실패 때문에 실패율 기준을 넘어 탈락했습니다. 대기 시간은 그 가정에서 나옵니다.
+
+**Redis가 죽으면.** 재고와 주문은 틀리지 않습니다. 대신 대기열이 적용된 이벤트는 신규 구매가 모두 닫히고, 기본 설정에서는 rate limiter도 503으로 답합니다. 대기 순번은 복원되지 않아 다시 등록해야 합니다.
+
+## 구조
+
+상태를 바꾸는 명령은 REST로, 조회 조합은 GraphQL로 나눴습니다. 단일 PostgreSQL 위에서 프로토콜만 나눈 것이고, 별도 read database나 event sourcing을 두는 CQRS는 아닙니다.
+
+| 종류 | 경로 |
+| --- | --- |
+| 상태 확인 | `GET /health`, `GET /ready` |
+| 구매 명령 (REST) | `POST /reservations`, `POST /checkouts`, `POST /webhooks/payments/settlement` |
+| 입장 대기열 (REST) | `POST /events/:eventId/admissions`, `GET /events/:eventId/admissions/me`, `DELETE /events/:eventId/admissions/:admissionId` |
+| 조회 (GraphQL) | `POST /graphql` — `events`, `event`, `myOrders`, `myTickets`, `ticketByCode` |
+| 단건 조회 (REST) | `GET /events`, `GET /events/:id`, `GET /reservations/:id`, `GET /checkouts/:orderId` |
+| 기본으로 꺼진 것 | `POST /events`(운영자), `POST /demo/session`, `POST /demo/settlement`(데모) |
+
+- **PostgreSQL이 기준입니다.** 재고 차감, 주문 생성, 정산, 티켓 발급, 예약 상태 전환, 입장 소비 결과는 모두 PostgreSQL transaction 안에서 처리합니다.
+- **Redis는 네 가지에 씁니다.** 예약 hold의 조회 가속, rate limit, 멱등성 lock과 정산 webhook의 결과 cache, 입장 대기열의 순서·입장 자격·입장 예산입니다. 앞의 셋은 Redis를 잃어도 정합성이 깨지지 않습니다. 대기열은 다릅니다. 대기열이 적용된 이벤트에서는 Redis가 없으면 판매가 멈춥니다.
+- 이벤트·재고에 대한 read-through cache는 없습니다.
+
+## 주요 기능
+
+- **예약 hold.** `POST /reservations`가 좌석을 바로 차감해 잡아 둡니다. 만료 시각은 DB에 있고 Redis TTL은 조회 가속용입니다. 만료된 예약의 좌석은 background sweeper와 checkout 경로가 DB transaction 안에서 되돌립니다.
+- **주문 생성.** `POST /checkouts`는 주문을 `pending`으로만 만듭니다. 티켓은 결제가 정산되기 전에는 발급하지 않습니다.
+- **정산 webhook.** `POST /webhooks/payments/settlement`가 주문을 `paid`로 바꾸고 이때 처음 티켓을 발급합니다. HMAC 서명과 timestamp를 검증합니다.
+- **중복 webhook.** 같은 Idempotency-Key의 재전송은 저장한 응답을 그대로 돌려주고, 다른 key로 온 같은 결제는 주문 행 잠금 뒤 이미 `paid`인 것을 확인해 기존 티켓을 반환합니다.
+- **초과 판매 방지.** 이벤트 행을 `FOR UPDATE`로 잠그고 차감하며, `available_seats`는 DB CHECK로 하한과 상한이 함께 강제됩니다. 수량은 이벤트 단위로 지킵니다. tier별 수량은 강제하지 않습니다.
+- **Rate limit.** Redis sliding window로 구매 요청(예약·checkout 생성, 정산 webhook)과 GraphQL을 서로 다른 한도로 제한합니다. 어느 한도를 쓸지는 route가 선언합니다. 예약 조회는 예약 생성과, 주문 조회는 checkout 생성과 같은 카운터를 씁니다(알려진 한계). Redis에 닿지 않으면 503이 기본값입니다.
+- **입장 제어.** 보호하도록 지정한 이벤트는 구매 전에 대기열을 거칩니다. Redis가 등록 순서대로 초당 정해진 수만 입장시키고, 입장 하나는 PostgreSQL 원장 한 행으로 예약 또는 주문 하나에만 쓰입니다. 대기 화면은 polling으로 상태를 읽고 순번이 먼 사용자는 조회 간격을 늘립니다. 기본으로 꺼져 있고(`ENABLE_ADMISSION=false`) 동시에 보호하는 이벤트는 1개입니다. 설계 선택과 한계는 [ADMISSION_DESIGN_AND_OPERATIONS.md](docs/ADMISSION_DESIGN_AND_OPERATIONS.md)에 있습니다.
+- **조회.** GraphQL `myOrders`, `myTickets`는 JWT가 필요합니다. `ticketByCode`는 인증 없이 티켓 번호로 게이트 검증용 정보만 돌려줍니다.
+
+## 핵심 정합성 규칙
+
+- 좌석을 바꾸는 코드는 한 곳이고 항상 이벤트 행 잠금 뒤에 실행됩니다.
+- `available_seats`는 DB CHECK로 0 미만과 `total_seats` 초과가 모두 막힙니다.
+- checkout, 정산, 입장 필드가 있는 예약은 SERIALIZABLE(최대 3회 시도), 입장 필드가 없는 예약은 READ COMMITTED입니다.
+- 같은 Idempotency-Key의 checkout은 PostgreSQL advisory lock과 `orders.idempotency_key` UNIQUE로 주문 하나에 모입니다. Redis lock은 최적화입니다.
+- checkout은 주문만 만들고 티켓은 정산 뒤에만 발급합니다.
+- 모든 status 컬럼은 애플리케이션 모델과 같은 허용 값 집합을 DB CHECK로 가집니다. 전이 순서는 애플리케이션 transaction이 책임집니다.
+- Redis에 쓰는 부작용은 가능한 한 commit 뒤에 반영합니다.
+
+## 디렉터리 구조
 
 ```
 src/
-  api/         Fastify 앱 조립, REST 라우트, GraphQL 서버, 미들웨어
-  core/        도메인 모델, 서비스, 에러
-  infra/       PostgreSQL, Redis, 설정, 로거, 마이그레이션, 시드
-docs/          아키텍처 / 정합성 / Redis / GraphQL 기술 문서
-load-test/     k6 부하 테스트 스크립트
+  api/         Fastify 앱 조립, REST 라우트(구매, 입장 대기열), GraphQL 서버, 미들웨어
+  core/        도메인 모델과 서비스(예약, checkout, 정산, 입장 제어와 소비 원장)
+  infra/       PostgreSQL, Redis(명령과 대기열 Lua), 설정, 마이그레이션, sweeper와 scheduler
+  tests/       단위 테스트와 통합 테스트
+frontend/      데모 페이지와 대기 화면의 polling controller (빌드 없는 정적 파일)
+load-test/     k6 스크립트, flash-sale 하네스, 저장한 측정 결과
+docs/          설계, 정합성, 측정 문서와 작업 기록
 ```
 
-## 🚀 빠른 시작
-
-### 1. 의존성 설치
+## 빠른 시작
 
 ```bash
 npm install
-```
-
-### 2. 정적 검증
-
-```bash
 npm run build
-npm test -- --runInBand
+npm test
 npm run lint
 ```
 
-### 3. 로컬 환경 실행
+로컬 실행:
 
 ```bash
 docker compose up -d postgres redis
 docker compose up -d app
+curl http://localhost:3000/health
+curl http://localhost:3000/ready
 ```
-
-기본 포트는 다음과 같습니다. (호스트 포트 충돌을 피하기 위해 5433 / 6380을 사용합니다.)
 
 | 서비스 | 호스트 포트 | 컨테이너 포트 |
 | --- | --- | --- |
@@ -217,46 +119,27 @@ docker compose up -d app
 | Redis | `6380` | `6379` |
 | App | `3000` | `3000` |
 
-### 4. 상태 확인
+### 운영 이미지
 
-```bash
-curl http://localhost:3000/health
-curl http://localhost:3000/ready
-```
-
-### 운영 이미지 마이그레이션
-
-운영 이미지에서는 앱 시작 전에 같은 이미지로 마이그레이션을 실행합니다.
-빌드 컨텍스트 밖의 `../production.env`에 DB/Redis 연결 설정과 운영용
-`JWT_SECRET`, `API_KEY`, `WEBHOOK_SIGNING_SECRET`을 제공하세요.
+운영 이미지는 `NODE_ENV=production`으로 뜨고, 시작할 때 설정을 검사합니다. `JWT_SECRET`이 없거나 `WEBHOOK_SIGNING_SECRET`이 없거나 32자 미만이면 시작하지 않습니다. 앱을 시작하기 전에 같은 이미지로 마이그레이션을 실행합니다. 빌드 컨텍스트 밖의 `../production.env`에 DB·Redis 연결 설정과 두 secret을 두세요.
 
 ```bash
 docker build -t peakpass:latest .
-docker run --rm --env-file ../production.env --env NODE_ENV=production peakpass:latest node dist/infra/migrations/runner.js up
-docker run --rm --env-file ../production.env --env NODE_ENV=production -p 3000:3000 peakpass:latest
+docker run --rm --env-file ../production.env peakpass:latest node dist/infra/migrations/runner.js up
+docker run --rm --env-file ../production.env -p 3000:3000 peakpass:latest
 ```
 
-SQL 파일은 컴파일된 실행기 옆에 포함됩니다. 이미 적용한 마이그레이션은
-재실행 시 건너뜁니다. `down`은 아직 구현되지 않았으므로 롤백 명령으로
-사용하지 마세요. 개발 소스의 `npm run migrate:up`은 기존대로 사용합니다.
-
-CI는 전용 빈 DB에서 운영 이미지의 001–013 적용, 재실행 이력 불변,
-`/ready`, 서명된 인증 요청을 확인합니다. 같은 검증은 DB/Redis 환경 변수를
-설정한 뒤 실행할 수 있습니다. 이 명령은 기존 테이블을 삭제하지 않으며
-이미 마이그레이션을 적용한 DB를 거부합니다.
+이미 적용한 마이그레이션은 건너뜁니다. `down`은 구현돼 있지 않습니다. CI는 빈 DB에서 운영 이미지의 001–013 적용, 재실행 시 이력 불변, `/ready`, 서명된 요청을 확인합니다. 같은 검사를 DB·Redis 환경 변수를 준 뒤 직접 돌릴 수 있습니다(이미 마이그레이션한 DB는 거부합니다).
 
 ```bash
 node .github/scripts/production-image-check.mjs peakpass:latest
 ```
 
-호스트의 DB/Redis에 연결하는 Docker Desktop 환경에서는
-`IMAGE_DB_HOST=host.docker.internal`, `IMAGE_REDIS_HOST=host.docker.internal`을
-설정합니다. Linux에서 호스트 네트워크를 사용하면 `IMAGE_NETWORK=host`를
-설정합니다.
+Docker Desktop에서 호스트의 DB·Redis에 붙일 때는 `IMAGE_DB_HOST=host.docker.internal`, `IMAGE_REDIS_HOST=host.docker.internal`을, Linux에서 호스트 네트워크를 쓸 때는 `IMAGE_NETWORK=host`를 줍니다.
 
-## 🎬 데모 시나리오
+## 데모 시나리오
 
-아래 명령들은 로컬(`http://localhost:3000`)을 기준으로 작성되어 있습니다. 로컬 Compose는 데모 편의를 위해 `ENFORCE_AUTH_USER_MATCH=false`로 띄우므로 2)·3)의 예약·checkout은 JWT 없이 동작하고, `WEBHOOK_SIGNING_SECRET`을 두지 않아 4)·5)의 settlement webhook은 서명 검증을 건너뜁니다. 6)의 `myOrders`·`myTickets`는 로컬에서도 JWT가 필요합니다. production 설정의 서버에서는 1)의 조회만 주소를 바꿔 그대로 쓸 수 있고, 예약·checkout과 6)의 조회에는 JWT가, settlement webhook에는 HMAC 서명이 필요합니다.
+로컬 Compose는 데모 편의를 위해 `ENFORCE_AUTH_USER_MATCH=false`로 뜨므로 2)·3)은 JWT 없이 동작하고, `WEBHOOK_SIGNING_SECRET`을 두지 않아 4)·5)는 서명 검증을 건너뜁니다. 6)은 로컬에서도 JWT가 필요합니다. production 설정에서는 예약·checkout에 JWT가, 정산 webhook에 HMAC 서명이 필요합니다.
 
 ### 1) 이벤트 목록 조회
 
@@ -264,7 +147,7 @@ node .github/scripts/production-image-check.mjs peakpass:latest
 curl http://localhost:3000/events
 ```
 
-### 2) 예약 Hold 생성
+### 2) 예약 hold 생성
 
 ```bash
 curl -X POST http://localhost:3000/reservations \
@@ -272,7 +155,7 @@ curl -X POST http://localhost:3000/reservations \
   -d '{"eventId":"EVENT_ID","userId":"USER_ID","quantity":1,"tierId":"TIER_ID"}'
 ```
 
-### 3) 체크아웃
+### 3) checkout
 
 ```bash
 curl -X POST http://localhost:3000/checkouts \
@@ -281,9 +164,9 @@ curl -X POST http://localhost:3000/checkouts \
   -d '{"eventId":"EVENT_ID","userId":"USER_ID","quantity":1,"tierId":"TIER_ID","reservationId":"RESERVATION_ID"}'
 ```
 
-이 시점 기대 상태: `order.status = pending`, `tickets = []`
+이 시점의 상태: `order.status = pending`, `tickets = []`
 
-### 4) Settlement Webhook (티켓 발급)
+### 4) 정산 webhook (티켓 발급)
 
 ```bash
 curl -X POST http://localhost:3000/webhooks/payments/settlement \
@@ -292,13 +175,13 @@ curl -X POST http://localhost:3000/webhooks/payments/settlement \
   -d '{"orderId":"ORDER_ID","providerTransactionId":"txn-settle-001","status":"settled"}'
 ```
 
-이 시점 기대 상태: `order.status = paid`, 티켓 발급됨 (예: `PASS-2026-000002`)
+이 시점의 상태: `order.status = paid`, 티켓 발급됨
 
-### 5) 같은 Settlement Webhook 재시도 (중복 방어 확인)
+### 5) 같은 정산 webhook 다시 보내기
 
-같은 `Idempotency-Key`로 한 번 더 호출하면 캐시된 기존 응답이 그대로 재생됩니다(따라서 `duplicate` 값도 첫 응답과 동일합니다). 새 `Idempotency-Key`에 같은 `providerTransactionId`로 재시도하면 `duplicate: true`로 응답합니다. 어느 쪽이든 **티켓 수는 늘어나지 않습니다.**
+같은 `Idempotency-Key`로 다시 보내면 저장된 응답이 그대로 돌아옵니다(`duplicate` 값도 첫 응답과 같습니다). 새 `Idempotency-Key`에 같은 `providerTransactionId`로 보내면 `duplicate: true`로 답합니다. 어느 쪽이든 티켓은 늘지 않습니다.
 
-### 6) GraphQL로 본인 주문 / 티켓 조회
+### 6) GraphQL로 내 주문과 티켓 조회
 
 ```bash
 curl -X POST http://localhost:3000/graphql \
@@ -307,115 +190,122 @@ curl -X POST http://localhost:3000/graphql \
   -d '{"query":"query { myOrders(limit: 10) { id status paymentStatus totalAmount } myTickets(limit: 10) { id ticketNumber status } }"}'
 ```
 
-## 🧪 테스트
+### 브라우저 데모 세션
 
-### 단위 / 통합 / 동시성 테스트
+`frontend/`의 데모 페이지는 `POST /demo/session`으로 고정된 seed 사용자 한 명의 짧은 JWT를 받을 수 있습니다. 기본으로 꺼져 있고 `ENABLE_DEMO_SESSION=true`로 명시해야 켜집니다. 사용자는 항상 `DEMO_USER_EMAIL`이며 요청이 사용자·이메일·role을 고를 수 없습니다. 이 JWT는 브라우저 메모리에만 두며 실제 로그인이나 접근 제어를 대신하지 않습니다.
 
-```bash
-npm test -- --runInBand
-npm run test:redis
-npm run test:concurrency
-```
+켜져 있으면 `POST /demo/settlement`가 이 JWT와 데모 사용자 소유의 주문 ID를 받아, webhook 서명 secret을 브라우저에 주지 않고 같은 정산 서비스를 실행합니다. 실제 `/webhooks/payments/settlement`는 그대로 HMAC 서명을 요구합니다.
 
-### 부하 테스트 (k6)
+## 테스트
 
-먼저 k6를 설치해 두어야 합니다. (Windows 예시)
+단위 테스트는 DB와 Redis 없이 돕니다.
 
 ```bash
-winget install k6.k6
-k6 version
+npm test
 ```
 
-실행 전 앱과 의존성이 떠 있어야 합니다.
+통합 테스트는 실제 PostgreSQL 16과 Redis 7이 필요합니다. **연결된 DB의 데이터를 지우므로** 개발용 Compose의 DB(5433)에 붙이지 말고 테스트 전용 인스턴스를 띄우세요. 입장 제어 테스트는 persistence를 끄고 `noeviction`으로 둔 Redis를 요구합니다.
+
+```bash
+docker run -d --name peakpass-test-pg -p 127.0.0.1:55432:5432 \
+  -e POSTGRES_USER=peakpass -e POSTGRES_PASSWORD=peakpass -e POSTGRES_DB=peakpass postgres:16-alpine
+docker run -d --name peakpass-test-redis -p 127.0.0.1:56379:6379 \
+  redis:7-alpine redis-server --save "" --appendonly no --maxmemory-policy noeviction
+
+export DB_HOST=127.0.0.1 DB_PORT=55432 DB_USER=peakpass DB_PASSWORD=peakpass DB_NAME=peakpass
+export REDIS_HOST=127.0.0.1 REDIS_PORT=56379
+npm run migrate:up
+npx jest --runInBand --config jest.integration.cjs
+```
+
+- `npm run test:concurrency`, `test:webhook`, `test:routes` 등은 위 전체 실행의 부분집합입니다.
+- `npm run test:flash-sale`은 부하 하네스의 계약 검사이고 Docker 없이 돕니다.
+- 실제 Redis·PostgreSQL·프로세스 장애를 일으키는 스위트와 직렬화 실패 재현 테스트는 환경 변수로 켜는 opt-in이며 CI에서 돌지 않습니다(`ADMISSION_FAULT_IMAGE`, `ADMISSION_SERIALIZATION_REPRO`, `WAVE3_REDIS_DESTRUCTIVE`, `WAVE4_TEST_IMAGE`).
+
+## 부하 테스트
+
+두 종류가 있습니다.
+
+**flash-sale 하네스.** 서로 다른 구매자가 한 이벤트에 몰리는 쓰기 부하입니다. 실행마다 전용 PostgreSQL·Redis·앱을 띄우고, 대기열 없음 / 대기열 + fixed polling / 대기열 + adaptive polling을 같은 조건에서 비교합니다. "결과"의 표가 이 하네스의 측정입니다. 실행 방법은 [load-test/README.md](load-test/README.md)에 있습니다.
+
+**시나리오별 micro-benchmark** (2026-06). 한 사용자가 한 이벤트를 반복해 두드리는 부하라 같은 행의 잠금 경합과 rate limit 동작을 보는 용도이고, 실서비스의 처리량으로 일반화하지 않습니다.
+
+| 시나리오 | 대상 | 보는 것 |
+| --- | --- | --- |
+| `baseline` | `/health`, GraphQL `events`, `event` | 일반 조회의 기준선 |
+| `spike` | GraphQL `event` | 한 이벤트 상세에 조회가 몰릴 때의 tail latency |
+| `sustained` | `POST /reservations` | 예약 부하와 429 비율 |
+| `callbacks` | `POST /webhooks/payments/settlement` | 반복되는 정산 webhook의 응답과 지연. 티켓 수는 이 스크립트가 아니라 통합 테스트가 확인합니다 |
+
+k6가 필요합니다(Windows 예: `winget install k6.k6`). 앱을 띄운 뒤 실행합니다.
 
 ```bash
 docker compose up -d postgres redis
 docker compose up -d app
-curl http://localhost:3000/health
-```
 
-순수 성능/idempotency 측정처럼 rate limit을 높여야 하는 경우:
-
-```bash
+# rate limit을 높여 지연만 볼 때
 docker compose -f docker-compose.yml -f docker-compose.perf.yml up -d --force-recreate app
 docker compose exec redis redis-cli FLUSHDB
 ```
 
-`docker-compose.perf.yml`은 k6 실행 중 dev watcher가 재시작되지 않도록 `npm run build` 후 `npm run start`로 앱을 실행합니다.
-
-Rate limit 동작 자체를 측정하는 경우:
-
 ```bash
-docker compose up -d --force-recreate app
-docker compose exec redis redis-cli FLUSHDB
-```
+export BASE_URL=http://localhost:3000 LOAD_TEST_USER_ID=USER_ID LOAD_TEST_EVENT_ID=EVENT_ID LOAD_TEST_TIER_ID=TIER_ID
 
-환경 변수(PowerShell 예시):
-
-```powershell
-$env:BASE_URL="http://localhost:3000"
-$env:LOAD_TEST_USER_ID="USER_ID"
-$env:LOAD_TEST_EVENT_ID="EVENT_ID"
-$env:LOAD_TEST_TIER_ID="TIER_ID"
-```
-
-시나리오 실행:
-
-```bash
 npm run load-test:baseline
 npm run load-test:spike
 npm run load-test:sustained
 npm run load-test:callbacks
-```
-
-Rate limit 전용 시나리오:
-
-```bash
 npm run load-test:rate-limit:graphql
 npm run load-test:rate-limit:reservations
 ```
 
-JSON 리포트 저장:
+`:report`를 붙인 스크립트(`npm run load-test:baseline:report` 등)는 결과를 `load-test/results/`에 저장합니다.
 
-```bash
-npm run load-test:baseline:report
-npm run load-test:spike:report
-npm run load-test:sustained:report
-npm run load-test:callbacks:report
-npm run load-test:rate-limit:graphql:report
-npm run load-test:rate-limit:reservations:report
-```
+## 문서
 
-결과는 `load-test/results/` 아래에 저장됩니다. 처음 확인할 지표는 다음과 같습니다.
+[docs/README.md](docs/README.md)에 읽는 순서가 있습니다. 먼저 볼 문서는 다음과 같습니다.
 
-- `http_req_duration` p95, p99
-- `http_req_failed`
-- reservation 시나리오의 **429 비율**
-- callback 시나리오의 **duplicate 응답 비율**
+1. [ARCHITECTURE_DIAGRAMS.md](docs/ARCHITECTURE_DIAGRAMS.md) — 요청이 흐르는 경로
+2. [TRANSACTION_CONSISTENCY.md](docs/TRANSACTION_CONSISTENCY.md) — 초과 판매와 중복 발급을 막는 방법
+3. [ADMISSION_DESIGN_AND_OPERATIONS.md](docs/ADMISSION_DESIGN_AND_OPERATIONS.md) — 입장 제어의 설계 선택, 대가, 한계
+4. [PERFORMANCE_REPORT.md](docs/PERFORMANCE_REPORT.md) — 측정 조건, 결과, 해석
+5. [RESUME_EVIDENCE.md](docs/RESUME_EVIDENCE.md) — 이력서 문장의 근거
 
-> callback 시나리오는 duplicate 응답이 나와도 괜찮지만, **티켓 수가 늘어나면 절대 안 됩니다.**
+## 코드 읽는 순서
 
-## 📚 문서
+구매 경로:
 
-핵심 문서는 `docs/` 안에 있습니다. 처음 본다면 이 순서를 추천합니다.
+1. `src/main.ts` — 시작과 종료 순서
+2. `src/api/app.ts` — Fastify 앱과 전역 미들웨어
+3. `src/infra/migrations/001_init_schema.sql` — 스키마
+4. `src/api/rest/checkouts.ts`, `src/core/services/checkout.service.ts` — 주문 생성
+5. `src/core/services/inventory.service.ts` — 좌석을 바꾸는 유일한 코드
+6. `src/api/rest/payments.ts`, `src/core/services/payment-webhook.service.ts` — 정산과 티켓 발급
+7. `src/core/services/reservation.service.ts` — 예약 hold
+8. `src/infra/postgres/client.ts` — transaction과 직렬화 재시도
 
-1. `docs/ARCHITECTURE_DIAGRAMS.md` — 전체 흐름 파악
-2. `docs/TRANSACTION_CONSISTENCY.md` — oversell·중복 발급 방어 로직
-3. `docs/REDIS_STRATEGY.md` — Redis 사용 의도와 한계
-4. `docs/GRAPHQL_RATIONALE.md` — write / read 분리 이유
-5. `docs/ADMISSION_DESIGN_AND_OPERATIONS.md` — 입장 제어의 설계 선택, 설정, 장애 때의 동작, 재현 절차
-6. `docs/PERFORMANCE_REPORT.md` — 측정 조건, 결과, 한계
+입장 제어:
 
-## 🗺️ 코드 읽는 순서 (추천)
+1. `docs/ADMISSION_CONTRACT.md` — 규칙의 원문
+2. `src/infra/redis/admission.ts` — 대기열 전이를 담은 Lua
+3. `src/core/services/admission.service.ts`, `src/api/rest/admissions.ts` — 대기열 API
+4. `src/core/services/admission-consumption.ts`, migration 012·013 — 입장을 구매에 묶는 원장
+5. `src/infra/cron/admission-scheduler.ts` — 승격 scheduler
+6. `frontend/admission-polling.js` — 대기 화면의 polling controller
 
-1. `src/main.ts` — 진입점
-2. `src/api/app.ts` — Fastify 앱 조립
-3. `src/infra/migrations/001_init_schema.sql` — 도메인 스키마
-4. `src/api/rest/checkouts.ts` — 체크아웃 라우트
-5. `src/api/rest/payments.ts` — settlement webhook
-6. `src/core/services/checkout.service.ts` — 체크아웃 로직
-7. `src/core/services/reservation.service.ts` — 예약 hold 로직
-8. `src/infra/redis/commands.ts` — Redis 명령
-9. `src/api/graphql/types.ts` — GraphQL 스키마
-10. `src/api/graphql/resolvers.ts` — 리졸버
-11. `src/api/graphql/loaders.ts` — DataLoader
+조회: `src/api/graphql/types.ts`, `resolvers.ts`, `loaders.ts`
+
+## 작업 방식
+
+이 저장소는 두 시기에 걸쳐 만들었습니다. 예약·결제·조회 부분(2026-04 – 2026-09)과 입장 제어(2026-09-30 – 2026-10-11)입니다.
+
+입장 제어는 AI 코딩 도구와 함께 만들었습니다. 부하 하네스, 기준선 측정, 계약, 대기열 backend까지는 Codex로, 구매 경로 연결부터 장애 검증, 부하 비교, 문서까지는 Claude Code로 작업했습니다. 이 구간에 더해진 줄은 제품 코드 3,311줄(`src` 1,913, `frontend` 1,398)과 테스트 10,464줄입니다(`git diff --numstat 79a0b5e..94da148 -- src frontend`). 다른 사람의 코드 리뷰는 받지 않았고, 검토는 본인과 도구의 자동 리뷰로 했습니다.
+
+단계마다 설계 설명을 받고 승인한 뒤 구현하게 했고, 병합은 직접 했습니다. 저장소 기록에 날짜와 함께 남아 있는 결정은 다음과 같습니다.
+
+- 구현 전에 대기열 없는 경로부터 측정한다(쓰기 기준선, 2026-10-01).
+- 재고 권한은 Redis로 옮기지 않고 메시지 큐도 두지 않는다. 앞단에서 유입만 줄인다.
+- 입장량 후보는 실패율과 지연 기준을 미리 정해 두고 pilot으로 거른다. 기준을 못 맞춘 후보는 버린다.
+- 구매 경로의 격리 수준은 바꾸지 않는다(2026-10-10, #27).
+- 분 단위 대기는 그대로 받아들이고 다시 측정하지 않는다(2026-10-10, #34).
+- 고치지 않는 한계는 숨기지 않고 문서에 적는다(설계 문서의 "알려진 한계").

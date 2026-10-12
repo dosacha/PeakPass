@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { uuid } from './uuid';
 
 export const OrderStatus = z.enum(['pending', 'paid', 'delivered', 'cancelled', 'expired']);
 export type OrderStatus = z.infer<typeof OrderStatus>;
@@ -28,13 +29,15 @@ export interface Order {
   paidAt?: Date;
 }
 
+// UUID 필드는 소문자로 맞춘다. 보낸 그대로 두면 대문자로 보낸 요청의 재전송이, DB가 돌려준
+// 소문자 값과의 문자열 비교에서 "다른 요청"으로 판정된다.
 export const CreateOrderSchema = z.object({
-  eventId: z.string().uuid(),
-  userId: z.string().uuid(),
+  eventId: uuid,
+  userId: uuid,
   quantity: z.number().int().positive().max(100),
   tierId: z.string(),
-  idempotencyKey: z.string().uuid(),
-  reservationId: z.string().uuid().optional(),
+  idempotencyKey: uuid,
+  reservationId: uuid.optional(),
 });
 
 export type CreateOrderInput = z.infer<typeof CreateOrderSchema>;

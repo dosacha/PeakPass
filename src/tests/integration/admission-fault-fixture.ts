@@ -18,7 +18,7 @@ import {
 import { ledgerMismatches } from '../helpers/admission-ledger';
 
 /**
- * Real failures at the integration boundary (admission-v1 §8, P7).
+ * Real failures at the integration boundary (admission-v1 §8).
  *
  * The product runs as containers of the production image named by ADMISSION_FAULT_IMAGE, next to
  * a PostgreSQL and a Redis that this fixture creates and removes. Faults are real: `docker pause`,
@@ -195,8 +195,11 @@ interface TopologyOptions {
 
 /** Removes the containers and the network of one run, found by its own run label. */
 async function removeRun(prefix: string) {
-  const docker = (...args: string[]) => run('docker', args, { encoding: 'utf8', windowsHide: true });
-  const found = await docker('ps', '-aq', '--filter', `label=peakpass.fault-run=${prefix}`).catch(() => null);
+  const docker = (...args: string[]) =>
+    run('docker', args, { encoding: 'utf8', windowsHide: true });
+  const found = await docker('ps', '-aq', '--filter', `label=peakpass.fault-run=${prefix}`).catch(
+    () => null,
+  );
   for (const id of found?.stdout.split(/\s+/).filter(Boolean) ?? [])
     await docker('rm', '-f', '-v', id).catch(() => undefined);
   await docker('network', 'rm', prefix).catch(() => undefined);
@@ -219,7 +222,6 @@ async function build(image: string, prefix: string, options: TopologyOptions) {
   const secrets = {
     DB_PASSWORD: randomBytes(18).toString('base64url'),
     JWT_SECRET: randomBytes(36).toString('base64url'),
-    API_KEY: randomBytes(24).toString('base64url'),
     WEBHOOK_SIGNING_SECRET: randomBytes(24).toString('base64url'),
   };
   const appEnv: Record<string, string> = {
@@ -264,21 +266,64 @@ async function build(image: string, prefix: string, options: TopologyOptions) {
 
   await docker('network', 'create', ...labels, prefix);
   const pgPort = await freePort();
-  const pgId = await docker('run', '-d', '--name', `${prefix}-pg`, '--network', prefix,
-    '--network-alias', 'pg', ...labels, '-e', 'POSTGRES_USER=peakpass', '-e', 'POSTGRES_PASSWORD',
-    '-e', 'POSTGRES_DB=peakpass', '-p', `127.0.0.1:${pgPort}:5432`, 'postgres:16-alpine',
-    '-c', 'track_commit_timestamp=on');
+  const pgId = await docker(
+    'run',
+    '-d',
+    '--name',
+    `${prefix}-pg`,
+    '--network',
+    prefix,
+    '--network-alias',
+    'pg',
+    ...labels,
+    '-e',
+    'POSTGRES_USER=peakpass',
+    '-e',
+    'POSTGRES_PASSWORD',
+    '-e',
+    'POSTGRES_DB=peakpass',
+    '-p',
+    `127.0.0.1:${pgPort}:5432`,
+    'postgres:16-alpine',
+    '-c',
+    'track_commit_timestamp=on',
+  );
   names.set(pgId, 'pg');
   const redisPort = await freePort();
-  const redisId = await docker('run', '-d', '--name', `${prefix}-redis`, '--network', prefix,
-    '--network-alias', 'redis', ...labels, '-p', `127.0.0.1:${redisPort}:6379`, 'redis:7-alpine',
-    'redis-server', '--save', '', '--appendonly', 'no', '--maxmemory', '256mb',
-    '--maxmemory-policy', 'noeviction');
+  const redisId = await docker(
+    'run',
+    '-d',
+    '--name',
+    `${prefix}-redis`,
+    '--network',
+    prefix,
+    '--network-alias',
+    'redis',
+    ...labels,
+    '-p',
+    `127.0.0.1:${redisPort}:6379`,
+    'redis:7-alpine',
+    'redis-server',
+    '--save',
+    '',
+    '--appendonly',
+    'no',
+    '--maxmemory',
+    '256mb',
+    '--maxmemory-policy',
+    'noeviction',
+  );
   names.set(redisId, 'redis');
 
   const newPool = () => {
-    const made = new Pool({ host: '127.0.0.1', port: pgPort, user: 'peakpass',
-      password: secrets.DB_PASSWORD, database: 'peakpass', max: 20 });
+    const made = new Pool({
+      host: '127.0.0.1',
+      port: pgPort,
+      user: 'peakpass',
+      password: secrets.DB_PASSWORD,
+      database: 'peakpass',
+      max: 20,
+    });
     made.on('error', () => undefined);
     made.on('connect', (client) => client.on('error', () => undefined));
     return made;
@@ -286,19 +331,26 @@ async function build(image: string, prefix: string, options: TopologyOptions) {
   let pool = newPool();
   // The image's first boot restarts the server once; three answers in a row mean it is up for good.
   let answers = 0;
-  await until(async () => {
-    try {
-      await pool.query('SELECT 1');
-      return ++answers >= 3;
-    } catch {
-      answers = 0;
-      return false;
-    }
-  }, 60000, 'PostgreSQL', 300);
+  await until(
+    async () => {
+      try {
+        await pool.query('SELECT 1');
+        return ++answers >= 3;
+      } catch {
+        answers = 0;
+        return false;
+      }
+    },
+    60000,
+    'PostgreSQL',
+    300,
+  );
   const monitor = new Monitor(redisPort);
   await monitor.attach();
   const newRedis = async () => {
-    const client = createClient({ socket: { host: '127.0.0.1', port: redisPort, reconnectStrategy: false } });
+    const client = createClient({
+      socket: { host: '127.0.0.1', port: redisPort, reconnectStrategy: false },
+    });
     client.on('error', () => undefined);
     await client.connect();
     return client;
@@ -310,27 +362,59 @@ async function build(image: string, prefix: string, options: TopologyOptions) {
       name in extra ? ['--env', `${name}=${value}`] : ['--env', name],
     );
   note('migrations', {
-    out: (await docker('run', '--rm', '--network', prefix, ...labels, ...containerEnv({}), image,
-      'node', 'dist/infra/migrations/runner.js', 'up')).split('\n').slice(-2).join(' '),
+    out: (
+      await docker(
+        'run',
+        '--rm',
+        '--network',
+        prefix,
+        ...labels,
+        ...containerEnv({}),
+        image,
+        'node',
+        'dist/infra/migrations/runner.js',
+        'up',
+      )
+    )
+      .split('\n')
+      .slice(-2)
+      .join(' '),
   });
 
   const apps: AppBox[] = [];
   const ready = async (app: AppBox, timeoutMs = 60000) =>
-    until(async () => {
-      try {
-        const response = await fetch(`${app.url}/ready`, { signal: AbortSignal.timeout(2000) });
-        await response.arrayBuffer();
-        return response.status === 200;
-      } catch {
-        return false;
-      }
-    }, timeoutMs, `${app.name} to be ready`, 250);
-  for (const [index, spec] of (options.apps ?? [{ admission: true }, { admission: true }]).entries()) {
+    until(
+      async () => {
+        try {
+          const response = await fetch(`${app.url}/ready`, { signal: AbortSignal.timeout(2000) });
+          await response.arrayBuffer();
+          return response.status === 200;
+        } catch {
+          return false;
+        }
+      },
+      timeoutMs,
+      `${app.name} to be ready`,
+      250,
+    );
+  for (const [index, spec] of (
+    options.apps ?? [{ admission: true }, { admission: true }]
+  ).entries()) {
     const port = await freePort();
     const name = `${prefix}-app${index + 1}`;
-    const id = await docker('run', '-d', '--name', name, '--network', prefix, ...labels,
-      '-p', `127.0.0.1:${port}:3000`,
-      ...containerEnv({ ENABLE_ADMISSION: String(spec.admission), ...spec.env }), image);
+    const id = await docker(
+      'run',
+      '-d',
+      '--name',
+      name,
+      '--network',
+      prefix,
+      ...labels,
+      '-p',
+      `127.0.0.1:${port}:3000`,
+      ...containerEnv({ ENABLE_ADMISSION: String(spec.admission), ...spec.env }),
+      image,
+    );
     names.set(id, `app${index + 1}`);
     apps.push({ index, id, name, url: `http://127.0.0.1:${port}`, admission: spec.admission });
   }
@@ -357,8 +441,17 @@ async function build(image: string, prefix: string, options: TopologyOptions) {
     let body: Json | null = null;
     if (request.closing) {
       const answer = await closingRequest(app, method, path, request);
-      requests.push({ at: Date.now() - started, user: request.user ?? null, app: answer.app, method,
-        path, status: answer.status, code: answer.code, ms: answer.ms, closing: true });
+      requests.push({
+        at: Date.now() - started,
+        user: request.user ?? null,
+        app: answer.app,
+        method,
+        path,
+        status: answer.status,
+        code: answer.code,
+        ms: answer.ms,
+        closing: true,
+      });
       return answer;
     }
     try {
@@ -390,8 +483,16 @@ async function build(image: string, prefix: string, options: TopologyOptions) {
       app: app.index + 1,
       ms: Math.round(performance.now() - began),
     };
-    requests.push({ at: Date.now() - started, user: request.user ?? null, app: answer.app, method,
-      path, status, code: answer.code, ms: answer.ms });
+    requests.push({
+      at: Date.now() - started,
+      user: request.user ?? null,
+      app: answer.app,
+      method,
+      path,
+      status,
+      code: answer.code,
+      ms: answer.ms,
+    });
     return answer;
   }
 
@@ -411,7 +512,13 @@ async function build(image: string, prefix: string, options: TopologyOptions) {
         } catch {
           body = { raw: text.slice(0, 200) };
         }
-        resolve({ status, code: body?.error?.code ?? null, body, app: app.index + 1, ms: Math.round(performance.now() - began) });
+        resolve({
+          status,
+          code: body?.error?.code ?? null,
+          body,
+          app: app.index + 1,
+          ms: Math.round(performance.now() - began),
+        });
       };
       const outgoing = httpRequest(
         app.url + path,
@@ -458,7 +565,9 @@ async function build(image: string, prefix: string, options: TopologyOptions) {
         answer.status > 500 ||
         (answer.status === 409 && answer.code === 'ADMISSION_IN_PROGRESS');
       if (!unknown || Date.now() >= end) return { final: answer, attempts };
-      await sleep(Math.max(Number(answer.body?.nextPollAfterMs) || 0, Math.min(250 * 2 ** attempt, 2000)));
+      await sleep(
+        Math.max(Number(answer.body?.nextPollAfterMs) || 0, Math.min(250 * 2 ** attempt, 2000)),
+      );
     }
   }
 
@@ -467,40 +576,64 @@ async function build(image: string, prefix: string, options: TopologyOptions) {
     const userId = randomUUID();
     await pool.query('INSERT INTO users(id,email) VALUES($1,$2)', [userId, `${userId}@p7.test`]);
     const token = jwt.sign({ sub: userId }, secrets.JWT_SECRET, { expiresIn: '1h' });
-    const call = (app: AppBox, method: string, path: string, body?: unknown, key?: string, timeoutMs?: number) =>
-      http(app, method, path, { token, body, key, timeoutMs, user: userId });
+    const call = (
+      app: AppBox,
+      method: string,
+      path: string,
+      body?: unknown,
+      key?: string,
+      timeoutMs?: number,
+    ) => http(app, method, path, { token, body, key, timeoutMs, user: userId });
     const self = {
       userId,
       token,
       call,
-      status: (eventId: string, app = enabled()[0]) => call(app, 'GET', `/events/${eventId}/admissions/me`),
-      join: (eventId: string, epoch: string, joinRequestId: string = randomUUID(), app = enabled()[0]) =>
-        call(app, 'POST', `/events/${eventId}/admissions`, { epoch, joinRequestId }),
+      status: (eventId: string, app = enabled()[0]) =>
+        call(app, 'GET', `/events/${eventId}/admissions/me`),
+      join: (
+        eventId: string,
+        epoch: string,
+        joinRequestId: string = randomUUID(),
+        app = enabled()[0],
+      ) => call(app, 'POST', `/events/${eventId}/admissions`, { epoch, joinRequestId }),
       cancel: (eventId: string, admission: AdmissionRef, app = enabled()[0]) =>
         call(app, 'DELETE', `/events/${eventId}/admissions/${admission.admissionId}`, {
           epoch: admission.admissionEpoch,
         }),
       /** Joins and returns the entry while it is still waiting. */
       async queue(eventId: string, app = enabled()[0], joinRequestId: string = randomUUID()) {
-        const first = await until(async () => {
-          const answer = await self.status(eventId, app);
-          return answer.status === 200 && answer;
-        }, 30000, 'the queue to answer', 500);
+        const first = await until(
+          async () => {
+            const answer = await self.status(eventId, app);
+            return answer.status === 200 && answer;
+          },
+          30000,
+          'the queue to answer',
+          500,
+        );
         const admissionEpoch: string = first.body!.queue.epoch;
-        const joined = await decided(() => self.join(eventId, admissionEpoch, joinRequestId, app), 30000);
+        const joined = await decided(
+          () => self.join(eventId, admissionEpoch, joinRequestId, app),
+          30000,
+        );
         if (joined.final.status !== 201 && joined.final.status !== 200)
           throw new Error(`join answered ${joined.final.status} ${joined.final.code}`);
         return { admissionId: joined.final.body!.admission.admissionId as string, admissionEpoch };
       },
       /** Polls once a second until the entry is admitted. */
       async admitted(eventId: string, timeoutMs = 60000, app = enabled()[0]) {
-        await until(async () => {
-          const answer = await self.status(eventId, app);
-          const state = answer.body?.admission?.state;
-          if (answer.status === 200 && state && state !== 'waiting' && state !== 'admitted')
-            throw new Error(`entry ended as ${state} before admission`);
-          return answer.status === 200 && state === 'admitted';
-        }, timeoutMs, 'admission', 1000);
+        await until(
+          async () => {
+            const answer = await self.status(eventId, app);
+            const state = answer.body?.admission?.state;
+            if (answer.status === 200 && state && state !== 'waiting' && state !== 'admitted')
+              throw new Error(`entry ended as ${state} before admission`);
+            return answer.status === 200 && state === 'admitted';
+          },
+          timeoutMs,
+          'admission',
+          1000,
+        );
       },
       async enter(eventId: string, timeoutMs = 60000, app = enabled()[0]): Promise<AdmissionRef> {
         const admission = await self.queue(eventId, app);
@@ -523,12 +656,20 @@ async function build(image: string, prefix: string, options: TopologyOptions) {
         deadlineMs?: number,
       ) => {
         const body = self.reservationBody(eventId, admission, quantity);
-        return decided((n) => call(targets[n % targets.length], 'POST', '/reservations', body), deadlineMs);
+        return decided(
+          (n) => call(targets[n % targets.length], 'POST', '/reservations', body),
+          deadlineMs,
+        );
       },
       /** A checkout: with `reservationId` an existing reservation, otherwise a direct purchase. */
       checkout: (
         eventId: string,
-        input: { admission?: AdmissionRef | null; reservationId?: string; quantity?: number; key?: string },
+        input: {
+          admission?: AdmissionRef | null;
+          reservationId?: string;
+          quantity?: number;
+          key?: string;
+        },
         targets = enabled(),
         deadlineMs?: number,
       ) => {
@@ -541,7 +682,10 @@ async function build(image: string, prefix: string, options: TopologyOptions) {
           ...(input.reservationId ? { reservationId: input.reservationId } : {}),
           ...(input.admission ?? {}),
         };
-        return decided((n) => call(targets[n % targets.length], 'POST', '/checkouts', body, key), deadlineMs);
+        return decided(
+          (n) => call(targets[n % targets.length], 'POST', '/checkouts', body, key),
+          deadlineMs,
+        );
       },
     };
     return self;
@@ -587,11 +731,15 @@ async function build(image: string, prefix: string, options: TopologyOptions) {
     try {
       await client.query('BEGIN');
       await readAdmissionPolicy(client, eventId, 'exclusive');
-      await client.query('UPDATE admission_events SET protected=$2 WHERE event_id=$1', [eventId, value]);
+      await client.query('UPDATE admission_events SET protected=$2 WHERE event_id=$1', [
+        eventId,
+        value,
+      ]);
       const xid = (await client.query('SELECT pg_current_xact_id()::text AS xid')).rows[0].xid;
       if (holdMs) await sleep(holdMs);
       await client.query('COMMIT');
-      return (await client.query('SELECT pg_xact_commit_timestamp($1::xid) AS at', [xid])).rows[0].at;
+      return (await client.query('SELECT pg_xact_commit_timestamp($1::xid) AS at', [xid])).rows[0]
+        .at;
     } catch (error) {
       await client.query('ROLLBACK').catch(() => undefined);
       throw error;
@@ -609,7 +757,11 @@ async function build(image: string, prefix: string, options: TopologyOptions) {
     );
     if (isProtected) {
       await protect(eventId, true);
-      await until(async () => (await control(eventId))?.mode === 'ready', 30000, 'the namespace to be published');
+      await until(
+        async () => (await control(eventId))?.mode === 'ready',
+        30000,
+        'the namespace to be published',
+      );
     }
     return eventId;
   }
@@ -632,7 +784,13 @@ async function build(image: string, prefix: string, options: TopologyOptions) {
         const client: PoolClient | null = await connected.catch(() => null);
         if (!client || released) return;
         released = true;
-        const settled = await Promise.race([granted.then(() => true, () => true), sleep(0).then(() => false)]);
+        const settled = await Promise.race([
+          granted.then(
+            () => true,
+            () => true,
+          ),
+          sleep(0).then(() => false),
+        ]);
         if (settled) await client.query('ROLLBACK').catch(() => undefined);
         // A holder that still waits for the gate is ended together with its connection.
         client.release(!settled);
@@ -644,7 +802,11 @@ async function build(image: string, prefix: string, options: TopologyOptions) {
    * Returns the removal. The timers that fire because of it are PostgreSQL's own.
    */
   let triggers = 0;
-  async function slow(table: 'reservations' | 'orders' | 'admission_results', userId: string, seconds: number) {
+  async function slow(
+    table: 'reservations' | 'orders' | 'admission_results',
+    userId: string,
+    seconds: number,
+  ) {
     const name = `p7_slow_${++triggers}`;
     await pool.query(`CREATE OR REPLACE FUNCTION p7_sleep() RETURNS trigger LANGUAGE plpgsql AS
       $$ BEGIN PERFORM pg_sleep(TG_ARGV[0]::float8); RETURN NEW; END $$`);
@@ -677,7 +839,12 @@ async function build(image: string, prefix: string, options: TopologyOptions) {
   /** Backends whose current statement matches, as PostgreSQL reports them. */
   const backends = async (queryLike: string) =>
     (
-      await pool.query<{ pid: number; state: string; wait_event: string | null; client_addr: string | null }>(
+      await pool.query<{
+        pid: number;
+        state: string;
+        wait_event: string | null;
+        client_addr: string | null;
+      }>(
         `SELECT pid, state, wait_event, client_addr::text FROM pg_stat_activity
         WHERE pid <> pg_backend_pid() AND query ILIKE $1`,
         [queryLike],
@@ -685,14 +852,18 @@ async function build(image: string, prefix: string, options: TopologyOptions) {
     ).rows;
   /** The state of one session, or null once PostgreSQL has ended it. */
   const session = async (pid: number) =>
-    (await pool.query<{ state: string }>('SELECT state FROM pg_stat_activity WHERE pid = $1', [pid])).rows[0]?.state ?? null;
+    (
+      await pool.query<{ state: string }>('SELECT state FROM pg_stat_activity WHERE pid = $1', [
+        pid,
+      ])
+    ).rows[0]?.state ?? null;
 
   /** The final SQL of contract §8: violating rows only. */
   async function violations(ignore: string[] = []) {
     const sql = readFileSync(join(__dirname, 'admission-final.sql'), 'utf8');
-    return (await pool.query<{ check_name: string; event_id: string; detail: string }>(sql)).rows.filter(
-      (row) => !ignore.includes(row.check_name),
-    );
+    return (
+      await pool.query<{ check_name: string; event_id: string; detail: string }>(sql)
+    ).rows.filter((row) => !ignore.includes(row.check_name));
   }
   /**
    * The transition log replayed. `incomplete` is non-empty when the capture missed something:
@@ -707,11 +878,16 @@ async function build(image: string, prefix: string, options: TopologyOptions) {
         if (!(await redis.exists(keys + name))) continue;
         const real = (await redis.zRange(keys + name, 0, -1)).filter((m) => m !== '__').sort();
         if (JSON.stringify(real) !== JSON.stringify([...replayed[name]].sort()))
-          incomplete.push(`${name} of ${id}: Redis holds ${real.length}, the log ${replayed[name].length}`);
+          incomplete.push(
+            `${name} of ${id}: Redis holds ${real.length}, the log ${replayed[name].length}`,
+          );
       }
     }
     // A namespace Redis holds and the log never saw is a capture that began too late.
-    for await (const key of redis.scanIterator({ MATCH: 'peakpass:admission:*:active', COUNT: 100 })) {
+    for await (const key of redis.scanIterator({
+      MATCH: 'peakpass:admission:*:active',
+      COUNT: 100,
+    })) {
       const id = key.slice('peakpass:admission:'.length, -':active'.length);
       if (!replay.namespaces.has(id)) incomplete.push(`${id} is in Redis and not in the log`);
     }
@@ -729,7 +905,10 @@ async function build(image: string, prefix: string, options: TopologyOptions) {
   async function ledgerProblems() {
     const read = async () => {
       const problems: string[] = [];
-      for await (const key of redis.scanIterator({ MATCH: 'peakpass:admission:*:control', COUNT: 100 })) {
+      for await (const key of redis.scanIterator({
+        MATCH: 'peakpass:admission:*:control',
+        COUNT: 100,
+      })) {
         const eventId = key.slice('peakpass:admission:'.length, -':control'.length);
         const current = await control(eventId);
         if (current?.mode !== 'ready') continue;
@@ -744,7 +923,9 @@ async function build(image: string, prefix: string, options: TopologyOptions) {
         )
           .filter(([field]) => field !== '__')
           .map(([, raw]) => JSON.parse(raw));
-        problems.push(...ledgerMismatches(rows, entries).map((problem) => `${eventId}: ${problem}`));
+        problems.push(
+          ...ledgerMismatches(rows, entries).map((problem) => `${eventId}: ${problem}`),
+        );
       }
       return problems;
     };
@@ -767,7 +948,9 @@ async function build(image: string, prefix: string, options: TopologyOptions) {
     expect(log.incomplete).toEqual([]);
     expect(await ledgerProblems()).toEqual([]);
     expect(
-      log.violations.filter((violation) => violation.time >= from && !ignoreRules.includes(violation.rule)),
+      log.violations.filter(
+        (violation) => violation.time >= from && !ignoreRules.includes(violation.rule),
+      ),
     ).toEqual([]);
     return log;
   }
@@ -780,7 +963,9 @@ async function build(image: string, prefix: string, options: TopologyOptions) {
   }
   const slots = async (eventId: string) => {
     const current = await control(eventId);
-    return current ? (await redis.zCard(`peakpass:admission:${eventId}:${current.epoch}:active`)) - 1 : null;
+    return current
+      ? (await redis.zCard(`peakpass:admission:${eventId}:${current.epoch}:active`)) - 1
+      : null;
   };
   /** Waits until no admitted entry and no unresolved claim is left. */
   const quiet = (eventId: string, timeoutMs = 90000) =>
@@ -788,17 +973,29 @@ async function build(image: string, prefix: string, options: TopologyOptions) {
   /** Releases protection by the explicit transition and waits until a scheduler retired the namespace. */
   async function release(eventId: string) {
     const at = await protect(eventId, false);
-    await until(async () => (await control(eventId)) === null, 30000, 'the namespace to be retired');
+    await until(
+      async () => (await control(eventId)) === null,
+      30000,
+      'the namespace to be retired',
+    );
     return at;
   }
   /** The address PostgreSQL sees for each application container. */
   const addresses = async () =>
     new Map(
       await Promise.all(
-        apps.map(async (app) => [
-          await docker('inspect', '--format', '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}', app.id),
-          app,
-        ] as const),
+        apps.map(
+          async (app) =>
+            [
+              await docker(
+                'inspect',
+                '--format',
+                '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}',
+                app.id,
+              ),
+              app,
+            ] as const,
+        ),
       ),
     );
   /** The applications whose sessions wait for an advisory lock: a coordinator at the event gate. */
@@ -811,7 +1008,8 @@ async function build(image: string, prefix: string, options: TopologyOptions) {
     return waiting.rows.map((row) => known.get(row.addr)).filter((app): app is AppBox => !!app);
   }
   const advisoryWaiters = async () =>
-    (await pool.query(`SELECT 1 FROM pg_locks WHERE locktype = 'advisory' AND NOT granted`)).rowCount ?? 0;
+    (await pool.query(`SELECT 1 FROM pg_locks WHERE locktype = 'advisory' AND NOT granted`))
+      .rowCount ?? 0;
   /**
    * Hands the gate on: a second holder queues behind whoever waits for the exclusive gate, the
    * current holder lets go, and this returns once the second holder has it. Everything that was
@@ -823,7 +1021,12 @@ async function build(image: string, prefix: string, options: TopologyOptions) {
     try {
       await Promise.race([
         queued.granted,
-        until(async () => (await advisoryWaiters()) > waiting, 10000, 'the next gate holder to queue', 20),
+        until(
+          async () => (await advisoryWaiters()) > waiting,
+          10000,
+          'the next gate holder to queue',
+          20,
+        ),
       ]);
       await current.release();
       await queued.granted;
@@ -894,7 +1097,13 @@ async function build(image: string, prefix: string, options: TopologyOptions) {
     async start() {
       const frozen: AppBox[] = [];
       for (const app of apps)
-        if (await fault('pause', app.id).then(() => true, () => false)) frozen.push(app);
+        if (
+          await fault('pause', app.id).then(
+            () => true,
+            () => false,
+          )
+        )
+          frozen.push(app);
       try {
         const attached = monitor.attach(true);
         await fault('start', redisId);
@@ -912,13 +1121,18 @@ async function build(image: string, prefix: string, options: TopologyOptions) {
   const pgBack = async () => {
     await pool.end().catch(() => undefined);
     pool = newPool();
-    await until(async () => {
-      try {
-        return (await pool.query('SELECT 1')).rowCount === 1;
-      } catch {
-        return false;
-      }
-    }, 60000, 'PostgreSQL to answer again', 200);
+    await until(
+      async () => {
+        try {
+          return (await pool.query('SELECT 1')).rowCount === 1;
+        } catch {
+          return false;
+        }
+      },
+      60000,
+      'PostgreSQL to answer again',
+      200,
+    );
   };
   const pgFaults = {
     /** A fast shutdown: every session is ended with an administrator-command error. */
@@ -941,12 +1155,17 @@ async function build(image: string, prefix: string, options: TopologyOptions) {
     /** The exit code once the container has stopped. */
     exited: async (app: AppBox, timeoutMs = 30000) =>
       (
-        await until(async () => {
-          const [running, code] = (
-            await docker('inspect', '--format', '{{.State.Running}} {{.State.ExitCode}}', app.id)
-          ).split(' ');
-          return running === 'false' ? { code: Number(code) } : null;
-        }, timeoutMs, `${app.name} to exit`, 200)
+        await until(
+          async () => {
+            const [running, code] = (
+              await docker('inspect', '--format', '{{.State.Running}} {{.State.ExitCode}}', app.id)
+            ).split(' ');
+            return running === 'false' ? { code: Number(code) } : null;
+          },
+          timeoutMs,
+          `${app.name} to exit`,
+          200,
+        )
       ).code,
     logs: (app: AppBox) => docker('logs', app.id),
     /** When the container's process was started: unchanged as long as it has not restarted. */
@@ -1023,7 +1242,8 @@ async function build(image: string, prefix: string, options: TopologyOptions) {
     appFaults,
     ready,
     destroy,
-    pgNow: async () => (await pool.query<{ now: Date }>('SELECT clock_timestamp() AS now')).rows[0].now,
+    pgNow: async () =>
+      (await pool.query<{ now: Date }>('SELECT clock_timestamp() AS now')).rows[0].now,
   };
 }
 export type Buyer = Awaited<ReturnType<Topology['buyer']>>;

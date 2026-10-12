@@ -1,6 +1,6 @@
 import 'dotenv/config';
 import { randomUUID } from 'crypto';
-import { readFileSync, existsSync } from 'fs';
+import { readFileSync } from 'fs';
 import {
   initPostgresPool,
   closePostgresPool,
@@ -33,7 +33,6 @@ describe('admission-v1 on owned PostgreSQL and Redis', () => {
 
   it('backfills existing events, constrains policy and lazily ensures later events', async () => {
     const file = 'src/infra/migrations/012_admission_events.sql';
-    expect(existsSync(file)).toBe(true);
     const c = await pool.connect();
     await c.query('BEGIN');
     try {
@@ -47,8 +46,7 @@ describe('admission-v1 on owned PostgreSQL and Redis', () => {
           )
         ).rows,
       ).toEqual([{ protected: false, generation: '0' }]);
-      const modulePath = '@/infra/postgres/admission-policy';
-      const policy = await import(modulePath);
+      const policy = await import('@/infra/postgres/admission-policy');
       await c.query('DELETE FROM admission_events WHERE event_id=$1', [eventId]);
       expect(await policy.readAdmissionPolicy(c, eventId, 'shared')).toMatchObject({
         eventId,

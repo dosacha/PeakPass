@@ -46,12 +46,10 @@ export class InsufficientInventoryError extends AppError {
 
 export class RateLimitExceededError extends AppError {
   constructor(limit: number, window: number) {
-    super(
-      'RATE_LIMIT_EXCEEDED',
-      429,
-      `Rate limit exceeded: ${limit} requests per ${window}ms`,
-      { limit, window },
-    );
+    super('RATE_LIMIT_EXCEEDED', 429, `Rate limit exceeded: ${limit} requests per ${window}ms`, {
+      limit,
+      window,
+    });
     this.name = 'RateLimitExceededError';
   }
 }
@@ -93,11 +91,7 @@ export class InternalServerError extends AppError {
 
 export class DemoSessionConfigurationError extends AppError {
   constructor() {
-    super(
-      'DEMO_SESSION_UNAVAILABLE',
-      503,
-      'Configured demo user is unavailable',
-    );
+    super('DEMO_SESSION_UNAVAILABLE', 503, 'Configured demo user is unavailable');
     this.name = 'DemoSessionConfigurationError';
   }
 }

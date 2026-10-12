@@ -1,6 +1,5 @@
 import 'dotenv/config';
 import { randomUUID } from 'crypto';
-import { existsSync } from 'fs';
 import jwt from 'jsonwebtoken';
 import { initRedis, closeRedis } from '@/infra/redis/client';
 import {
@@ -37,9 +36,7 @@ describe('admission actual authenticated HTTP and epoch lifecycle', () => {
       VALUES($1,'p4 http',NOW(),NOW()+interval '1 day',10,10)`,
       [eventId],
     );
-    expect(existsSync('src/core/services/admission.service.ts')).toBe(true);
-    const sp = '@/core/services/admission.service';
-    service = (await import(sp)).admissionService;
+    service = (await import('@/core/services/admission.service')).admissionService;
     await pool.query(
       `INSERT INTO admission_events(event_id,protected,redis_namespace)
       VALUES($1::uuid,true,'peakpass:admission:'||$1::uuid::text||':')`,
@@ -176,7 +173,9 @@ describe('admission actual authenticated HTTP and epoch lifecycle', () => {
       return result;
     });
     try {
-      await expect(service.recover(eventId, null)).rejects.toMatchObject({ code: 'ADMISSION_RECOVERING' });
+      await expect(service.recover(eventId, null)).rejects.toMatchObject({
+        code: 'ADMISSION_RECOVERING',
+      });
       expect(probes).toBe(2);
     } finally {
       spy.mockRestore();
@@ -200,16 +199,26 @@ describe('admission actual authenticated HTTP and epoch lifecycle', () => {
       const result = await currentProcess();
       if (++reads === 2) {
         const id = await redis.clientId();
-        await redis.sendCommand(['CLIENT', 'KILL', 'ID', String(id), 'SKIPME', 'no']).catch(() => undefined);
-        for (let i = 0; i < 100 && !(redis.isReady && (await redis.clientId().catch(() => id)) !== id); i++)
+        await redis
+          .sendCommand(['CLIENT', 'KILL', 'ID', String(id), 'SKIPME', 'no'])
+          .catch(() => undefined);
+        for (
+          let i = 0;
+          i < 100 && !(redis.isReady && (await redis.clientId().catch(() => id)) !== id);
+          i++
+        )
           await new Promise((resolve) => setTimeout(resolve, 50));
       }
       return result;
     });
     try {
-      await expect(service.recover(eventId, null)).rejects.toMatchObject({ code: 'ADMISSION_RECOVERING' });
+      await expect(service.recover(eventId, null)).rejects.toMatchObject({
+        code: 'ADMISSION_RECOVERING',
+      });
       expect(reads).toBe(2);
-      const phase = await pool.query('SELECT phase FROM admission_events WHERE event_id=$1', [eventId]);
+      const phase = await pool.query('SELECT phase FROM admission_events WHERE event_id=$1', [
+        eventId,
+      ]);
       expect(phase.rows[0].phase).toBe('recovering');
       expect((await service.control(eventId))?.mode).toBe('initializing');
     } finally {
@@ -235,8 +244,14 @@ describe('admission actual authenticated HTTP and epoch lifecycle', () => {
       // The recovery waits for the gate. Its connection is closed by the server and opened again:
       // the same Redis process, another connection.
       const id = await redis.clientId();
-      await redis.sendCommand(['CLIENT', 'KILL', 'ID', String(id), 'SKIPME', 'no']).catch(() => undefined);
-      for (let i = 0; i < 100 && !(redis.isReady && (await redis.clientId().catch(() => id)) !== id); i++)
+      await redis
+        .sendCommand(['CLIENT', 'KILL', 'ID', String(id), 'SKIPME', 'no'])
+        .catch(() => undefined);
+      for (
+        let i = 0;
+        i < 100 && !(redis.isReady && (await redis.clientId().catch(() => id)) !== id);
+        i++
+      )
         await new Promise((resolve) => setTimeout(resolve, 50));
       expect(service.isReady()).toBe(false);
       await first.query('COMMIT');
@@ -500,7 +515,7 @@ describe('admission actual authenticated HTTP and epoch lifecycle', () => {
       statusCode: 410,
     });
   });
-  // P4 has no release route. The fixture performs the contract's explicit transition under the exclusive gate.
+  // There is no release route. The fixture performs the contract's explicit transition under the exclusive gate.
   const setProtected = (value: boolean) =>
     serializableTransactionWithRetry(async (c) => {
       await readAdmissionPolicy(c, eventId, 'exclusive');

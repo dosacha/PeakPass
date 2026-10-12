@@ -46,8 +46,6 @@ services:
     environment:
       NODE_ENV: development
       LOG_LEVEL: debug
-      DATABASE_URL: postgresql://peakpass:peakpass@postgres:5432/peakpass
-      REDIS_URL: redis://redis:6379
       DB_HOST: postgres
       DB_PORT: 5432
       DB_USER: peakpass

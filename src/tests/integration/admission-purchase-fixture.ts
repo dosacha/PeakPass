@@ -13,7 +13,7 @@ export const TIER = 'general';
 export type Json = Record<string, any>;
 export const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
-// The contract's explicit transition (exclusive gate, real UPDATE). P5 adds no activation route.
+// The contract's explicit transition (exclusive gate, real UPDATE). There is no activation route.
 export const setProtected = (eventId: string, value: boolean) =>
   serializableTransactionWithRetry(async (c) => {
     await readAdmissionPolicy(c, eventId, 'exclusive');

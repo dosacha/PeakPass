@@ -3,11 +3,8 @@ import { z } from 'zod';
 import { AdmissionService, admissionService } from '@/core/services/admission.service';
 import { AdmissionError } from '@/core/models/admission';
 import { sendAdmissionError } from '@/api/errors';
+import { uuid } from '@/core/models/uuid';
 
-const uuid = z
-  .string()
-  .uuid()
-  .transform((v) => v.toLowerCase());
 const eventParams = z.object({ eventId: uuid }).strict();
 const joinBody = z.object({ epoch: uuid, joinRequestId: uuid }).strict();
 const cancelBody = z.object({ epoch: uuid }).strict();
@@ -34,6 +31,7 @@ export async function registerAdmissionRoutes(
   app.addHook('preHandler', async (request) => {
     const user = uuid.safeParse(request.user?.id);
     if (!user.success) throw new AdmissionError('UNAUTHENTICATED', 401);
+    // 주체는 JWT를 읽을 때 이미 소문자다. 계약 §3의 정규화를 이 plugin 안에서도 보장해 둔다.
     request.user!.id = user.data;
     z.object({}).strict().parse(request.query);
   });

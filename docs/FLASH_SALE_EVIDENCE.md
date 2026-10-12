@@ -2,7 +2,7 @@
 
 ## v3 측정 계약 — P8 A/B/C / flash-sale-v3.0
 
-P8([Issue #17](https://github.com/dosacha/PeakPass/issues/17))의 동일 조건 A/B/C 비교를 위한 revision이다. 실행 전 프로토콜·pilot 계획·결과는 [ISSUE_17_VALIDATION.md](ISSUE_17_VALIDATION.md)에 있다. 아래 v2.x 절과 P1 설명에서 v3가 바꾼 사항은 이 절이 우선한다. v2.6 원본과 판정은 수정하지 않는다. 분석기 `flash-sale-analysis-v3.0`은 v2.6 manifest를 기존 v2.6 규칙 그대로 분석한다.
+P8([Issue #17](https://github.com/dosacha/PeakPass/issues/17))의 동일 조건 A/B/C 비교를 위한 revision이다. 실행 전 프로토콜·pilot 계획·결과는 [ISSUE_17_VALIDATION.md](records/ISSUE_17_VALIDATION.md)에 있다. 아래 v2.x 절과 P1 설명에서 v3가 바꾼 사항은 이 절이 우선한다. v2.6 원본과 판정은 수정하지 않는다. 분석기 `flash-sale-analysis-v3.0`은 v2.6 manifest를 기존 v2.6 규칙 그대로 분석한다.
 
 - **환경.** `docker-compose.flash-sale.yml`의 변경은 두 곳이다: Redis `redis-server --save "" --appendonly no --maxmemory-policy noeviction`, 앱 `ENABLE_ADMISSION: "true"`. 모든 arm이 같은 파일과 같은 image를 쓴다. 자원 제한·pool·로그 수준·표본 주기는 v2.6과 같다.
 - **arm.** `--arm a|b|c`(기본 a). 모든 arm에서 이벤트의 policy 행을 SQL로 ensure한다. a는 그 행을 unprotected로 둔다. b·c는 앱 시작 전에 계약 §6 전이(배타 event gate → 행 `FOR UPDATE` → `UPDATE protected=true`)를 실행하고, 시작한 인스턴스가 namespace를 공개해 control `mode=ready`, PG `phase='open'`, generation·epoch 일치가 될 때까지 기다린다. 전이 SQL은 `src/infra/postgres/admission-policy.ts`의 문장을 옮긴 것이고 check가 소스와 대조한다. b·c는 인증 negative 3건에 더해 admission 필드 없는 구매가 400 `ADMISSION_INVALID_INPUT`으로 거절되는지 확인한다.
@@ -75,7 +75,7 @@ P2의 실행 전 프로토콜·분모·중단 기준·결과는 [FLASH_SALE_BASE
 
 [Issue #10](https://github.com/dosacha/PeakPass/issues/10)의 산출물이다. 기존 예매 계약을 호출하는 측정 도구이며 대기열·캐시 재고 차감·처리량 개선 구현은 포함하지 않는다. 아래 작은 실행은 하네스 정합성 증거다. 서비스의 최대 처리량이나 성능 개선 수치로 사용하지 않는다.
 
-P2(#11)는 끝났다. 착수 당시의 gate·측정 보완 사항·후행 영향 기준은 [Issue #11 인수인계](ISSUE_11_HANDOFF.md)에 기록으로 남아 있다.
+쓰기 기준선 측정(P2, #11)은 끝났다. 착수 당시의 gate와 측정 보완 사항은 Issue #11에 기록돼 있다.
 
 ## 실행
 
@@ -145,4 +145,4 @@ SQL 재고식은 `available + active reservation 수량 + pending/paid/delivered
 
 아래는 P1을 넘길 때 적은 P2 인수 조건의 기록이다. P2 #11은 2026-10-02에, 총괄 #9는 2026-10-10에 닫혔다.
 
-P2/Astra는 시작할 때 [총괄 #9](https://github.com/dosacha/PeakPass/issues/9)의 dependency gate를 적용한다. 승인한 **구현 SHA + `flash-sale-v1` + source hashes + accepted run IDs**를 #11에 고정하고, 환경·모델·성공 판정·계측이 바뀌면 먼저 #10 산출물 revision과 영향 범위를 갱신한다. 기존 결과를 새 조건의 결과처럼 재사용하지 않는다. 고부하에서 비정상 종료해도 원본과 SQL 스냅샷을 보존하며 `passed=false`는 하네스의 정상 smoke 승인 실패이지 측정 파일 부재를 뜻하지 않는다.
+P2는 시작할 때 [총괄 #9](https://github.com/dosacha/PeakPass/issues/9)의 dependency gate를 적용한다. 승인한 **구현 SHA + `flash-sale-v1` + source hashes + accepted run IDs**를 #11에 고정하고, 환경·모델·성공 판정·계측이 바뀌면 먼저 #10 산출물 revision과 영향 범위를 갱신한다. 기존 결과를 새 조건의 결과처럼 재사용하지 않는다. 고부하에서 비정상 종료해도 원본과 SQL 스냅샷을 보존하며 `passed=false`는 하네스의 정상 smoke 승인 실패이지 측정 파일 부재를 뜻하지 않는다.

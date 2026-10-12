@@ -3,7 +3,9 @@ import { initRedis, getRedis, closeRedis } from '../../infra/redis/client';
 import { checkRateLimit } from '../../infra/redis/commands';
 
 const mode = process.argv[2];
-const send = (state: string) => { if (process.connected) process.send?.({ state, pid: process.pid }); };
+const send = (state: string) => {
+  if (process.connected) process.send?.({ state, pid: process.pid });
+};
 let operation: Promise<unknown>;
 process.on('message', async (message) => {
   if (message === 'recreate') {
@@ -19,18 +21,23 @@ process.on('message', async (message) => {
     process.disconnect?.();
   }
 });
-operation = initRedis().then((client) => {
-  send('ready');
-  client.on('reconnecting', () => send('reconnecting'));
-  client.on('error', () => { if (!client.isOpen) send('terminal'); });
-}, async () => {
-  if (mode === 'startup') {
-    await closeRedis();
-    send('startup-rejected');
-    process.exitCode = 1;
-    process.disconnect?.();
-  }
-});
+operation = initRedis().then(
+  (client) => {
+    send('ready');
+    client.on('reconnecting', () => send('reconnecting'));
+    client.on('error', () => {
+      if (!client.isOpen) send('terminal');
+    });
+  },
+  async () => {
+    if (mode === 'startup') {
+      await closeRedis();
+      send('startup-rejected');
+      process.exitCode = 1;
+      process.disconnect?.();
+    }
+  },
+);
 if (mode === 'handshake') getRedis().on('connect', () => send('tcp-connected'));
 
 if (mode === 'connecting') {

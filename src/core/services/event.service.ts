@@ -162,7 +162,10 @@ export class EventService {
     }
   }
 
-  async getEventsByIdsWithClient(eventIds: string[], client: PoolClient): Promise<(Event | null)[]> {
+  async getEventsByIdsWithClient(
+    eventIds: string[],
+    client: PoolClient,
+  ): Promise<(Event | null)[]> {
     if (eventIds.length === 0) {
       return [];
     }

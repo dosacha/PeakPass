@@ -46,6 +46,14 @@ FOR UPDATE
 - 같은 이벤트 재고에 대한 동시 차감을 직렬화
 - 재고 확인과 차감을 같은 트랜잭션 안에서 수행
 
+### 격리 수준과 행 잠금이 각각 하는 일
+
+- **행 잠금**이 초과 판매를 막습니다. 좌석을 바꾸는 코드는 `InventoryService.adjustAvailableSeats` 하나이고, 항상 이벤트 행을 `FOR UPDATE`로 잠근 뒤 남은 좌석을 확인하고 차감합니다. DB의 CHECK(`available_seats >= 0`)가 그 뒤의 방어선입니다.
+- **격리 수준은 경로마다 다릅니다.** checkout, settlement webhook, 입장 필드가 있는 예약은 SERIALIZABLE이고 직렬화 실패(SQLSTATE 40001)나 deadlock(40P01)이 나면 최대 3회까지 시도합니다(첫 시도와 재시도 2회, `serializableTransactionWithRetry`). 입장 필드가 없는 예약은 READ COMMITTED입니다.
+- **두 격리 수준은 경합할 때 다르게 끝납니다.** READ COMMITTED의 예약은 행 잠금을 기다렸다가 최신 좌석 수를 보고 진행하므로, 경합의 패자는 품절(409)로 끝납니다. SERIALIZABLE transaction은 기다리던 행이 그 사이에 바뀌면 직렬화 실패로 끝나고 처음부터 다시 시도합니다. 3회 안에 끝내지 못하면 입장 필드가 없는 요청은 500, 입장 필드가 있는 구매는 503 `ADMISSION_UNAVAILABLE`이 됩니다. 통합 테스트 `concurrency.test.ts`가 이 차이를 그대로 보입니다. 3석에 5명이 동시에 구매하면 두 경로 모두 정확히 3석이 팔립니다. 예약의 패자 2명은 모두 품절이고, checkout의 패자 2명은 품절이거나 시도 3회를 다 쓴 직렬화 실패입니다.
+- **SERIALIZABLE이 지금 맡고 있는 것.** 같은 Idempotency-Key의 checkout이 겹치면 advisory lock을 기다린 요청은 낡은 snapshot으로 진행하고, PostgreSQL은 그 INSERT를 직렬화 실패로 보고했고 재시도가 기존 주문을 읽어 반환했습니다(같은 key의 checkout 세 개를 겹친 테스트의 관측입니다. unique 위반 23505가 나올 수 없다는 증명은 아닙니다). 중복 정산도 같은 방식으로 주문 행 잠금 뒤 재시도에서 `paid`를 확인합니다.
+- **비용과 결정.** 구매가 몰리면 직렬화 실패로 시도 3회를 다 쓴 요청이 실패로 드러납니다. 부하 비교에서 대기열 없는 경로가 무너진 원인이 이것입니다([PERFORMANCE_REPORT.md](./PERFORMANCE_REPORT.md)). 행 잠금만으로 충분한지, 격리 수준을 READ COMMITTED로 내리거나 재시도를 늘리면 어떻게 되는지는 측정하지 않았습니다. 2026-10-10에 이 실패를 재현 테스트(`admission-serialization-repro.test.ts`, opt-in)로 조사한 뒤 제품 코드를 바꾸지 않기로 정했습니다. 격리 수준과 재시도 정책은 입장 제어 계약 §5에 고정돼 있어, 바꾸면 장애 검증과 부하 측정을 다시 해야 하기 때문입니다([#27](https://github.com/dosacha/PeakPass/issues/27)).
+
 ### 4. 주문 생성과 재고 차감
 
 - `orders` INSERT
@@ -87,9 +95,10 @@ checkout 시점에는 티켓을 발급하지 않습니다.
   checkout과 분리된 `payment-settlement` scope namespace를 사용
 - 같은 `Idempotency-Key` 재전송은 캐시된 기존 응답을 그대로 재생 (duplicate flag도 원본 값 유지)
 - 다른 `Idempotency-Key` + 같은 `providerTransactionId` 재시도는 `duplicate: true`로 수렴
-- `payment_records.provider_transaction_id` 고유 인덱스 사용
-- order를 `FOR UPDATE`로 잠금
-- 이미 `paid` 상태이거나 기존 티켓이 있으면 중복 발급 없이 기존 결과 반환
+- 동시에 온 중복을 가르는 것은 order의 `FOR UPDATE` 잠금이다. 잠금을 얻은 요청은 주문이 이미 `paid`이거나 기존 티켓이 있으면 중복 발급 없이 기존 결과를 반환한다
+- 잠금을 기다리다 직렬화 실패한 요청은 재시도에서 같은 확인을 거친다
+- `payment_records.provider_transaction_id` 고유 인덱스는 이 경로를 벗어난 중복을 막는 마지막 방어선이다
+- 금액은 대조하지 않는다. `cancelled` 주문에 온 `settled`는 409로 거절하고 기록을 남기지 않는다(`expired` 주문에 온 `settled`는 기록하고 `reconciliation_required`를 표시한다)
 
 ## 주문 결제 기한과 만료
 
@@ -151,7 +160,7 @@ pending→paid)는 DB state machine이 아니라 애플리케이션 트랜잭션
 
 - Redis는 빠르지만 source of truth가 아님
 - oversell 방지의 핵심은 Redis 락이 아니라 PostgreSQL 트랜잭션과 행 잠금
-- 멱등성은 헤더, DB 고유 키와 advisory lock, Redis in-flight lock을 함께 사용 (Redis 응답 캐시는 settlement webhook만)
+- 멱등성은 헤더, DB 고유 키와 advisory lock, 직렬화 재시도가 맡는다. Redis in-flight lock과 settlement webhook의 응답 캐시는 최적화다
 - 티켓은 checkout 직후가 아니라 settlement 이후에만 발급
 - duplicate webhook에도 티켓이 늘지 않도록 방어함
 

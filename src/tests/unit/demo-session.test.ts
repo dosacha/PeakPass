@@ -34,16 +34,18 @@ function createSettlementResult(orderId: string, userId: string, duplicate: bool
       updatedAt: now,
       paidAt: now,
     },
-    tickets: [{
-      id: randomUUID(),
-      orderId,
-      eventId: randomUUID(),
-      userId,
-      ticketNumber: `PASS-${randomUUID().slice(0, 8)}`,
-      status: 'active' as const,
-      createdAt: now,
-      updatedAt: now,
-    }],
+    tickets: [
+      {
+        id: randomUUID(),
+        orderId,
+        eventId: randomUUID(),
+        userId,
+        ticketNumber: `PASS-${randomUUID().slice(0, 8)}`,
+        status: 'active' as const,
+        createdAt: now,
+        updatedAt: now,
+      },
+    ],
     paymentStatus: 'settled',
     duplicate,
   };
@@ -122,6 +124,32 @@ describe('live demo sessions', () => {
     await app.close();
   });
 
+  it('hands the order id of a demo settlement on in lower case', async () => {
+    const { registerDemoSessionRoutes } = await loadDemoRoutes();
+    const { jwtAuthMiddleware } = await import('@/api/middleware/auth');
+    const processSettlement = jest.fn(async (request) =>
+      createSettlementResult(request.orderId, request.userId),
+    );
+    const orderId = randomUUID();
+    const app = Fastify();
+    app.addHook('preHandler', jwtAuthMiddleware);
+    await registerDemoSessionRoutes(app, { processSettlement });
+
+    const response = await app.inject({
+      method: 'POST',
+      url: '/demo/settlement',
+      payload: { orderId: orderId.toUpperCase() },
+      headers: {
+        Authorization: `Bearer ${createDemoToken()}`,
+        'Idempotency-Key': randomUUID(),
+      },
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(processSettlement).toHaveBeenCalledWith(expect.objectContaining({ orderId }));
+    await app.close();
+  });
+
   it('requires a live demo JWT for demo settlement', async () => {
     const { registerDemoSessionRoutes } = await loadDemoRoutes();
     const { jwtAuthMiddleware } = await import('@/api/middleware/auth');
@@ -179,7 +207,10 @@ describe('live demo sessions', () => {
     await app.close();
   });
 
-  it('rejects another user order without revealing it', async () => {
+  // The settlement itself is stubbed here: this checks the ownership rule and that the route turns
+  // its rejection into 404. The rejection of a real order of another user, and the ticket count
+  // after a replay, are checked against PostgreSQL in integration/demo-settlement.test.ts.
+  it("answers 404 when the settlement rejects an order that is not the demo user's", async () => {
     const { assertDemoOrderOwnership, registerDemoSessionRoutes } = await loadDemoRoutes();
     const { jwtAuthMiddleware } = await import('@/api/middleware/auth');
     const otherUserId = randomUUID();
@@ -204,52 +235,9 @@ describe('live demo sessions', () => {
     });
 
     expect(response.statusCode).toBe(404);
-    expect(() => assertDemoOrderOwnership({ userId: otherUserId }, DEMO_USER.id))
-      .toThrow('Order not found');
-    await app.close();
-  });
-
-  it('replays the same settlement and a new-key semantic duplicate without issuing more tickets', async () => {
-    const { registerDemoSessionRoutes } = await loadDemoRoutes();
-    const { jwtAuthMiddleware } = await import('@/api/middleware/auth');
-    const orderId = randomUUID();
-    const idempotencyKey = randomUUID();
-    let ticketIssueCount = 0;
-    let firstResult: ReturnType<typeof createSettlementResult> | null = null;
-    const processSettlement = jest.fn(async (request) => {
-      if (!firstResult) {
-        ticketIssueCount += 1;
-        firstResult = createSettlementResult(request.orderId, request.userId);
-        return firstResult;
-      }
-
-      return { ...firstResult, duplicate: true };
-    });
-    const app = Fastify();
-    app.addHook('preHandler', jwtAuthMiddleware);
-    await registerDemoSessionRoutes(app, { processSettlement });
-
-    const send = (key: string) => app.inject({
-      method: 'POST',
-      url: '/demo/settlement',
-      payload: { orderId },
-      headers: {
-        Authorization: `Bearer ${createDemoToken()}`,
-        'Idempotency-Key': key,
-      },
-    });
-    const [first, replay, semanticDuplicate] = await Promise.all([
-      send(idempotencyKey),
-      send(idempotencyKey),
-      send(randomUUID()),
-    ]);
-
-    expect(first.statusCode).toBe(200);
-    expect(replay.statusCode).toBe(200);
-    expect(semanticDuplicate.statusCode).toBe(200);
-    expect(replay.json().tickets).toHaveLength(first.json().tickets.length);
-    expect(semanticDuplicate.json().tickets).toHaveLength(first.json().tickets.length);
-    expect(ticketIssueCount).toBe(1);
+    expect(() => assertDemoOrderOwnership({ userId: otherUserId }, DEMO_USER.id)).toThrow(
+      'Order not found',
+    );
     await app.close();
   });
 });

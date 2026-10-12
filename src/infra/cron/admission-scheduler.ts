@@ -5,7 +5,7 @@ import { getLogger } from '@/infra/logger';
 
 export function startAdmissionScheduler(
   service: Pick<AdmissionService, 'maintain' | 'stop'> = admissionService,
-  intervalMs = admissionProfile.tickMs,
+  intervalMs: number = admissionProfile.tickMs,
 ) {
   let stopped = false;
   let timer: NodeJS.Timeout | undefined;

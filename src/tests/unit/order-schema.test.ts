@@ -14,15 +14,11 @@ describe('CreateOrderSchema', () => {
   });
 
   it('rejects non-positive quantities', () => {
-    expect(() =>
-      CreateOrderSchema.parse({ ...validInput, quantity: 0 }),
-    ).toThrow();
+    expect(() => CreateOrderSchema.parse({ ...validInput, quantity: 0 })).toThrow();
   });
 
   it('rejects invalid event ids', () => {
-    expect(() =>
-      CreateOrderSchema.parse({ ...validInput, eventId: 'not-a-uuid' }),
-    ).toThrow();
+    expect(() => CreateOrderSchema.parse({ ...validInput, eventId: 'not-a-uuid' })).toThrow();
   });
 
   it('requires an idempotency key', () => {

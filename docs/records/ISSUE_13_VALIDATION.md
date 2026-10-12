@@ -36,7 +36,7 @@ Redis must have AOF/RDB off and `maxmemory-policy=noeviction`. CONFIG/INFO permi
 
 ## P5 cooperation interface
 
-Source: [policy helper](../src/infra/postgres/admission-policy.ts), [service](../src/core/services/admission.service.ts), [types](../src/core/models/admission.ts).
+Source: [policy helper](../../src/infra/postgres/admission-policy.ts), [service](../../src/core/services/admission.service.ts), [types](../../src/core/models/admission.ts).
 
 | Function | Caller obligations / returned information |
 | --- | --- |
@@ -80,7 +80,7 @@ Owned environment: Windows host Node24.15.0; Docker Node18 Alpine image; Postgre
 | Harness regression | `npm run test:flash-sale`:29/29; callback run-isolation check passed. These are harness checks, not load runs. |
 | Skips | Seven redis-recovery, two order-sweeper Redis outage, one order-expiration-http Redis-stop cases. They require their exact old container identity and reserved port63532; they are not retargeted or claimed as run. All ten names are in the final manifest. P4 corruption/recovery fixtures are distinct evidence. |
 
-Raw outputs: [candidate manifest](../test-results/admission-v1/p4-candidate-20261002.json) / [candidate ZIP](../test-results/admission-v1/p4-candidate-20261002.zip), [final manifest](../test-results/admission-v1/p4-final-20261002.json) / [final ZIP](../test-results/admission-v1/p4-final-20261002.zip). Each manifest records the ZIP and uncompressed file SHA256 values. The candidate preserves the failed first full run and final #9/#12–#18 snapshots; the final archive preserves the review regression RED/GREEN, final suites/image results and the initial implementation RED outputs. The reviewer model is recorded from the actual spawn arguments, not its role label. No credentials or `.env` are archived.
+Raw outputs: [candidate manifest](../../test-results/admission-v1/p4-candidate-20261002.json) / [candidate ZIP](../../test-results/admission-v1/p4-candidate-20261002.zip), [final manifest](../../test-results/admission-v1/p4-final-20261002.json) / [final ZIP](../../test-results/admission-v1/p4-final-20261002.zip). Each manifest records the ZIP and uncompressed file SHA256 values. The candidate preserves the failed first full run and final #9/#12–#18 snapshots; the final archive preserves the review regression RED/GREEN, final suites/image results and the initial implementation RED outputs. The reviewer model is recorded from the actual spawn arguments, not its role label. No credentials or `.env` are archived.
 
 Cleanup: after final verification, both owned PostgreSQL/Redis container IDs and task labels were checked, then those two disposable containers were stopped and removed. No containers remain with this task label. The worktree, validation archives and final image remain available for review.
 
@@ -128,6 +128,6 @@ Remaining limits of the follow-up. By the user's decision of 2026-10-02 they are
 
 Owned environment: Windows host Node24.15.0; PostgreSQL16.12 and Redis7.4.8 (AOF/RDB off, noeviction,256MiB) on127.0.0.1:64369/64370 for the baseline and on127.0.0.1:59308/59309 for the runs at `51d331b`. Every container pair carried `peakpass.task=peakpass-pr24-review-20261002` and was stopped and removed after its runs; no other container, checkout or database was changed. Commands are the ones listed in the verification record, without the Docker opt-in and the image checks.
 
-Raw outputs: [follow-up manifest](../test-results/admission-v1/p4-review-20261002.json) / [follow-up ZIP](../test-results/admission-v1/p4-review-20261002.zip). The manifest records the ZIP and file SHA256 values, both smoke observations and the skipped suites. The archive also holds the disposable smoke fixture, which is not part of the source tree. No credentials or `.env` are archived.
+Raw outputs: [follow-up manifest](../../test-results/admission-v1/p4-review-20261002.json) / [follow-up ZIP](../../test-results/admission-v1/p4-review-20261002.zip). The manifest records the ZIP and file SHA256 values, both smoke observations and the skipped suites. The archive also holds the disposable smoke fixture, which is not part of the source tree. No credentials or `.env` are archived.
 
 Source refresh at the follow-up: origin/main remains `f2a4674133cbeb50a65590f75bd9140efc32ff1d` and the PR head before the first follow-up push was `e6583fb70c14d0a99a19c530eeda1b178b64274d`. The P2 index hash matches the consumed value. The PR description is rewritten at the merge to cover this follow-up. GitHub Actions `install-lint-test` passed on `2d138e940035443750506087da525073df9a728e`, `4965f005ed6f08d21c947ec847801eb0dbd1733d`, `ab69ab7e9db95c4d92dcd041a06926b9d33e0e35` and `a9543abf18c8fc8a8c57cb9875c1e6351022ddf4`; each run includes the image build and the enabled image check. The automated reviews of `4965f00` and `a9543ab` finished without a new comment. The user instructed the merge on 2026-10-02 with the remaining limits deferred to #25. The merge commit and the gate update are recorded in #9 and #13; CI and review of this record's own commit and replies on the review threads are outside this record.

@@ -315,17 +315,39 @@ describe('route-level contract: checkout idempotency and settlement webhook', ()
     async function staleCache(key: string, body: CheckoutResponseBody) {
       const redis = await ensureRedisOpen();
       // Actual prior-version Redis response shape, including the old unscoped namespace.
-      for (const cacheKey of [`peakpass:idempotency:checkout:${key}`, `peakpass:idempotency:${key}`]) {
-        await redis.setEx(cacheKey, 60, JSON.stringify({ statusCode: 201, body, storedAt: new Date().toISOString() }));
+      for (const cacheKey of [
+        `peakpass:idempotency:checkout:${key}`,
+        `peakpass:idempotency:${key}`,
+      ]) {
+        await redis.setEx(
+          cacheKey,
+          60,
+          JSON.stringify({ statusCode: 201, body, storedAt: new Date().toISOString() }),
+        );
       }
     }
 
-    function retry(fixture: Fixture, key: string, changes: Record<string, unknown> = {}, token: string | null = fixture.token) {
+    function retry(
+      fixture: Fixture,
+      key: string,
+      changes: Record<string, unknown> = {},
+      token: string | null = fixture.token,
+    ) {
       return app.inject({
-        method: 'POST', url: '/checkouts',
-        headers: { 'content-type': 'application/json', 'idempotency-key': key,
-          ...(token === null ? {} : { authorization: `Bearer ${token}` }) },
-        payload: { eventId: fixture.eventId, userId: fixture.userId, tierId: fixture.tierId, quantity: 1, ...changes },
+        method: 'POST',
+        url: '/checkouts',
+        headers: {
+          'content-type': 'application/json',
+          'idempotency-key': key,
+          ...(token === null ? {} : { authorization: `Bearer ${token}` }),
+        },
+        payload: {
+          eventId: fixture.eventId,
+          userId: fixture.userId,
+          tierId: fixture.tierId,
+          quantity: 1,
+          ...changes,
+        },
       });
     }
 
@@ -346,14 +368,26 @@ describe('route-level contract: checkout idempotency and settlement webhook', ()
       expect(initial.statusCode).toBe(201);
       const body = initial.json() as CheckoutResponseBody;
       await staleCache(key, body);
-      const changes: Record<string, unknown> = change === 'quantity' ? { quantity: 2 }
-        : change === 'invalid' ? { quantity: 0 }
-        : change === 'owner' || change === 'mismatch' ? { userId: other.userId }
-        : change === 'eventId' ? { eventId: other.eventId }
-        : change === 'tierId' ? { tierId: other.tierId }
-        : change === 'reservationId' ? { reservationId: uuid() } : {};
-      const response = await retry(fixture, key, changes,
-        change === 'no-jwt' ? null : change === 'owner' ? other.token : fixture.token);
+      const changes: Record<string, unknown> =
+        change === 'quantity'
+          ? { quantity: 2 }
+          : change === 'invalid'
+            ? { quantity: 0 }
+            : change === 'owner' || change === 'mismatch'
+              ? { userId: other.userId }
+              : change === 'eventId'
+                ? { eventId: other.eventId }
+                : change === 'tierId'
+                  ? { tierId: other.tierId }
+                  : change === 'reservationId'
+                    ? { reservationId: uuid() }
+                    : {};
+      const response = await retry(
+        fixture,
+        key,
+        changes,
+        change === 'no-jwt' ? null : change === 'owner' ? other.token : fixture.token,
+      );
       expect(response.statusCode).toBe(status);
       expect(response.json()).not.toHaveProperty('order');
       expect(await countOrdersByIdempotencyKey(key)).toBe(1);
@@ -370,7 +404,9 @@ describe('route-level contract: checkout idempotency and settlement webhook', ()
         expect(response.statusCode).toBe(400);
         expect(checkout).not.toHaveBeenCalled();
         expect(await getAvailableSeats(fixture.eventId)).toBe(5);
-      } finally { checkout.mockRestore(); }
+      } finally {
+        checkout.mockRestore();
+      }
     });
 
     it('a lost response retry preserves order identity and exactly-once effects without writing a checkout response cache', async () => {
@@ -379,7 +415,9 @@ describe('route-level contract: checkout idempotency and settlement webhook', ()
       // Discard the first HTTP result, representing application-level response loss.
       await postCheckout(fixture, key);
       const original = await pool.query('SELECT id FROM orders WHERE idempotency_key = $1', [key]);
-      const replay = await retry(fixture, key, { extraClientField: 'ignored by normalized schema' });
+      const replay = await retry(fixture, key, {
+        extraClientField: 'ignored by normalized schema',
+      });
       expect(replay.statusCode).toBe(201);
       expect(replay.json().order.id).toBe(original.rows[0].id);
       expect(await countOrdersByIdempotencyKey(key)).toBe(1);
@@ -396,7 +434,10 @@ describe('route-level contract: checkout idempotency and settlement webhook', ()
       expect(initial.statusCode).toBe(201);
       const pending = initial.json() as CheckoutResponseBody;
       await staleCache(key, pending);
-      const settlement = await postSettlementWebhook({ orderId: pending.order.id, providerTransactionId: uuid(), status: 'settled' }, uuid());
+      const settlement = await postSettlementWebhook(
+        { orderId: pending.order.id, providerTransactionId: uuid(), status: 'settled' },
+        uuid(),
+      );
       expect(settlement.statusCode).toBe(200);
       const replay = await postCheckout(fixture, key);
       expect(replay.statusCode).toBe(201);
@@ -411,12 +452,13 @@ describe('route-level contract: checkout idempotency and settlement webhook', ()
     it('in-flight lock recheck cannot replay a newly arriving stale checkout cache', async () => {
       const fixture = await setupEventAndUser(5);
       const key = uuid();
-      const { tryAcquireIdempotencyLock, releaseIdempotencyLock } = await import('@/infra/redis/commands');
+      const { tryAcquireIdempotencyLock, releaseIdempotencyLock } =
+        await import('@/infra/redis/commands');
       const token = await tryAcquireIdempotencyLock('checkout', key, 10);
       expect(token).toBeTruthy();
       const responsePromise = postCheckout(fixture, key);
       // Inject stale cache during the real 100ms lock recheck window.
-      await new Promise(resolve => setTimeout(resolve, 25));
+      await new Promise((resolve) => setTimeout(resolve, 25));
       await staleCache(key, { order: { id: uuid(), status: 'pending', quantity: 1 }, tickets: [] });
       try {
         const response = await responsePromise;
@@ -424,27 +466,42 @@ describe('route-level contract: checkout idempotency and settlement webhook', ()
         expect(await countOrdersByIdempotencyKey(key)).toBe(1);
         expect(await getAvailableSeats(fixture.eventId)).toBe(4);
         expect(await countPendingPaymentRecords(response.json().order.id)).toBe(1);
-      } finally { await releaseIdempotencyLock('checkout', key, token!); }
+      } finally {
+        await releaseIdempotencyLock('checkout', key, token!);
+      }
     });
 
-    it.each([['no JWT', 401], ['body mismatch', 403], ['invalid body', 400]])(
-      'lock contention still rejects %s through route guards', async (scenario, status) => {
-        const fixture = await setupEventAndUser(5);
-        const key = uuid();
-        const { tryAcquireIdempotencyLock, releaseIdempotencyLock } = await import('@/infra/redis/commands');
-        const token = await tryAcquireIdempotencyLock('checkout', key, 10);
-        expect(token).toBeTruthy();
-        await staleCache(key, { order: { id: uuid(), status: 'pending', quantity: 1 }, tickets: [] });
-        try {
-          const response = await retry(fixture, key,
-            scenario === 'body mismatch' ? { userId: uuid() } : scenario === 'invalid body' ? { quantity: 0 } : {},
-            scenario === 'no JWT' ? null : fixture.token);
-          expect(response.statusCode).toBe(status);
-          expect(response.json()).not.toHaveProperty('order');
-          expect(await countOrdersByIdempotencyKey(key)).toBe(0);
-          expect(await getAvailableSeats(fixture.eventId)).toBe(5);
-        } finally { await releaseIdempotencyLock('checkout', key, token!); }
-      });
+    it.each([
+      ['no JWT', 401],
+      ['body mismatch', 403],
+      ['invalid body', 400],
+    ])('lock contention still rejects %s through route guards', async (scenario, status) => {
+      const fixture = await setupEventAndUser(5);
+      const key = uuid();
+      const { tryAcquireIdempotencyLock, releaseIdempotencyLock } =
+        await import('@/infra/redis/commands');
+      const token = await tryAcquireIdempotencyLock('checkout', key, 10);
+      expect(token).toBeTruthy();
+      await staleCache(key, { order: { id: uuid(), status: 'pending', quantity: 1 }, tickets: [] });
+      try {
+        const response = await retry(
+          fixture,
+          key,
+          scenario === 'body mismatch'
+            ? { userId: uuid() }
+            : scenario === 'invalid body'
+              ? { quantity: 0 }
+              : {},
+          scenario === 'no JWT' ? null : fixture.token,
+        );
+        expect(response.statusCode).toBe(status);
+        expect(response.json()).not.toHaveProperty('order');
+        expect(await countOrdersByIdempotencyKey(key)).toBe(0);
+        expect(await getAvailableSeats(fixture.eventId)).toBe(5);
+      } finally {
+        await releaseIdempotencyLock('checkout', key, token!);
+      }
+    });
 
     it('held Redis lock preserves PostgreSQL fingerprint checks and the winning lock token', async () => {
       const fixture = await setupEventAndUser(5);
@@ -452,13 +509,17 @@ describe('route-level contract: checkout idempotency and settlement webhook', ()
       const initial = await postCheckout(fixture, key);
       expect(initial.statusCode).toBe(201);
       const body = initial.json() as CheckoutResponseBody;
-      const { tryAcquireIdempotencyLock, releaseIdempotencyLock } = await import('@/infra/redis/commands');
+      const { tryAcquireIdempotencyLock, releaseIdempotencyLock } =
+        await import('@/infra/redis/commands');
       const token = await tryAcquireIdempotencyLock('checkout', key, 10);
       expect(token).toBeTruthy();
       await staleCache(key, body);
       try {
-        const responses = await Promise.all([retry(fixture, key), retry(fixture, key, { quantity: 2 })]);
-        expect(responses.map(response => response.statusCode)).toEqual([201, 409]);
+        const responses = await Promise.all([
+          retry(fixture, key),
+          retry(fixture, key, { quantity: 2 }),
+        ]);
+        expect(responses.map((response) => response.statusCode)).toEqual([201, 409]);
         expect(responses[0].json().order.id).toBe(body.order.id);
         expect(responses[1].json()).not.toHaveProperty('order');
         expect(await countOrdersByIdempotencyKey(key)).toBe(1);
@@ -466,231 +527,335 @@ describe('route-level contract: checkout idempotency and settlement webhook', ()
         expect(await getAvailableSeats(fixture.eventId)).toBe(4);
         const redis = await ensureRedisOpen();
         expect(await redis.get(`peakpass:idempotency:lock:checkout:${key}`)).toBe(token);
-      } finally { await releaseIdempotencyLock('checkout', key, token!); }
+      } finally {
+        await releaseIdempotencyLock('checkout', key, token!);
+      }
     });
   });
 
-  it(
-    'T01 route-level: sequential checkout replay with the same Idempotency-Key converges to one order',
-    async () => {
+  it('T01 route-level: sequential checkout replay with the same Idempotency-Key converges to one order', async () => {
+    const fixture = await setupEventAndUser(5);
+    const idempotencyKey = uuid();
+
+    const first = await postCheckout(fixture, idempotencyKey);
+    expect(first.statusCode).toBe(201);
+    const firstBody = first.json() as CheckoutResponseBody;
+    expect(firstBody.order.status).toBe('pending');
+    expect(firstBody.tickets).toHaveLength(0);
+
+    // 순차 재시도는 PostgreSQL의 현재 order/tickets를 반환한다.
+    const second = await postCheckout(fixture, idempotencyKey);
+    expect(second.statusCode).toBe(201);
+    const secondBody = second.json() as CheckoutResponseBody;
+    expect(secondBody.order.id).toBe(firstBody.order.id);
+
+    expect(await countOrdersByIdempotencyKey(idempotencyKey)).toBe(1);
+    expect(await getAvailableSeats(fixture.eventId)).toBe(4); // quantity=1, 정확히 1회 차감
+    expect(await countPendingPaymentRecords(firstBody.order.id)).toBe(1);
+  }, 20000);
+
+  // ── T02 ────────────────────────────────────────────────────────────────
+
+  it('T02 route-level: concurrent same-key checkouts replay PostgreSQL and converge with 201', async () => {
+    const fixture = await setupEventAndUser(5);
+    const idempotencyKey = uuid();
+
+    const responses = await Promise.all([
+      postCheckout(fixture, idempotencyKey),
+      postCheckout(fixture, idempotencyKey),
+      postCheckout(fixture, idempotencyKey),
+    ]);
+
+    const statuses = responses.map((response) => response.statusCode);
+
+    expect(statuses).toEqual([201, 201, 201]);
+
+    const successOrderIds = new Set(
+      responses
+        .filter((response) => response.statusCode === 201)
+        .map((response) => (response.json() as CheckoutResponseBody).order.id),
+    );
+    expect(successOrderIds.size).toBe(1);
+    const [orderId] = [...successOrderIds];
+
+    // 모든 요청 완료 후 같은 key 재요청은 201로 최초 order에 수렴해야 한다.
+    const followUp = await postCheckout(fixture, idempotencyKey);
+    expect(followUp.statusCode).toBe(201);
+    expect((followUp.json() as CheckoutResponseBody).order.id).toBe(orderId);
+
+    expect(await countOrdersByIdempotencyKey(idempotencyKey)).toBe(1);
+    expect(await getAvailableSeats(fixture.eventId)).toBe(4);
+    expect(await countPendingPaymentRecords(orderId)).toBe(1);
+  }, 20000);
+
+  // ── T03 ────────────────────────────────────────────────────────────────
+
+  it('T03 route-level, Redis unavailable: concurrent same-key checkouts fall back to PostgreSQL and converge to one order', async () => {
+    const fixture = await setupEventAndUser(5);
+    const idempotencyKey = uuid();
+
+    // Inject acquisition failure: a disconnected client now automatically recovers.
+    // Real container outage/recovery is covered by redis-recovery.test.ts.
+    const unavailable = jest
+      .spyOn(redisModule, 'withRedis')
+      .mockRejectedValue(new Error('Injected Redis outage'));
+
+    let responses;
+    try {
+      responses = await Promise.all([
+        postCheckout(fixture, idempotencyKey),
+        postCheckout(fixture, idempotencyKey),
+        postCheckout(fixture, idempotencyKey),
+      ]);
+    } finally {
+      unavailable.mockRestore();
+    }
+
+    const statuses = responses.map((response) => response.statusCode);
+    expect(statuses.some((status) => status >= 500)).toBe(false);
+
+    // Redis lock이 없으므로 세 요청 모두 DB 경로로 진행하고,
+    // pg_advisory_xact_lock + orders.idempotency_key UNIQUE(+40001 retry)로
+    // 같은 logical order에 수렴한다. 현재 구현 계약은 3건 모두 201이다.
+    expect(statuses).toEqual([201, 201, 201]);
+
+    const orderIds = new Set(
+      responses.map((response) => (response.json() as CheckoutResponseBody).order.id),
+    );
+    expect(orderIds.size).toBe(1);
+    const [orderId] = [...orderIds];
+
+    expect(await countOrdersByIdempotencyKey(idempotencyKey)).toBe(1);
+    expect(await getAvailableSeats(fixture.eventId)).toBe(4);
+    expect(await countPendingPaymentRecords(orderId)).toBe(1);
+
+    // Redis 복구 후 같은 key 재요청도 동일 order를 반환해야 한다.
+    const afterRecovery = await postCheckout(fixture, idempotencyKey);
+    expect(afterRecovery.statusCode).toBe(201);
+    expect((afterRecovery.json() as CheckoutResponseBody).order.id).toBe(orderId);
+  }, 30000);
+
+  // ── T04 ────────────────────────────────────────────────────────────────
+
+  it('T04 route-level, provider transaction: 5 concurrent settlements with distinct Idempotency-Keys issue exactly one ticket', async () => {
+    const fixture = await setupEventAndUser(5);
+    const orderId = await createPendingOrderViaRoute(fixture, 1);
+    const providerTransactionId = `route-txn-${uuid()}`;
+    const body = { orderId, providerTransactionId, status: 'settled' as const };
+
+    // Idempotency-Key를 전부 다르게 두어 Redis result cache가 아니라
+    // order FOR UPDATE + provider_transaction_id partial UNIQUE 경로를 검증한다.
+    const responses = await Promise.all(
+      Array.from({ length: 5 }, () => postSettlementWebhook(body, uuid())),
+    );
+
+    const statuses = responses.map((response) => response.statusCode);
+    expect(statuses).toEqual([200, 200, 200, 200, 200]);
+
+    const bodies = responses.map((response) => response.json() as WebhookResponseBody);
+    for (const parsed of bodies) {
+      expect(parsed.order.id).toBe(orderId);
+      expect(parsed.paymentStatus).toBe('settled');
+      expect(parsed.tickets).toHaveLength(1);
+    }
+
+    const duplicateFlags = bodies.map((parsed) => parsed.duplicate);
+    expect(duplicateFlags.filter((flag) => flag === false)).toHaveLength(1);
+    expect(duplicateFlags.filter((flag) => flag === true)).toHaveLength(4);
+
+    const ticketIds = new Set(bodies.map((parsed) => parsed.tickets[0].id));
+    expect(ticketIds.size).toBe(1);
+
+    expect(await getOrderStatus(orderId)).toBe('paid');
+    expect(await countTickets(orderId)).toBe(1);
+    // provider-linked settlement record는 정확히 1건.
+    expect(await countProviderLinkedPaymentRecords(orderId)).toBe(1);
+    // checkout이 만든 pending record는 별도로 존재한다
+    // (전체 payment_records를 1로 단정하지 않는 이유).
+    expect(await countPendingPaymentRecords(orderId)).toBe(1);
+  }, 30000);
+
+  // ── T05 ────────────────────────────────────────────────────────────────
+
+  it('T05 route-level: settlement webhook HMAC/timestamp rejection leaves order, payments, and tickets untouched', async () => {
+    const fixture = await setupEventAndUser(5);
+    const orderId = await createPendingOrderViaRoute(fixture, 1);
+    const seatsAfterCheckout = await getAvailableSeats(fixture.eventId);
+    const body = {
+      orderId,
+      providerTransactionId: `route-txn-${uuid()}`,
+      status: 'settled' as const,
+    };
+
+    // signature 없음
+    const missingSignature = await postSettlementWebhook(body, uuid(), { omitSignature: true });
+    expect(missingSignature.statusCode).toBe(401);
+    expect((missingSignature.json() as { error: { code: string } }).error.code).toBe(
+      'MISSING_SIGNATURE',
+    );
+
+    // timestamp 없음
+    const missingTimestamp = await postSettlementWebhook(body, uuid(), { omitTimestamp: true });
+    expect(missingTimestamp.statusCode).toBe(401);
+    expect((missingTimestamp.json() as { error: { code: string } }).error.code).toBe(
+      'MISSING_TIMESTAMP',
+    );
+
+    // 잘못된 signature (길이는 같고 내용만 다른 hex)
+    const validTimestamp = String(Math.floor(Date.now() / 1000));
+    const validSignature = signWebhook(JSON.stringify(body), validTimestamp);
+    const tamperedSignature = (validSignature[0] === 'a' ? 'b' : 'a') + validSignature.slice(1);
+    const wrongSignature = await postSettlementWebhook(body, uuid(), {
+      timestamp: validTimestamp,
+      signature: tamperedSignature,
+    });
+    expect(wrongSignature.statusCode).toBe(401);
+    expect((wrongSignature.json() as { error: { code: string } }).error.code).toBe(
+      'INVALID_SIGNATURE',
+    );
+
+    // 허용 범위(WEBHOOK_REPLAY_TOLERANCE_SECONDS, 기본 300초)를 벗어난 timestamp.
+    // 서명 자체는 그 timestamp 기준으로 유효하게 만들어 window 검증만 실패시킨다.
+    const staleTimestamp = String(Math.floor(Date.now() / 1000) - 3600);
+    const staleResponse = await postSettlementWebhook(body, uuid(), {
+      timestamp: staleTimestamp,
+    });
+    expect(staleResponse.statusCode).toBe(401);
+    expect((staleResponse.json() as { error: { code: string } }).error.code).toBe(
+      'TIMESTAMP_OUT_OF_WINDOW',
+    );
+
+    // 위 거부 요청들은 어떤 상태도 바꾸지 않아야 한다.
+    expect(await getOrderStatus(orderId)).toBe('pending');
+    expect(await countTickets(orderId)).toBe(0);
+    expect(await countProviderLinkedPaymentRecords(orderId)).toBe(0);
+    expect(await countPendingPaymentRecords(orderId)).toBe(1); // checkout pending만 존재
+    expect(await getAvailableSeats(fixture.eventId)).toBe(seatsAfterCheckout);
+  }, 20000);
+
+  // ── T06 ────────────────────────────────────────────────────────────────
+
+  it('T06 route-level: sequential settlement replay with the same Idempotency-Key returns the same ticket without reprocessing', async () => {
+    const fixture = await setupEventAndUser(5);
+    const orderId = await createPendingOrderViaRoute(fixture, 1);
+    const providerTransactionId = `route-txn-${uuid()}`;
+    const body = { orderId, providerTransactionId, status: 'settled' as const };
+    const idempotencyKey = uuid();
+
+    const first = await postSettlementWebhook(body, idempotencyKey);
+    expect(first.statusCode).toBe(200);
+    const firstBody = first.json() as WebhookResponseBody;
+    expect(firstBody.duplicate).toBe(false);
+    expect(firstBody.tickets).toHaveLength(1);
+
+    const second = await postSettlementWebhook(body, idempotencyKey);
+    expect(second.statusCode).toBe(200);
+    const secondBody = second.json() as WebhookResponseBody;
+
+    // 현재 계약: 두 번째 응답은 Redis result cache가 재생한 *첫 응답 그대로*다.
+    // 따라서 duplicate 플래그도 첫 응답 값(false)을 유지한다 — 재처리가 아니라
+    // 캐시 재생이라는 증거이므로 그대로 고정한다.
+    expect(secondBody.duplicate).toBe(false);
+    expect(secondBody.order.id).toBe(orderId);
+    expect(secondBody.tickets).toHaveLength(1);
+    expect(secondBody.tickets[0].id).toBe(firstBody.tickets[0].id);
+
+    // 티켓과 provider-linked settlement record는 증가하지 않아야 한다.
+    expect(await countTickets(orderId)).toBe(1);
+    expect(await countProviderLinkedPaymentRecords(orderId)).toBe(1);
+    expect(await getOrderStatus(orderId)).toBe('paid');
+  }, 20000);
+
+  // ── R02: cross-command idempotency scope ───────────────────────────────
+  //
+  // checkout과 settlement가 같은 raw Idempotency-Key를 쓰더라도 Redis result
+  // cache / in-flight lock을 공유하면 안 된다. 아래 테스트는 command scope가
+  // 분리된 key 형식(peakpass:idempotency:{scope}:{key})을 계약으로 고정한다.
+  describe('R02 idempotency scope: same raw key must not cross command boundaries', () => {
+    it('R02-T01 route-level: checkout cached result must not replay into the settlement webhook', async () => {
+      const fixture = await setupEventAndUser(5);
+      const sharedKey = uuid();
+
+      const checkoutResponse = await postCheckout(fixture, sharedKey);
+      expect(checkoutResponse.statusCode).toBe(201);
+      const orderId = (checkoutResponse.json() as CheckoutResponseBody).order.id;
+
+      // checkout과 동일한 raw Idempotency-Key로 유효한 HMAC settlement 전송.
+      // scope가 분리돼 있어야 checkout cache가 아닌 settlement transaction이 실행된다.
+      const webhookResponse = await postSettlementWebhook(
+        { orderId, providerTransactionId: `route-txn-${uuid()}`, status: 'settled' },
+        sharedKey,
+      );
+      expect(webhookResponse.statusCode).toBe(200);
+      const webhookBody = webhookResponse.json() as WebhookResponseBody;
+      // paymentStatus는 checkout 응답에는 없는 필드다 — checkout body가
+      // 재생됐다면 undefined가 되므로 재생 여부를 이 필드로 판별한다.
+      expect(webhookBody.paymentStatus).toBe('settled');
+      expect(webhookBody.tickets).toHaveLength(1);
+
+      expect(await getOrderStatus(orderId)).toBe('paid');
+      expect(await countTickets(orderId)).toBe(1);
+      expect(await countProviderLinkedPaymentRecords(orderId)).toBe(1);
+
+      // 같은 raw key가 두 record 종류로 공존해야 한다 (migration 005의 partial UNIQUE 계약).
+      // 전체 payment_records 수는 2건 이상일 수 있으므로 종류별로만 센다.
+      expect(await countPaymentRecordsByRawKey(sharedKey, false)).toBe(1); // checkout pending
+      expect(await countPaymentRecordsByRawKey(sharedKey, true)).toBe(1); // settlement terminal
+    }, 20000);
+
+    it('R02-T02 route-level: settlement cached result must not replay into checkout', async () => {
+      // order A를 정상 settlement 처리해 그 결과를 raw key로 캐시시킨다.
+      const fixtureA = await setupEventAndUser(5);
+      const orderA = await createPendingOrderViaRoute(fixtureA, 1);
+      const sharedKey = uuid();
+      const settleA = await postSettlementWebhook(
+        { orderId: orderA, providerTransactionId: `route-txn-${uuid()}`, status: 'settled' },
+        sharedKey,
+      );
+      expect(settleA.statusCode).toBe(200);
+
+      // 독립 fixture B에서 같은 raw key로 checkout — 새 order가 실제 생성돼야 한다.
+      const fixtureB = await setupEventAndUser(5);
+      const checkoutB = await postCheckout(fixtureB, sharedKey);
+      expect(checkoutB.statusCode).toBe(201);
+      const bodyB = checkoutB.json() as CheckoutResponseBody & { paymentStatus?: string };
+      expect(bodyB.order.id).not.toBe(orderA);
+      // settlement body가 재생됐다면 paymentStatus가 존재했을 것이다.
+      expect(bodyB.paymentStatus).toBeUndefined();
+      expect(bodyB.tickets).toHaveLength(0);
+
+      expect(await countOrdersByIdempotencyKey(sharedKey)).toBe(1);
+      expect(await getAvailableSeats(fixtureB.eventId)).toBe(4);
+
+      // 같은 raw key가 두 record 종류로 공존해야 한다:
+      // order B의 checkout pending record + order A의 settlement terminal record.
+      expect(await countPaymentRecordsByRawKey(sharedKey, false)).toBe(1);
+      expect(await countPaymentRecordsByRawKey(sharedKey, true)).toBe(1);
+    }, 20000);
+
+    it('R02-T03 route-level: checkout replay stays idempotent without a Redis response cache', async () => {
       const fixture = await setupEventAndUser(5);
       const idempotencyKey = uuid();
 
       const first = await postCheckout(fixture, idempotencyKey);
       expect(first.statusCode).toBe(201);
-      const firstBody = first.json() as CheckoutResponseBody;
-      expect(firstBody.order.status).toBe('pending');
-      expect(firstBody.tickets).toHaveLength(0);
-
-      // 순차 재시도는 PostgreSQL의 현재 order/tickets를 반환한다.
       const second = await postCheckout(fixture, idempotencyKey);
       expect(second.statusCode).toBe(201);
-      const secondBody = second.json() as CheckoutResponseBody;
-      expect(secondBody.order.id).toBe(firstBody.order.id);
-
-      expect(await countOrdersByIdempotencyKey(idempotencyKey)).toBe(1);
-      expect(await getAvailableSeats(fixture.eventId)).toBe(4); // quantity=1, 정확히 1회 차감
-      expect(await countPendingPaymentRecords(firstBody.order.id)).toBe(1);
-    },
-    20000,
-  );
-
-  // ── T02 ────────────────────────────────────────────────────────────────
-
-  it(
-    'T02 route-level: concurrent same-key checkouts replay PostgreSQL and converge with 201',
-    async () => {
-      const fixture = await setupEventAndUser(5);
-      const idempotencyKey = uuid();
-
-      const responses = await Promise.all([
-        postCheckout(fixture, idempotencyKey),
-        postCheckout(fixture, idempotencyKey),
-        postCheckout(fixture, idempotencyKey),
-      ]);
-
-      const statuses = responses.map((response) => response.statusCode);
-
-      expect(statuses).toEqual([201, 201, 201]);
-
-      const successOrderIds = new Set(
-        responses
-          .filter((response) => response.statusCode === 201)
-          .map((response) => (response.json() as CheckoutResponseBody).order.id),
+      expect((second.json() as CheckoutResponseBody).order.id).toBe(
+        (first.json() as CheckoutResponseBody).order.id,
       );
-      expect(successOrderIds.size).toBe(1);
-      const [orderId] = [...successOrderIds];
-
-      // 모든 요청 완료 후 같은 key 재요청은 201로 최초 order에 수렴해야 한다.
-      const followUp = await postCheckout(fixture, idempotencyKey);
-      expect(followUp.statusCode).toBe(201);
-      expect((followUp.json() as CheckoutResponseBody).order.id).toBe(orderId);
 
       expect(await countOrdersByIdempotencyKey(idempotencyKey)).toBe(1);
       expect(await getAvailableSeats(fixture.eventId)).toBe(4);
-      expect(await countPendingPaymentRecords(orderId)).toBe(1);
-    },
-    20000,
-  );
 
-  // ── T03 ────────────────────────────────────────────────────────────────
+      // Checkout response replay is owned by PostgreSQL, not Redis.
+      const redis = await ensureRedisOpen();
+      expect(await redis.get(`peakpass:idempotency:checkout:${idempotencyKey}`)).toBeNull();
+      // unscoped 신규 key는 더 이상 생성되면 안 된다.
+      expect(await redis.get(`peakpass:idempotency:${idempotencyKey}`)).toBeNull();
+    }, 20000);
 
-  it(
-    'T03 route-level, Redis unavailable: concurrent same-key checkouts fall back to PostgreSQL and converge to one order',
-    async () => {
-      const fixture = await setupEventAndUser(5);
-      const idempotencyKey = uuid();
-
-      // Inject acquisition failure: a disconnected client now automatically recovers.
-      // Real container outage/recovery is covered by redis-recovery.test.ts.
-      const unavailable = jest.spyOn(redisModule, 'withRedis')
-        .mockRejectedValue(new Error('Injected Redis outage'));
-
-      let responses;
-      try {
-        responses = await Promise.all([
-          postCheckout(fixture, idempotencyKey),
-          postCheckout(fixture, idempotencyKey),
-          postCheckout(fixture, idempotencyKey),
-        ]);
-      } finally {
-        unavailable.mockRestore();
-      }
-
-      const statuses = responses.map((response) => response.statusCode);
-      expect(statuses.some((status) => status >= 500)).toBe(false);
-
-      // Redis lock이 없으므로 세 요청 모두 DB 경로로 진행하고,
-      // pg_advisory_xact_lock + orders.idempotency_key UNIQUE(+40001 retry)로
-      // 같은 logical order에 수렴한다. 현재 구현 계약은 3건 모두 201이다.
-      expect(statuses).toEqual([201, 201, 201]);
-
-      const orderIds = new Set(
-        responses.map((response) => (response.json() as CheckoutResponseBody).order.id),
-      );
-      expect(orderIds.size).toBe(1);
-      const [orderId] = [...orderIds];
-
-      expect(await countOrdersByIdempotencyKey(idempotencyKey)).toBe(1);
-      expect(await getAvailableSeats(fixture.eventId)).toBe(4);
-      expect(await countPendingPaymentRecords(orderId)).toBe(1);
-
-      // Redis 복구 후 같은 key 재요청도 동일 order를 반환해야 한다.
-      const afterRecovery = await postCheckout(fixture, idempotencyKey);
-      expect(afterRecovery.statusCode).toBe(201);
-      expect((afterRecovery.json() as CheckoutResponseBody).order.id).toBe(orderId);
-    },
-    30000,
-  );
-
-  // ── T04 ────────────────────────────────────────────────────────────────
-
-  it(
-    'T04 route-level, provider transaction: 5 concurrent settlements with distinct Idempotency-Keys issue exactly one ticket',
-    async () => {
-      const fixture = await setupEventAndUser(5);
-      const orderId = await createPendingOrderViaRoute(fixture, 1);
-      const providerTransactionId = `route-txn-${uuid()}`;
-      const body = { orderId, providerTransactionId, status: 'settled' as const };
-
-      // Idempotency-Key를 전부 다르게 두어 Redis result cache가 아니라
-      // order FOR UPDATE + provider_transaction_id partial UNIQUE 경로를 검증한다.
-      const responses = await Promise.all(
-        Array.from({ length: 5 }, () => postSettlementWebhook(body, uuid())),
-      );
-
-      const statuses = responses.map((response) => response.statusCode);
-      expect(statuses).toEqual([200, 200, 200, 200, 200]);
-
-      const bodies = responses.map((response) => response.json() as WebhookResponseBody);
-      for (const parsed of bodies) {
-        expect(parsed.order.id).toBe(orderId);
-        expect(parsed.paymentStatus).toBe('settled');
-        expect(parsed.tickets).toHaveLength(1);
-      }
-
-      const duplicateFlags = bodies.map((parsed) => parsed.duplicate);
-      expect(duplicateFlags.filter((flag) => flag === false)).toHaveLength(1);
-      expect(duplicateFlags.filter((flag) => flag === true)).toHaveLength(4);
-
-      const ticketIds = new Set(bodies.map((parsed) => parsed.tickets[0].id));
-      expect(ticketIds.size).toBe(1);
-
-      expect(await getOrderStatus(orderId)).toBe('paid');
-      expect(await countTickets(orderId)).toBe(1);
-      // provider-linked settlement record는 정확히 1건.
-      expect(await countProviderLinkedPaymentRecords(orderId)).toBe(1);
-      // checkout이 만든 pending record는 별도로 존재한다
-      // (전체 payment_records를 1로 단정하지 않는 이유).
-      expect(await countPendingPaymentRecords(orderId)).toBe(1);
-    },
-    30000,
-  );
-
-  // ── T05 ────────────────────────────────────────────────────────────────
-
-  it(
-    'T05 route-level: settlement webhook HMAC/timestamp rejection leaves order, payments, and tickets untouched',
-    async () => {
-      const fixture = await setupEventAndUser(5);
-      const orderId = await createPendingOrderViaRoute(fixture, 1);
-      const seatsAfterCheckout = await getAvailableSeats(fixture.eventId);
-      const body = { orderId, providerTransactionId: `route-txn-${uuid()}`, status: 'settled' as const };
-
-      // signature 없음
-      const missingSignature = await postSettlementWebhook(body, uuid(), { omitSignature: true });
-      expect(missingSignature.statusCode).toBe(401);
-      expect((missingSignature.json() as { error: { code: string } }).error.code).toBe(
-        'MISSING_SIGNATURE',
-      );
-
-      // timestamp 없음
-      const missingTimestamp = await postSettlementWebhook(body, uuid(), { omitTimestamp: true });
-      expect(missingTimestamp.statusCode).toBe(401);
-      expect((missingTimestamp.json() as { error: { code: string } }).error.code).toBe(
-        'MISSING_TIMESTAMP',
-      );
-
-      // 잘못된 signature (길이는 같고 내용만 다른 hex)
-      const validTimestamp = String(Math.floor(Date.now() / 1000));
-      const validSignature = signWebhook(JSON.stringify(body), validTimestamp);
-      const tamperedSignature =
-        (validSignature[0] === 'a' ? 'b' : 'a') + validSignature.slice(1);
-      const wrongSignature = await postSettlementWebhook(body, uuid(), {
-        timestamp: validTimestamp,
-        signature: tamperedSignature,
-      });
-      expect(wrongSignature.statusCode).toBe(401);
-      expect((wrongSignature.json() as { error: { code: string } }).error.code).toBe(
-        'INVALID_SIGNATURE',
-      );
-
-      // 허용 범위(WEBHOOK_REPLAY_TOLERANCE_SECONDS, 기본 300초)를 벗어난 timestamp.
-      // 서명 자체는 그 timestamp 기준으로 유효하게 만들어 window 검증만 실패시킨다.
-      const staleTimestamp = String(Math.floor(Date.now() / 1000) - 3600);
-      const staleResponse = await postSettlementWebhook(body, uuid(), {
-        timestamp: staleTimestamp,
-      });
-      expect(staleResponse.statusCode).toBe(401);
-      expect((staleResponse.json() as { error: { code: string } }).error.code).toBe(
-        'TIMESTAMP_OUT_OF_WINDOW',
-      );
-
-      // 위 거부 요청들은 어떤 상태도 바꾸지 않아야 한다.
-      expect(await getOrderStatus(orderId)).toBe('pending');
-      expect(await countTickets(orderId)).toBe(0);
-      expect(await countProviderLinkedPaymentRecords(orderId)).toBe(0);
-      expect(await countPendingPaymentRecords(orderId)).toBe(1); // checkout pending만 존재
-      expect(await getAvailableSeats(fixture.eventId)).toBe(seatsAfterCheckout);
-    },
-    20000,
-  );
-
-  // ── T06 ────────────────────────────────────────────────────────────────
-
-  it(
-    'T06 route-level: sequential settlement replay with the same Idempotency-Key returns the same ticket without reprocessing',
-    async () => {
+    it('R02-T04 route-level: same-command settlement replay stays idempotent under command-scoped Redis keys', async () => {
       const fixture = await setupEventAndUser(5);
       const orderId = await createPendingOrderViaRoute(fixture, 1);
       const providerTransactionId = `route-txn-${uuid()}`;
@@ -700,157 +865,19 @@ describe('route-level contract: checkout idempotency and settlement webhook', ()
       const first = await postSettlementWebhook(body, idempotencyKey);
       expect(first.statusCode).toBe(200);
       const firstBody = first.json() as WebhookResponseBody;
-      expect(firstBody.duplicate).toBe(false);
-      expect(firstBody.tickets).toHaveLength(1);
-
       const second = await postSettlementWebhook(body, idempotencyKey);
       expect(second.statusCode).toBe(200);
       const secondBody = second.json() as WebhookResponseBody;
-
-      // 현재 계약: 두 번째 응답은 Redis result cache가 재생한 *첫 응답 그대로*다.
-      // 따라서 duplicate 플래그도 첫 응답 값(false)을 유지한다 — 재처리가 아니라
-      // 캐시 재생이라는 증거이므로 그대로 고정한다.
-      expect(secondBody.duplicate).toBe(false);
-      expect(secondBody.order.id).toBe(orderId);
-      expect(secondBody.tickets).toHaveLength(1);
       expect(secondBody.tickets[0].id).toBe(firstBody.tickets[0].id);
 
-      // 티켓과 provider-linked settlement record는 증가하지 않아야 한다.
       expect(await countTickets(orderId)).toBe(1);
       expect(await countProviderLinkedPaymentRecords(orderId)).toBe(1);
-      expect(await getOrderStatus(orderId)).toBe('paid');
-    },
-    20000,
-  );
 
-  // ── R02: cross-command idempotency scope ───────────────────────────────
-  //
-  // checkout과 settlement가 같은 raw Idempotency-Key를 쓰더라도 Redis result
-  // cache / in-flight lock을 공유하면 안 된다. 아래 테스트는 command scope가
-  // 분리된 key 형식(peakpass:idempotency:{scope}:{key})을 계약으로 고정한다.
-  describe('R02 idempotency scope: same raw key must not cross command boundaries', () => {
-    it(
-      'R02-T01 route-level: checkout cached result must not replay into the settlement webhook',
-      async () => {
-        const fixture = await setupEventAndUser(5);
-        const sharedKey = uuid();
-
-        const checkoutResponse = await postCheckout(fixture, sharedKey);
-        expect(checkoutResponse.statusCode).toBe(201);
-        const orderId = (checkoutResponse.json() as CheckoutResponseBody).order.id;
-
-        // checkout과 동일한 raw Idempotency-Key로 유효한 HMAC settlement 전송.
-        // scope가 분리돼 있어야 checkout cache가 아닌 settlement transaction이 실행된다.
-        const webhookResponse = await postSettlementWebhook(
-          { orderId, providerTransactionId: `route-txn-${uuid()}`, status: 'settled' },
-          sharedKey,
-        );
-        expect(webhookResponse.statusCode).toBe(200);
-        const webhookBody = webhookResponse.json() as WebhookResponseBody;
-        // paymentStatus는 checkout 응답에는 없는 필드다 — checkout body가
-        // 재생됐다면 undefined가 되므로 재생 여부를 이 필드로 판별한다.
-        expect(webhookBody.paymentStatus).toBe('settled');
-        expect(webhookBody.tickets).toHaveLength(1);
-
-        expect(await getOrderStatus(orderId)).toBe('paid');
-        expect(await countTickets(orderId)).toBe(1);
-        expect(await countProviderLinkedPaymentRecords(orderId)).toBe(1);
-
-        // 같은 raw key가 두 record 종류로 공존해야 한다 (migration 005의 partial UNIQUE 계약).
-        // 전체 payment_records 수는 2건 이상일 수 있으므로 종류별로만 센다.
-        expect(await countPaymentRecordsByRawKey(sharedKey, false)).toBe(1); // checkout pending
-        expect(await countPaymentRecordsByRawKey(sharedKey, true)).toBe(1); // settlement terminal
-      },
-      20000,
-    );
-
-    it(
-      'R02-T02 route-level: settlement cached result must not replay into checkout',
-      async () => {
-        // order A를 정상 settlement 처리해 그 결과를 raw key로 캐시시킨다.
-        const fixtureA = await setupEventAndUser(5);
-        const orderA = await createPendingOrderViaRoute(fixtureA, 1);
-        const sharedKey = uuid();
-        const settleA = await postSettlementWebhook(
-          { orderId: orderA, providerTransactionId: `route-txn-${uuid()}`, status: 'settled' },
-          sharedKey,
-        );
-        expect(settleA.statusCode).toBe(200);
-
-        // 독립 fixture B에서 같은 raw key로 checkout — 새 order가 실제 생성돼야 한다.
-        const fixtureB = await setupEventAndUser(5);
-        const checkoutB = await postCheckout(fixtureB, sharedKey);
-        expect(checkoutB.statusCode).toBe(201);
-        const bodyB = checkoutB.json() as CheckoutResponseBody & { paymentStatus?: string };
-        expect(bodyB.order.id).not.toBe(orderA);
-        // settlement body가 재생됐다면 paymentStatus가 존재했을 것이다.
-        expect(bodyB.paymentStatus).toBeUndefined();
-        expect(bodyB.tickets).toHaveLength(0);
-
-        expect(await countOrdersByIdempotencyKey(sharedKey)).toBe(1);
-        expect(await getAvailableSeats(fixtureB.eventId)).toBe(4);
-
-        // 같은 raw key가 두 record 종류로 공존해야 한다:
-        // order B의 checkout pending record + order A의 settlement terminal record.
-        expect(await countPaymentRecordsByRawKey(sharedKey, false)).toBe(1);
-        expect(await countPaymentRecordsByRawKey(sharedKey, true)).toBe(1);
-      },
-      20000,
-    );
-
-    it(
-      'R02-T03 route-level: checkout replay stays idempotent without a Redis response cache',
-      async () => {
-        const fixture = await setupEventAndUser(5);
-        const idempotencyKey = uuid();
-
-        const first = await postCheckout(fixture, idempotencyKey);
-        expect(first.statusCode).toBe(201);
-        const second = await postCheckout(fixture, idempotencyKey);
-        expect(second.statusCode).toBe(201);
-        expect((second.json() as CheckoutResponseBody).order.id).toBe(
-          (first.json() as CheckoutResponseBody).order.id,
-        );
-
-        expect(await countOrdersByIdempotencyKey(idempotencyKey)).toBe(1);
-        expect(await getAvailableSeats(fixture.eventId)).toBe(4);
-
-        // Checkout response replay is owned by PostgreSQL, not Redis.
-        const redis = await ensureRedisOpen();
-        expect(await redis.get(`peakpass:idempotency:checkout:${idempotencyKey}`)).toBeNull();
-        // unscoped 신규 key는 더 이상 생성되면 안 된다.
-        expect(await redis.get(`peakpass:idempotency:${idempotencyKey}`)).toBeNull();
-      },
-      20000,
-    );
-
-    it(
-      'R02-T04 route-level: same-command settlement replay stays idempotent under command-scoped Redis keys',
-      async () => {
-        const fixture = await setupEventAndUser(5);
-        const orderId = await createPendingOrderViaRoute(fixture, 1);
-        const providerTransactionId = `route-txn-${uuid()}`;
-        const body = { orderId, providerTransactionId, status: 'settled' as const };
-        const idempotencyKey = uuid();
-
-        const first = await postSettlementWebhook(body, idempotencyKey);
-        expect(first.statusCode).toBe(200);
-        const firstBody = first.json() as WebhookResponseBody;
-        const second = await postSettlementWebhook(body, idempotencyKey);
-        expect(second.statusCode).toBe(200);
-        const secondBody = second.json() as WebhookResponseBody;
-        expect(secondBody.tickets[0].id).toBe(firstBody.tickets[0].id);
-
-        expect(await countTickets(orderId)).toBe(1);
-        expect(await countProviderLinkedPaymentRecords(orderId)).toBe(1);
-
-        const redis = await ensureRedisOpen();
-        expect(
-          await redis.get(`peakpass:idempotency:payment-settlement:${idempotencyKey}`),
-        ).not.toBeNull();
-        expect(await redis.get(`peakpass:idempotency:${idempotencyKey}`)).toBeNull();
-      },
-      20000,
-    );
+      const redis = await ensureRedisOpen();
+      expect(
+        await redis.get(`peakpass:idempotency:payment-settlement:${idempotencyKey}`),
+      ).not.toBeNull();
+      expect(await redis.get(`peakpass:idempotency:${idempotencyKey}`)).toBeNull();
+    }, 20000);
   });
 });

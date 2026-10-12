@@ -1,20 +1,17 @@
 import 'dotenv/config';
 import { randomUUID } from 'crypto';
-import { existsSync } from 'fs';
 import { initRedis, closeRedis } from '@/infra/redis/client';
 import { initLogger } from '@/infra/logger';
+import * as api from '@/infra/redis/admission';
+import { admissionProfile } from '@/core/models/admission';
 
 describe('admission Redis atomic protocol', () => {
   let redis: Awaited<ReturnType<typeof initRedis>>;
-  let api: typeof import('@/infra/redis/admission');
   const eventId = randomUUID(),
     epoch = randomUUID();
   beforeAll(async () => {
     initLogger();
     redis = await initRedis();
-    expect(existsSync('src/infra/redis/admission.ts')).toBe(true);
-    const path = '@/infra/redis/admission';
-    api = await import(path);
     await api.initializeAdmission({ eventId, epoch, generation: '1' }, 'fixture-process');
     await api.publishAdmission(eventId, epoch, '1');
   });
@@ -73,12 +70,25 @@ describe('admission Redis atomic protocol', () => {
     expect(a.state).toBe('waiting');
   });
   it('shares R across workers and keeps claimed C until durable finalization', async () => {
+    // More waiters than R, so the count below is bounded by R and not by an empty queue.
+    await Promise.all(
+      Array.from({ length: 3 }, () =>
+        api.runAdmission(eventId, epoch, 'join', {
+          userId: randomUUID(),
+          joinRequestId: randomUUID(),
+          admissionId: randomUUID(),
+        }),
+      ),
+    );
+    const admitted = api.admissionKeys(eventId, epoch)[8];
     const outcomes = await Promise.all([
       api.runAdmission(eventId, epoch, 'tick'),
       api.runAdmission(eventId, epoch, 'tick'),
     ]);
     const promoted = outcomes.flatMap((x) => x.promoted ?? []);
-    expect(promoted).toHaveLength(2);
+    expect(promoted).toHaveLength(admissionProfile.rate);
+    // The budget of this second is spent although buyers still wait and C has room.
+    expect((await api.runAdmission(eventId, epoch, 'tick')).promoted ?? []).toHaveLength(0);
     const entry = (await api.runAdmission(eventId, epoch, 'inspect', { admissionId: promoted[0] }))
       .entry!;
     const input = {
@@ -89,6 +99,7 @@ describe('admission Redis atomic protocol', () => {
     };
     const claimed = await api.runAdmission(eventId, epoch, 'claim', input);
     expect(claimed.entry?.phase).toBe('processing');
+    expect(await redis.zScore(admitted, entry.admissionId)).not.toBeNull();
     expect((await api.runAdmission(eventId, epoch, 'cancel', input)).code).toBe(
       'ADMISSION_IN_PROGRESS',
     );
@@ -100,13 +111,17 @@ describe('admission Redis atomic protocol', () => {
       claimToken: claimed.entry!.claimToken,
       outcome: { kind: 'reservation', resourceId: randomUUID(), code: null },
     };
+    // The slot stays occupied through the claim and is returned only by the completion.
+    expect(await redis.zScore(admitted, entry.admissionId)).not.toBeNull();
     expect((await api.runAdmission(eventId, epoch, 'complete', complete)).entry?.state).toBe(
       'consumed',
     );
+    expect(await redis.zScore(admitted, entry.admissionId)).toBeNull();
     expect((await api.runAdmission(eventId, epoch, 'complete', complete)).entry?.state).toBe(
       'consumed',
     );
-    expect((await api.runAdmission(eventId, epoch, 'tick')).promoted ?? []).toHaveLength(0);
+    // The other promoted buyer has not purchased and still holds its slot.
+    expect(await redis.zScore(admitted, promoted[1])).not.toBeNull();
   });
   it('fails closed on missing metadata and never publishes a frozen generation', async () => {
     await api.freezeAdmission(eventId, epoch, '1');

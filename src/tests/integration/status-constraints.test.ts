@@ -130,7 +130,14 @@ describe('status domain CHECK constraints (R03-A, migration 006)', () => {
       INSERT INTO tickets (id, order_id, event_id, user_id, ticket_number, status)
       VALUES ($1, $2, $3, $4, $5, $6)
       `,
-      [uuid(), orderId, eventId, userId, `PASS-2026-9${String(Date.now()).slice(-5)}${uuid().slice(0, 4)}`, status],
+      [
+        uuid(),
+        orderId,
+        eventId,
+        userId,
+        `PASS-2026-9${String(Date.now()).slice(-5)}${uuid().slice(0, 4)}`,
+        status,
+      ],
     );
   }
 

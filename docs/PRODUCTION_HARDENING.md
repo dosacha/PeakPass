@@ -1,6 +1,6 @@
 # 애플리케이션 안정성
 
-이 문서는 현재 코드에 들어가 있는 애플리케이션 안정성 관련 기능과 아직 남아 있는 과제를 정리합니다.
+이 문서는 현재 코드에 들어가 있는 애플리케이션 안정성 관련 기능과 하지 않은 것을 정리합니다.
 
 ## 현재 구현된 항목
 
@@ -48,8 +48,12 @@
 
 ### 환경 변수 검증
 
-- 설정 로딩 로직 존재
-- 필수 값 누락 시 시작 단계에서 실패하도록 구성
+- 환경 변수는 시작할 때 schema로 검증하고, 형식이 맞지 않으면 시작하지 않습니다(`src/infra/config.ts`).
+- `NODE_ENV=production`이면 아래 조합을 거부합니다. 운영 이미지(`Dockerfile`)는 `NODE_ENV=production`을 기본으로 둡니다.
+  - `JWT_SECRET`이 없거나, 개발용 기본값이거나, 예전 `.env.example`에 실려 있던 값
+  - `WEBHOOK_SIGNING_SECRET`이 없거나 32자 미만
+  - `ENFORCE_AUTH_USER_MATCH=false`, `RATE_LIMIT_FAIL_MODE=open`, `ENABLE_RATE_LIMITING=false`
+- 분기마다 거절 테스트가 있습니다(`src/tests/unit/production-invariants.test.ts`).
 
 ### GraphQL 쿼리 복잡도 제한
 
@@ -78,7 +82,9 @@
 - duplicate settlement webhook에 대해 중복 티켓 미발급 확인
 - GraphQL 쿼리 복잡도 초과 요청 거부 단위 테스트 확인
 
-## 아직 남은 과제
+## 하지 않은 것
 
-- payment-callback 부하 테스트 결과 고정 (수치는 [PERFORMANCE_REPORT.md](./PERFORMANCE_REPORT.md)에 있으나 저장된 summary 파일이 없음)
-- 입장 제어 각 단계가 고치지 않고 남긴 한계와 미실시 검증 (follow-up Issue #25, #27, #29, #32, #34, #36)
+- payment-callback 부하 시나리오의 결과는 console 출력만 있고 저장된 summary 파일이 없습니다([PERFORMANCE_REPORT.md](./PERFORMANCE_REPORT.md)).
+- settlement webhook의 rate limit은 구매 경로와 같은 한도(보낸 쪽 IP당 5회/분)를 씁니다. 결제사의 재전송을 받기에는 낮은 값이고, 부하 측정에서는 한도를 올렸습니다.
+- 예약 sweeper는 5분마다 200건씩 처리하고 시작 직후에는 돌지 않습니다. 만료된 예약이 좌석을 쥔 시간만큼 품절로 보일 수 있습니다.
+- 입장 제어에서 고치지 않고 받아들인 한계는 [ADMISSION_DESIGN_AND_OPERATIONS.md](./ADMISSION_DESIGN_AND_OPERATIONS.md)의 "알려진 한계"에 있습니다.

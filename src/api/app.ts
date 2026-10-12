@@ -8,6 +8,7 @@ import { AdmissionError } from '@/core/models/admission';
 import { ZodError } from 'zod';
 import {
   handleAppError,
+  handleHttpError,
   handleUnexpectedError,
   handleValidationError,
   sendAdmissionError,
@@ -45,35 +46,37 @@ export async function createApp() {
   await fastify.register(corsPlugin, { origin: true });
 
   fastify.removeContentTypeParser('application/json');
-  fastify.addContentTypeParser(
-    'application/json',
-    { parseAs: 'buffer' },
-    (request, body, done) => {
-      const buffer = Buffer.isBuffer(body) ? body : Buffer.from(body);
-      (request as FastifyRequest).rawBody = buffer;
+  fastify.addContentTypeParser('application/json', { parseAs: 'buffer' }, (request, body, done) => {
+    const buffer = Buffer.isBuffer(body) ? body : Buffer.from(body);
+    (request as FastifyRequest).rawBody = buffer;
 
-      if (buffer.length === 0) {
-        done(null, {});
-        return;
-      }
+    if (buffer.length === 0) {
+      done(null, {});
+      return;
+    }
 
-      try {
-        done(null, JSON.parse(buffer.toString('utf8')));
-      } catch (err) {
-        const error = err instanceof SyntaxError
+    try {
+      done(null, JSON.parse(buffer.toString('utf8')));
+    } catch (err) {
+      const error =
+        err instanceof SyntaxError
           ? new AppError('BAD_REQUEST', 400, 'Invalid JSON body')
-          : err instanceof Error ? err : new Error('Invalid JSON body');
-        done(error, undefined);
-      }
-    },
-  );
+          : err instanceof Error
+            ? err
+            : new Error('Invalid JSON body');
+      done(error, undefined);
+    }
+  });
 
   fastify.addHook('onRequest', async (request) => {
     request.id = (request.headers['x-request-id'] as string) || randomUUID();
   });
 
   fastify.addHook('onRequest', async (request) => {
-    logger.info({ requestId: request.id, method: request.method, url: request.url }, 'Request started');
+    logger.info(
+      { requestId: request.id, method: request.method, url: request.url },
+      'Request started',
+    );
   });
 
   const { webhookSignatureMiddleware } = await import('./middleware/webhook-signature');
@@ -107,6 +110,20 @@ export async function createApp() {
       return;
     }
 
+    // Fastify가 요청을 거절하며 만든 4xx(415 지원하지 않는 Content-Type, 413 본문 초과 등)는
+    // 서버 결함이 아니므로 그 상태 코드로 답한다. Fastify의 오류(code가 FST_ERR_로 시작)만
+    // 대상이다. statusCode만 붙은 알 수 없는 오류는 메시지가 새지 않도록 500으로 남긴다.
+    if (
+      typeof err.code === 'string' &&
+      err.code.startsWith('FST_ERR_') &&
+      typeof err.statusCode === 'number' &&
+      err.statusCode >= 400 &&
+      err.statusCode < 500
+    ) {
+      handleHttpError(reply, err.statusCode, err.message, requestId);
+      return;
+    }
+
     handleUnexpectedError(err, reply, requestId);
   });
 
@@ -129,6 +146,6 @@ export async function createApp() {
   await registerDemoSessionRoutes(fastify);
   const { registerAdmissionRoutes } = await import('./rest/admissions');
   await fastify.register(registerAdmissionRoutes);
-  
+
   return fastify;
 }

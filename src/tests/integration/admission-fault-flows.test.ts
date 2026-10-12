@@ -12,7 +12,7 @@ import {
 } from './admission-fault-fixture';
 
 /**
- * P7: policy transitions with buyers attached, the existing flows on a protected event, and the
+ * Policy transitions with buyers attached, the existing flows on a protected event, and the
  * ways around the gate, through two application processes.
  *
  * Opt-in: ADMISSION_FAULT_IMAGE names the production image under test. Activation, release and
@@ -43,7 +43,12 @@ faultSuite('admission lifecycle and existing flows across processes (real contai
     previous = isProtected ? eventId : null;
     return eventId;
   }
-  const brief = (answer: Answer) => ({ app: answer.app, status: answer.status, code: answer.code, ms: answer.ms });
+  const brief = (answer: Answer) => ({
+    app: answer.app,
+    status: answer.status,
+    code: answer.code,
+    ms: answer.ms,
+  });
   const tally = (answers: Answer[]) => {
     const seen: Record<string, number> = {};
     for (const answer of answers) {
@@ -55,7 +60,13 @@ faultSuite('admission lifecycle and existing flows across processes (real contai
   const reserveLegacy = (buyer: Buyer, app: AppBox, eventId: string) =>
     buyer.call(app, 'POST', '/reservations', buyer.reservationBody(eventId, null, 1));
   const checkoutLegacy = (buyer: Buyer, app: AppBox, eventId: string) =>
-    buyer.call(app, 'POST', '/checkouts', { eventId, userId: buyer.userId, quantity: 1, tierId: TIER }, randomUUID());
+    buyer.call(
+      app,
+      'POST',
+      '/checkouts',
+      { eventId, userId: buyer.userId, quantity: 1, tierId: TIER },
+      randomUUID(),
+    );
   /**
    * Occupations of the event that no consumed result stands for, with the time their creating
    * transaction committed. An order row is updated when it expires, so its creation is read from
@@ -116,14 +127,22 @@ faultSuite('admission lifecycle and existing flows across processes (real contai
     // event row. Without admission fields it keeps its existing answer when the three attempts
     // run out: 500. That is the unprotected path as it was before the queue, not the activation.
     expect(
-      Object.keys(seen.checkouts).filter((answer) => !['201', '400 ADMISSION_INVALID_INPUT', '500 INTERNAL_ERROR'].includes(answer)),
+      Object.keys(seen.checkouts).filter(
+        (answer) => !['201', '400 ADMISSION_INVALID_INPUT', '500 INTERNAL_ERROR'].includes(answer),
+      ),
     ).toEqual([]);
     expect(seen.checkouts['400 ADMISSION_INVALID_INPUT']).toBeGreaterThan(0);
     const late = (await unlinked(eventId)).filter((row) => row.at >= activatedAt);
     expect(late).toEqual([]);
-    expect((await unlinked(eventId)).length).toBe((seen.reservations['201'] ?? 0) + (seen.checkouts['201'] ?? 0));
+    expect((await unlinked(eventId)).length).toBe(
+      (seen.reservations['201'] ?? 0) + (seen.checkouts['201'] ?? 0),
+    );
     // The schedulers publish the namespace of the new policy, and the queue then admits a buyer.
-    await until(async () => (await t.control(eventId))?.mode === 'ready', 30000, 'the namespace to be published');
+    await until(
+      async () => (await t.control(eventId))?.mode === 'ready',
+      30000,
+      'the namespace to be published',
+    );
     const admitted = await buyers[0].enter(eventId);
     expect((await buyers[0].reserve(eventId, admitted, 1)).final.status).toBe(201);
     await t.quiet(eventId);
@@ -143,7 +162,14 @@ faultSuite('admission lifecycle and existing flows across processes (real contai
     let releasedAt: Date;
     let writerAnswer: Answer;
     try {
-      const inflight = writer.call(first, 'POST', '/reservations', writer.reservationBody(eventId, writerAdmission, 1), undefined, 30000);
+      const inflight = writer.call(
+        first,
+        'POST',
+        '/reservations',
+        writer.reservationBody(eventId, writerAdmission, 1),
+        undefined,
+        30000,
+      );
       await t.sleeping('%INSERT INTO reservations%');
       await waiting.queue(eventId, second);
       // The release needs the exclusive gate and so waits for the writer that holds the shared one.
@@ -156,12 +182,25 @@ faultSuite('admission lifecycle and existing flows across processes (real contai
     expect(writerAnswer.status).toBe(201);
     const results = await t.results(eventId);
     expect(results).toHaveLength(1);
-    expect(results[0]).toMatchObject({ admissionId: writerAdmission.admissionId, outcome: 'consumed' });
+    expect(results[0]).toMatchObject({
+      admissionId: writerAdmission.admissionId,
+      outcome: 'consumed',
+    });
     expect(new Date(results[0].committedAt).getTime()).toBeLessThan(releasedAt.getTime());
     // A scheduler retires the namespace; the queue API then says that the event has no queue.
-    await until(async () => (await t.control(eventId)) === null, 30000, 'the namespace to be retired');
-    for (const [buyer, app] of [[waiting, first], [idle, second]] as const)
-      expect(await buyer.status(eventId, app)).toMatchObject({ status: 404, code: 'ADMISSION_NOT_ENABLED' });
+    await until(
+      async () => (await t.control(eventId)) === null,
+      30000,
+      'the namespace to be retired',
+    );
+    for (const [buyer, app] of [
+      [waiting, first],
+      [idle, second],
+    ] as const)
+      expect(await buyer.status(eventId, app)).toMatchObject({
+        status: 404,
+        code: 'ADMISSION_NOT_ENABLED',
+      });
     // The event is unprotected now: a purchase takes the existing flow and consumes no admission.
     expect((await idle.reserve(eventId, idleAdmission, 1)).final.status).toBe(201);
     expect((await reserveLegacy(waiting, first, eventId)).status).toBe(201);
@@ -178,11 +217,20 @@ faultSuite('admission lifecycle and existing flows across processes (real contai
     const writerAdmission = await writer.enter(eventId, 60000, second);
     const remove = await t.slow('reservations', writer.userId, 2);
     try {
-      const inflight = writer.call(first, 'POST', '/reservations', writer.reservationBody(eventId, writerAdmission, 1), undefined, 30000);
+      const inflight = writer.call(
+        first,
+        'POST',
+        '/reservations',
+        writer.reservationBody(eventId, writerAdmission, 1),
+        undefined,
+        30000,
+      );
       await t.sleeping('%INSERT INTO reservations%');
       // The cascade to the policy row waits for the writer's lock; then the reservation forbids it.
       const began = Date.now();
-      await expect(t.pool.query('DELETE FROM events WHERE id = $1', [eventId])).rejects.toMatchObject({ code: '23503' });
+      await expect(
+        t.pool.query('DELETE FROM events WHERE id = $1', [eventId]),
+      ).rejects.toMatchObject({ code: '23503' });
       expect(Date.now() - began).toBeGreaterThan(500);
       expect((await inflight).status).toBe(201);
     } finally {
@@ -203,7 +251,10 @@ faultSuite('admission lifecycle and existing flows across processes (real contai
       await other.queue(queued);
       const [bought, deletion] = await Promise.all([
         buyer.reserve(queued, admission, 1, [round % 2 ? second : first]),
-        t.pool.query('DELETE FROM events WHERE id = $1', [queued]).then(() => 'deleted', (error) => String(error.code)),
+        t.pool.query('DELETE FROM events WHERE id = $1', [queued]).then(
+          () => 'deleted',
+          (error) => String(error.code),
+        ),
       ]);
       const purchase = bought.final;
       rounds.push({ purchase: brief(purchase), attempts: bought.attempts.map(brief), deletion });
@@ -211,9 +262,15 @@ faultSuite('admission lifecycle and existing flows across processes (real contai
         previous = null;
         expect(purchase.status).toBe(404);
         // The sweep retires the orphaned namespace; the queue API then answers 404.
-        await until(async () => (await t.control(queued)) === null, 30000, 'the orphaned namespace to be retired');
+        await until(
+          async () => (await t.control(queued)) === null,
+          30000,
+          'the orphaned namespace to be retired',
+        );
         expect((await other.status(queued, first)).status).toBe(404);
-        expect((await t.pool.query('SELECT 1 FROM reservations WHERE event_id = $1', [queued])).rowCount).toBe(0);
+        expect(
+          (await t.pool.query('SELECT 1 FROM reservations WHERE event_id = $1', [queued])).rowCount,
+        ).toBe(0);
       } else {
         // Refused by the reservation's foreign key, or chosen as the victim of the lock cycle
         // between the purchase and the cascade.
@@ -244,30 +301,149 @@ faultSuite('admission lifecycle and existing flows across processes (real contai
     const before = await t.seats(eventId);
     const ownerBody = owner.reservationBody(eventId, ownerAdmission, 1);
     const refused: Array<[string, Answer, number, string | null]> = [
-      ['admission fields without a token', await t.http(first, 'POST', '/reservations', { body: ownerBody }), 401, 'UNAUTHENTICATED'],
-      ['the body names another user', await stranger.call(second, 'POST', '/reservations', ownerBody), 403, 'FORBIDDEN'],
-      ['a reservation without admission fields', await reserveLegacy(stranger, first, eventId), 400, 'ADMISSION_INVALID_INPUT'],
-      ['a direct checkout without admission fields', await checkoutLegacy(stranger, second, eventId), 400, 'ADMISSION_INVALID_INPUT'],
-      ['one admission field alone', await stranger.call(first, 'POST', '/reservations', { ...stranger.reservationBody(eventId, null, 1), admissionId: ownerAdmission.admissionId }), 400, 'ADMISSION_INVALID_INPUT'],
-      ['the admission of another user', await stranger.call(second, 'POST', '/reservations', stranger.reservationBody(eventId, ownerAdmission, 1)), 404, 'ADMISSION_NOT_FOUND'],
-      ['the admission of another user on the direct path', await stranger.call(first, 'POST', '/checkouts', { eventId, userId: stranger.userId, quantity: 1, tierId: TIER, ...ownerAdmission }, randomUUID()), 404, 'ADMISSION_NOT_FOUND'],
-      ['an admission that does not exist', await stranger.call(second, 'POST', '/reservations', stranger.reservationBody(eventId, { admissionId: randomUUID(), admissionEpoch: ownerAdmission.admissionEpoch }, 1)), 404, 'ADMISSION_NOT_FOUND'],
-      ['an epoch that is not the current one', await owner.call(first, 'POST', '/reservations', owner.reservationBody(eventId, { admissionId: ownerAdmission.admissionId, admissionEpoch: randomUUID() }, 1)), 410, 'ADMISSION_RESET'],
-      ['an admission that is still waiting', await waiting.call(second, 'POST', '/reservations', waiting.reservationBody(eventId, waitingAdmission, 1)), 409, 'ADMISSION_NOT_READY'],
+      [
+        'admission fields without a token',
+        await t.http(first, 'POST', '/reservations', { body: ownerBody }),
+        401,
+        'UNAUTHENTICATED',
+      ],
+      [
+        'the body names another user',
+        await stranger.call(second, 'POST', '/reservations', ownerBody),
+        403,
+        'FORBIDDEN',
+      ],
+      [
+        'a reservation without admission fields',
+        await reserveLegacy(stranger, first, eventId),
+        400,
+        'ADMISSION_INVALID_INPUT',
+      ],
+      [
+        'a direct checkout without admission fields',
+        await checkoutLegacy(stranger, second, eventId),
+        400,
+        'ADMISSION_INVALID_INPUT',
+      ],
+      [
+        'one admission field alone',
+        await stranger.call(first, 'POST', '/reservations', {
+          ...stranger.reservationBody(eventId, null, 1),
+          admissionId: ownerAdmission.admissionId,
+        }),
+        400,
+        'ADMISSION_INVALID_INPUT',
+      ],
+      [
+        'the admission of another user',
+        await stranger.call(
+          second,
+          'POST',
+          '/reservations',
+          stranger.reservationBody(eventId, ownerAdmission, 1),
+        ),
+        404,
+        'ADMISSION_NOT_FOUND',
+      ],
+      [
+        'the admission of another user on the direct path',
+        await stranger.call(
+          first,
+          'POST',
+          '/checkouts',
+          { eventId, userId: stranger.userId, quantity: 1, tierId: TIER, ...ownerAdmission },
+          randomUUID(),
+        ),
+        404,
+        'ADMISSION_NOT_FOUND',
+      ],
+      [
+        'an admission that does not exist',
+        await stranger.call(
+          second,
+          'POST',
+          '/reservations',
+          stranger.reservationBody(
+            eventId,
+            { admissionId: randomUUID(), admissionEpoch: ownerAdmission.admissionEpoch },
+            1,
+          ),
+        ),
+        404,
+        'ADMISSION_NOT_FOUND',
+      ],
+      [
+        'an epoch that is not the current one',
+        await owner.call(
+          first,
+          'POST',
+          '/reservations',
+          owner.reservationBody(
+            eventId,
+            { admissionId: ownerAdmission.admissionId, admissionEpoch: randomUUID() },
+            1,
+          ),
+        ),
+        410,
+        'ADMISSION_RESET',
+      ],
+      [
+        'an admission that is still waiting',
+        await waiting.call(
+          second,
+          'POST',
+          '/reservations',
+          waiting.reservationBody(eventId, waitingAdmission, 1),
+        ),
+        409,
+        'ADMISSION_NOT_READY',
+      ],
     ];
-    t.note('L5 refusals', { refused: refused.map(([what, answer]) => ({ what, ...brief(answer) })) });
-    for (const [what, answer, status, code] of refused) expect({ what, status: answer.status, code: answer.code }).toEqual({ what, status, code });
+    t.note('L5 refusals', {
+      refused: refused.map(([what, answer]) => ({ what, ...brief(answer) })),
+    });
+    for (const [what, answer, status, code] of refused)
+      expect({ what, status: answer.status, code: answer.code }).toEqual({ what, status, code });
     expect(await t.seats(eventId)).toEqual(before);
     // None of it cost the owner anything: the admission still buys, once.
     const bought = await owner.call(first, 'POST', '/reservations', ownerBody);
     expect(bought.status).toBe(201);
     // Another user cannot check out that reservation, with or without an admission of their own.
-    const foreign = await stranger.call(second, 'POST', '/checkouts', { eventId, userId: stranger.userId, quantity: 1, tierId: TIER, reservationId: bought.body!.id }, randomUUID());
+    const foreign = await stranger.call(
+      second,
+      'POST',
+      '/checkouts',
+      {
+        eventId,
+        userId: stranger.userId,
+        quantity: 1,
+        tierId: TIER,
+        reservationId: bought.body!.id,
+      },
+      randomUUID(),
+    );
     expect(foreign.status).toBe(409);
     expect((await t.seats(eventId)).orders).toBe(0);
     // Real time: an admission left alone for its 30 s is refused as expired.
-    await until(async () => (await fillers[0].status(eventId)).body?.admission?.state === 'expired', 60000, 'an idle admission to expire', 1000);
-    const expired = await fillers[0].call(first, 'POST', '/reservations', fillers[0].reservationBody(eventId, { admissionId: (await fillers[0].status(eventId)).body!.admission.admissionId, admissionEpoch: ownerAdmission.admissionEpoch }, 1));
+    await until(
+      async () => (await fillers[0].status(eventId)).body?.admission?.state === 'expired',
+      60000,
+      'an idle admission to expire',
+      1000,
+    );
+    const expired = await fillers[0].call(
+      first,
+      'POST',
+      '/reservations',
+      fillers[0].reservationBody(
+        eventId,
+        {
+          admissionId: (await fillers[0].status(eventId)).body!.admission.admissionId,
+          admissionEpoch: ownerAdmission.admissionEpoch,
+        },
+        1,
+      ),
+    );
     expect(expired).toMatchObject({ status: 410, code: 'ADMISSION_EXPIRED' });
     expect(await t.seats(eventId)).toMatchObject({ reservations: 1, results: 1 });
     await t.quiet(eventId);
@@ -280,7 +456,10 @@ faultSuite('admission lifecycle and existing flows across processes (real contai
     const purchase = async (kind: 'reservation' | 'direct') => {
       const buyer = await t.buyer();
       const admission = await buyer.enter(eventId);
-      const made = kind === 'direct' ? await buyer.checkout(eventId, { admission, quantity: 2 }) : await buyer.reserve(eventId, admission, 2);
+      const made =
+        kind === 'direct'
+          ? await buyer.checkout(eventId, { admission, quantity: 2 })
+          : await buyer.reserve(eventId, admission, 2);
       expect(made.final.status).toBe(201);
       return { buyer, body: made.final.body! };
     };
@@ -290,14 +469,26 @@ faultSuite('admission lifecycle and existing flows across processes (real contai
     // and its checkout returns the seats; the result that created it stays.
     const expiring = await purchase('reservation');
     const held = await available();
-    await t.pool.query(`UPDATE reservations SET expires_at = NOW() - interval '1 second' WHERE id = $1`, [expiring.body.id]);
-    const tooLate = await expiring.buyer.checkout(eventId, { reservationId: expiring.body.id, quantity: 2 });
+    await t.pool.query(
+      `UPDATE reservations SET expires_at = NOW() - interval '1 second' WHERE id = $1`,
+      [expiring.body.id],
+    );
+    const tooLate = await expiring.buyer.checkout(eventId, {
+      reservationId: expiring.body.id,
+      quantity: 2,
+    });
     expect(tooLate.final.status).toBe(409);
     expect(await available()).toBe(held + 2);
-    expect((await t.pool.query('SELECT status FROM reservations WHERE id = $1', [expiring.body.id])).rows[0].status).toBe('expired');
+    expect(
+      (await t.pool.query('SELECT status FROM reservations WHERE id = $1', [expiring.body.id]))
+        .rows[0].status,
+    ).toBe('expired');
     // A second one is left for the product's own five-minute sweeper (last scenario of this file).
     const left = await purchase('reservation');
-    await t.pool.query(`UPDATE reservations SET expires_at = NOW() - interval '1 second' WHERE id = $1`, [left.body.id]);
+    await t.pool.query(
+      `UPDATE reservations SET expires_at = NOW() - interval '1 second' WHERE id = $1`,
+      [left.body.id],
+    );
     swept = { reservationId: left.body.id };
 
     // Real time: the three-second payment deadline against a settlement, with a sweeper in each
@@ -310,11 +501,20 @@ faultSuite('admission lifecycle and existing flows across processes (real contai
       await sleep(Math.max(0, deadline - (await t.pgNow()).getTime() + offsetMs));
       const settled = await t.settle(offsetMs % 100 ? first : second, made.body.order.id);
       expect(settled.status).toBe(200);
-      const final = await until(async () => {
-        const row = await order(made.body.order.id);
-        return row.status !== 'pending' && row;
-      }, 10000, 'the order to leave pending');
-      outcomes.push({ offsetMs, status: final.status, tickets: final.tickets, answered: settled.body!.order.status });
+      const final = await until(
+        async () => {
+          const row = await order(made.body.order.id);
+          return row.status !== 'pending' && row;
+        },
+        10000,
+        'the order to leave pending',
+      );
+      outcomes.push({
+        offsetMs,
+        status: final.status,
+        tickets: final.tickets,
+        answered: settled.body!.order.status,
+      });
       if (final.status === 'paid') {
         expect(final.tickets).toBe(2);
         expect(settled.body!.tickets).toHaveLength(2);
@@ -329,7 +529,11 @@ faultSuite('admission lifecycle and existing flows across processes (real contai
 
     // A settlement that arrives after the expiry is kept as a fact and issues nothing.
     const lateOrder = await purchase('direct');
-    await until(async () => (await order(lateOrder.body.order.id)).status === 'expired', 15000, 'the order to expire');
+    await until(
+      async () => (await order(lateOrder.body.order.id)).status === 'expired',
+      15000,
+      'the order to expire',
+    );
     const afterExpiry = await available();
     const late = await t.settle(first, lateOrder.body.order.id);
     expect(late.status).toBe(200);
@@ -356,16 +560,31 @@ faultSuite('admission lifecycle and existing flows across processes (real contai
     await t.redisFaults.stop();
     await t.redisFaults.start();
     await Promise.all(t.apps.map((app) => t.ready(app)));
-    const replay = await until(async () => {
-      const answer = await t.settle(second, paying.body.order.id, 'settled', key, provider);
-      return answer.status === 200 && answer;
-    }, 30000, 'the callback after the Redis restart', 500);
+    const replay = await until(
+      async () => {
+        const answer = await t.settle(second, paying.body.order.id, 'settled', key, provider);
+        return answer.status === 200 && answer;
+      },
+      30000,
+      'the callback after the Redis restart',
+      500,
+    );
     expect(replay.body).toMatchObject({ order: { status: 'paid' }, duplicate: true });
     expect(replay.body!.tickets).toHaveLength(2);
-    const reused = await t.settle(first, paying.body.order.id, 'settled', key, `p7-${randomUUID()}`);
+    const reused = await t.settle(
+      first,
+      paying.body.order.id,
+      'settled',
+      key,
+      `p7-${randomUUID()}`,
+    );
     expect(reused.status).toBe(409);
     // The restart cost the queue one generation, and the log of it is complete.
-    await until(async () => (await t.control(eventId))?.mode === 'ready', 30000, 'the namespace after the restart');
+    await until(
+      async () => (await t.control(eventId))?.mode === 'ready',
+      30000,
+      'the namespace after the restart',
+    );
     await t.verify();
   });
 
@@ -374,7 +593,9 @@ faultSuite('admission lifecycle and existing flows across processes (real contai
     const { reservationId } = swept!;
     // Real time: the sweeper's first tick comes five minutes after the instances started.
     await until(
-      async () => (await t.pool.query('SELECT status FROM reservations WHERE id = $1', [reservationId])).rows[0].status === 'expired',
+      async () =>
+        (await t.pool.query('SELECT status FROM reservations WHERE id = $1', [reservationId]))
+          .rows[0].status === 'expired',
       400000,
       'the reservation sweeper',
       5000,

@@ -78,12 +78,12 @@ const Hero = () => (
         <div className="stat-card accent">
           <div className="label">Source of truth</div>
           <div className="value">PostgreSQL</div>
-          <div className="sub">Redis = hold TTL / idempotency cache</div>
+          <div className="sub">Redis = hold TTL · rate limit · 멱등성 cache · 대기열</div>
         </div>
         <div className="stat-card">
-          <div className="label">Load target</div>
-          <div className="value">p95&lt;120<span className="unit">ms</span></div>
-          <div className="sub">k6 smoke · /reservations 200 rps</div>
+          <div className="label">Admission control</div>
+          <div className="value">Queue</div>
+          <div className="sub">Redis 대기열 · 입장량 제한 · adaptive polling</div>
         </div>
       </div>
     </div>

@@ -14,6 +14,9 @@ RUN npm run build
 FROM node:18-alpine
 WORKDIR /app
 
+# 이 이미지는 운영용이다. NODE_ENV를 주지 않고 띄워도 시작 검사(src/infra/config.ts)가 돈다.
+ENV NODE_ENV=production
+
 # 시그널 처리용 dumb-init 설치
 RUN apk add --no-cache dumb-init
 

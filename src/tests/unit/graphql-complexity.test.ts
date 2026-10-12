@@ -41,40 +41,60 @@ describe('GraphQL query complexity', () => {
     });
 
     it('charges a reused fragment for every aliased execution', () => {
-      const document = parse('fragment Item on Event { id } query { a: event(id: "a") { ...Item } b: event(id: "b") { ...Item } }');
+      const document = parse(
+        'fragment Item on Event { id } query { a: event(id: "a") { ...Item } b: event(id: "b") { ...Item } }',
+      );
       expect(() => validateQueryComplexity(document, schema, {}, 4)).not.toThrow();
       expect(() => validateQueryComplexity(document, schema, {}, 3)).toThrow(/Query too complex/);
     });
 
     it('multiplies nested list costs using actual return types and argument defaults', () => {
-      const nestedSchema = buildSchema('type Query { events(limit: Int = 3): [Event!]! } type Event { id: ID! related(limit: Int = 2): [Event!]! }');
+      const nestedSchema = buildSchema(
+        'type Query { events(limit: Int = 3): [Event!]! } type Event { id: ID! related(limit: Int = 2): [Event!]! }',
+      );
       const document = parse('{ events { related { id } } }');
       // events 3 + 3 * (related 1 + 2 * id 1) = 12.
       expect(() => validateQueryComplexity(document, nestedSchema, {}, 12)).not.toThrow();
-      expect(() => validateQueryComplexity(document, nestedSchema, {}, 11)).toThrow(/Query too complex/);
+      expect(() => validateQueryComplexity(document, nestedSchema, {}, 11)).toThrow(
+        /Query too complex/,
+      );
     });
 
     it('coerces operation variable defaults and respects provided overrides', () => {
       const document = parse('query Q($limit: Int = 10000) { events(limit: $limit) { id } }');
       expect(() => validateQueryComplexity(document, schema)).toThrow(/Query too complex/);
       expect(() => validateQueryComplexity(document, schema, { limit: 2 }, 4)).not.toThrow();
-      expect(() => validateQueryComplexity(document, schema, { limit: 2 }, 3)).toThrow(/Query too complex/);
+      expect(() => validateQueryComplexity(document, schema, { limit: 2 }, 3)).toThrow(
+        /Query too complex/,
+      );
     });
 
     it('charges root defaults and accepts the exact 5000 budget boundary', () => {
-      expect(() => validateQueryComplexity(parse('{ events { id } }'), schema, {}, 20)).not.toThrow();
-      expect(() => validateQueryComplexity(parse('{ events { id } }'), schema, {}, 19)).toThrow(/Query too complex/);
-      expect(() => validateQueryComplexity(parse('{ events(limit: 2500) { id } }'), schema)).not.toThrow();
-      expect(() => validateQueryComplexity(parse('{ events(limit: 2501) { id } }'), schema)).toThrow(/Query too complex/);
+      expect(() =>
+        validateQueryComplexity(parse('{ events { id } }'), schema, {}, 20),
+      ).not.toThrow();
+      expect(() => validateQueryComplexity(parse('{ events { id } }'), schema, {}, 19)).toThrow(
+        /Query too complex/,
+      );
+      expect(() =>
+        validateQueryComplexity(parse('{ events(limit: 2500) { id } }'), schema),
+      ).not.toThrow();
+      expect(() =>
+        validateQueryComplexity(parse('{ events(limit: 2501) { id } }'), schema),
+      ).toThrow(/Query too complex/);
     });
 
     it('rejects fragment cycles without recursion or a cheap fallback', () => {
-      const document = parse('fragment Loop on Event { id ...Loop } query { event(id: "a") { ...Loop } }');
+      const document = parse(
+        'fragment Loop on Event { id ...Loop } query { event(id: "a") { ...Loop } }',
+      );
       expect(() => validateQueryComplexity(document, schema)).toThrow(/cycle|complex|depth/i);
     });
 
     it('enforces the depth boundary even when the default cost budget is larger', () => {
-      const nestedSchema = buildSchema('type Query { event: Event } type Event { id: ID next: Event }');
+      const nestedSchema = buildSchema(
+        'type Query { event: Event } type Event { id: ID next: Event }',
+      );
       const within = parse(`{ event { ${'next { '.repeat(9)} id ${'} '.repeat(9)} } }`);
       const beyond = parse(`{ event { ${'next { '.repeat(10)} id ${'} '.repeat(10)} } }`);
       expect(() => validateQueryComplexity(within, nestedSchema)).not.toThrow();
@@ -105,9 +125,7 @@ describe('GraphQL query complexity', () => {
         }
       `);
 
-      expect(() => validateQueryComplexity(document, schema, {}, 100)).toThrow(
-        /Query too complex/,
-      );
+      expect(() => validateQueryComplexity(document, schema, {}, 100)).toThrow(/Query too complex/);
     });
 
     it('rejects queries that exceed the limit via variable args', () => {
@@ -169,7 +187,9 @@ describe('GraphQL query complexity', () => {
         }
       `);
 
-      expect(() => validateQueryComplexity(document, schema, { eventId: 'event-1' }, 100)).not.toThrow();
+      expect(() =>
+        validateQueryComplexity(document, schema, { eventId: 'event-1' }, 100),
+      ).not.toThrow();
     });
 
     it('sums complexity across multiple top-level fields', () => {
@@ -185,9 +205,7 @@ describe('GraphQL query complexity', () => {
         }
       `);
 
-      expect(() => validateQueryComplexity(document, schema, {}, 80)).toThrow(
-        /Query too complex/,
-      );
+      expect(() => validateQueryComplexity(document, schema, {}, 80)).toThrow(/Query too complex/);
       expect(() => validateQueryComplexity(document, schema, {}, 200)).not.toThrow();
     });
   });
@@ -209,7 +227,11 @@ describe('GraphQL query complexity', () => {
       if (!requestListener || !requestListener.didResolveOperation) {
         throw new Error('plugin did not return a request listener');
       }
-      await requestListener.didResolveOperation({ document, schema, request: { variables } } as never);
+      await requestListener.didResolveOperation({
+        document,
+        schema,
+        request: { variables },
+      } as never);
     }
 
     it('returns a plugin with requestDidStart hook', () => {
@@ -227,11 +249,9 @@ describe('GraphQL query complexity', () => {
     it('throws GraphQLError when variable complexity exceeds max', async () => {
       const plugin = createComplexityPlugin({ max: 100 });
       await expect(
-        callDidResolveOperation(
-          plugin,
-          `query Q($l: Int!) { events(limit: $l) { id } }`,
-          { l: 1000 },
-        ),
+        callDidResolveOperation(plugin, `query Q($l: Int!) { events(limit: $l) { id } }`, {
+          l: 1000,
+        }),
       ).rejects.toThrow(/Query too complex/);
     });
 

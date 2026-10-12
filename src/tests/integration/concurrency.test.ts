@@ -9,7 +9,7 @@ import { initLogger } from '@/infra/logger';
 import { v4 as uuid } from 'uuid';
 import { CheckoutService, CheckoutResult } from '@/core/services/checkout.service';
 import { ReservationService } from '@/core/services/reservation.service';
-import { ConflictError, ValidationError } from '@/core/errors';
+import { ConflictError, InsufficientInventoryError, ValidationError } from '@/core/errors';
 
 type CheckoutInput = {
   eventId: string;
@@ -83,14 +83,11 @@ describe('concurrency integration tests', () => {
 
     await Promise.all(
       userIds.map((userId) =>
-        pool.query(
-          `INSERT INTO users (id, email, name) VALUES ($1, $2, $3)`,
-          [
-            userId,
-            `user-${userId.slice(0, 8)}@test.com`,
-            `Test user ${userId.slice(0, 4)}`,
-          ],
-        ),
+        pool.query(`INSERT INTO users (id, email, name) VALUES ($1, $2, $3)`, [
+          userId,
+          `user-${userId.slice(0, 8)}@test.com`,
+          `Test user ${userId.slice(0, 4)}`,
+        ]),
       ),
     );
 
@@ -98,18 +95,32 @@ describe('concurrency integration tests', () => {
   }
 
   async function getAvailableSeats(eventId: string): Promise<number> {
-    const result = await pool.query(
-      `SELECT available_seats FROM events WHERE id = $1`,
-      [eventId],
-    );
+    const result = await pool.query(`SELECT available_seats FROM events WHERE id = $1`, [eventId]);
     return result.rows[0].available_seats;
   }
 
-  async function getReservationStatus(reservationId: string): Promise<string | null> {
+  async function countOrders(eventId: string): Promise<number> {
     const result = await pool.query(
-      `SELECT status FROM reservations WHERE id = $1`,
-      [reservationId],
+      `SELECT count(*)::int AS count FROM orders WHERE event_id = $1`,
+      [eventId],
     );
+    return result.rows[0].count;
+  }
+
+  /**
+   * 구매가 거절된 이유를 구분한다. 품절과 직렬화 재시도 소진(SQLSTATE 40001)은 둘 다
+   * 좌석 수를 지키는 거절이지만 원인이 다르므로, 테스트가 "실패 n건"으로 뭉개지 않게 한다.
+   */
+  function rejectionReason(err: unknown): string {
+    if (err instanceof InsufficientInventoryError) return 'sold-out';
+    if ((err as { code?: string } | null)?.code === '40001') return 'serialization-failure';
+    return `unexpected: ${String(err)}`;
+  }
+
+  async function getReservationStatus(reservationId: string): Promise<string | null> {
+    const result = await pool.query(`SELECT status FROM reservations WHERE id = $1`, [
+      reservationId,
+    ]);
     return result.rows[0]?.status ?? null;
   }
 
@@ -130,221 +141,218 @@ describe('concurrency integration tests', () => {
     await clearRedisData();
   });
 
-  it(
-    'prevents overselling under concurrent serializable checkouts',
-    async () => {
-      const { eventId, tierId, userIds } = await setupEventAndUsers({
-        seats: 3,
-        userCount: 5,
-      });
+  it('prevents overselling under concurrent serializable checkouts', async () => {
+    const seats = 3;
+    const { eventId, tierId, userIds } = await setupEventAndUsers({
+      seats,
+      userCount: 5,
+    });
 
-      const checkoutService = new CheckoutService();
+    const checkoutService = new CheckoutService();
+    const checkout = (userId: string) => {
+      const input: CheckoutInput = {
+        eventId,
+        userId,
+        quantity: 1,
+        tierId,
+        idempotencyKey: uuid(),
+      };
 
-      const results = await Promise.allSettled(
-        userIds.map((userId) => {
-          const input: CheckoutInput = {
-            eventId,
-            userId,
-            quantity: 1,
-            tierId,
-            idempotencyKey: uuid(),
-          };
+      return serializableTransactionWithRetry((client) => checkoutService.checkout(input, client));
+    };
 
-          return serializableTransactionWithRetry((client) =>
-            checkoutService.checkout(input, client),
-          );
+    const results = await Promise.allSettled(userIds.map(checkout));
+    const sold = results.filter((r) => r.status === 'fulfilled').length;
+    const reasons = results.flatMap((r) =>
+      r.status === 'rejected' ? [rejectionReason(r.reason)] : [],
+    );
+    process.stdout.write(JSON.stringify({ concurrentCheckouts: { sold, reasons } }) + '\n');
+
+    // 동시 구매의 패자는 품절이거나, SERIALIZABLE transaction이 세 번의 시도를 다 쓴 40001이다.
+    // 어느 쪽이 몇 건인지는 타이밍에 달려 있어 단언하지 않는다. 다른 이유의 거절은 없어야 한다.
+    expect(
+      reasons.filter((reason) => reason !== 'sold-out' && reason !== 'serialization-failure'),
+    ).toEqual([]);
+
+    // 거절 사유가 무엇이든 팔린 수는 정확히 좌석 수다. 품절 거절은 좌석이 0일 때만 나오고,
+    // 한 요청의 시도 세 번이 모두 직렬화 실패였다면 그 사이에 서로 다른 구매 3건이 commit된 것이다.
+    expect(sold).toBe(seats);
+    expect(reasons).toHaveLength(userIds.length - seats);
+    expect(await getAvailableSeats(eventId)).toBe(0);
+    expect(await countOrders(eventId)).toBe(seats);
+
+    // 패자가 한 명씩 다시 구매하면 경합이 없으므로 모두 품절로 거절되고, 주문은 늘지 않는다.
+    const losers = userIds.filter((_, index) => results[index].status === 'rejected');
+    for (const userId of losers) {
+      expect(await checkout(userId).then(() => 'sold', rejectionReason)).toBe('sold-out');
+    }
+    expect(await getAvailableSeats(eventId)).toBe(0);
+    expect(await countOrders(eventId)).toBe(seats);
+  }, 15000);
+
+  it('prevents overselling at reservation stage under concurrent reservations', async () => {
+    const { eventId, tierId, userIds } = await setupEventAndUsers({
+      seats: 3,
+      userCount: 5,
+    });
+
+    const reservationService = new ReservationService();
+
+    const results = await Promise.allSettled(
+      userIds.map((userId) =>
+        reservationService.createReservation({
+          eventId,
+          userId,
+          quantity: 1,
+          tierId,
         }),
-      );
+      ),
+    );
 
-      const successCount = results.filter((r) => r.status === 'fulfilled').length;
-      const failureCount = results.filter((r) => r.status === 'rejected').length;
+    const successCount = results.filter((r) => r.status === 'fulfilled').length;
+    const reasons = results.flatMap((r) =>
+      r.status === 'rejected' ? [rejectionReason(r.reason)] : [],
+    );
 
-      expect(successCount).toBe(3);
-      expect(failureCount).toBe(2);
-      expect(await getAvailableSeats(eventId)).toBe(0);
-    },
-    15000,
-  );
+    // 입장 필드 없는 예약은 READ COMMITTED라 행 잠금을 기다렸다가 진행한다.
+    // 그래서 패자는 재시도 소진이 아니라 전부 품절로 거절된다.
+    expect(successCount).toBe(3);
+    expect(reasons).toEqual(['sold-out', 'sold-out']);
+    expect(await getAvailableSeats(eventId)).toBe(0);
+  }, 15000);
 
-  it(
-    'prevents overselling at reservation stage under concurrent reservations',
-    async () => {
-      const { eventId, tierId, userIds } = await setupEventAndUsers({
-        seats: 3,
-        userCount: 5,
-      });
+  it('returns seats to inventory when a reservation is expired', async () => {
+    const { eventId, tierId, userIds } = await setupEventAndUsers({
+      seats: 5,
+      userCount: 1,
+    });
+    const userId = userIds[0];
 
-      const reservationService = new ReservationService();
+    const reservationService = new ReservationService();
 
-      const results = await Promise.allSettled(
-        userIds.map((userId) =>
-          reservationService.createReservation({
-            eventId,
-            userId,
-            quantity: 1,
-            tierId,
-          }),
-        ),
-      );
+    const reservation = await reservationService.createReservation({
+      eventId,
+      userId,
+      quantity: 2,
+      tierId,
+    });
 
-      const successCount = results.filter((r) => r.status === 'fulfilled').length;
-      const failureCount = results.filter((r) => r.status === 'rejected').length;
+    expect(await getAvailableSeats(eventId)).toBe(3);
+    expect(await getReservationStatus(reservation.id)).toBe('active');
 
-      expect(successCount).toBe(3);
-      expect(failureCount).toBe(2);
-      expect(await getAvailableSeats(eventId)).toBe(0);
-    },
-    15000,
-  );
+    await reservationService.expireReservation(reservation.id);
 
-  it(
-    'returns seats to inventory when a reservation is expired',
-    async () => {
-      const { eventId, tierId, userIds } = await setupEventAndUsers({
-        seats: 5,
-        userCount: 1,
-      });
-      const userId = userIds[0];
+    expect(await getAvailableSeats(eventId)).toBe(5);
+    expect(await getReservationStatus(reservation.id)).toBe('expired');
 
-      const reservationService = new ReservationService();
+    await reservationService.expireReservation(reservation.id);
+    expect(await getAvailableSeats(eventId)).toBe(5);
+  }, 15000);
 
-      const reservation = await reservationService.createReservation({
-        eventId,
-        userId,
-        quantity: 2,
-        tierId,
-      });
+  it('does not double-deduct seats when checkout follows a reservation', async () => {
+    const { eventId, tierId, userIds } = await setupEventAndUsers({
+      seats: 5,
+      userCount: 1,
+    });
+    const userId = userIds[0];
 
-      expect(await getAvailableSeats(eventId)).toBe(3);
-      expect(await getReservationStatus(reservation.id)).toBe('active');
+    const reservationService = new ReservationService();
+    const checkoutService = new CheckoutService();
 
-      await reservationService.expireReservation(reservation.id);
+    const reservation = await reservationService.createReservation({
+      eventId,
+      userId,
+      quantity: 2,
+      tierId,
+    });
 
-      expect(await getAvailableSeats(eventId)).toBe(5);
-      expect(await getReservationStatus(reservation.id)).toBe('expired');
+    expect(await getAvailableSeats(eventId)).toBe(3);
 
-      await reservationService.expireReservation(reservation.id);
-      expect(await getAvailableSeats(eventId)).toBe(5);
-    },
-    15000,
-  );
+    await serializableTransactionWithRetry((client) =>
+      checkoutService.checkout(
+        {
+          eventId,
+          userId,
+          quantity: 2,
+          tierId,
+          reservationId: reservation.id,
+          idempotencyKey: uuid(),
+        },
+        client,
+      ),
+    );
 
-  it(
-    'does not double-deduct seats when checkout follows a reservation',
-    async () => {
-      const { eventId, tierId, userIds } = await setupEventAndUsers({
-        seats: 5,
-        userCount: 1,
-      });
-      const userId = userIds[0];
+    expect(await getAvailableSeats(eventId)).toBe(3);
 
-      const reservationService = new ReservationService();
-      const checkoutService = new CheckoutService();
+    expect(await getReservationStatus(reservation.id)).toBe('converted');
+  }, 15000);
 
-      const reservation = await reservationService.createReservation({
-        eventId,
-        userId,
-        quantity: 2,
-        tierId,
-      });
+  it('rejects checkout when userId differs from reservation', async () => {
+    const reservationService = new ReservationService();
+    const checkoutService = new CheckoutService();
+    const { eventId, tierId, userIds } = await setupEventAndUsers({
+      seats: 5,
+      userCount: 2,
+    });
 
-      expect(await getAvailableSeats(eventId)).toBe(3);
+    const reservation = await reservationService.createReservation({
+      eventId,
+      userId: userIds[0],
+      quantity: 1,
+      tierId,
+    });
 
-      await serializableTransactionWithRetry((client) =>
+    await expect(
+      serializableTransactionWithRetry((client) =>
         checkoutService.checkout(
           {
             eventId,
-            userId,
-            quantity: 2,
+            userId: userIds[1],
+            quantity: 1,
             tierId,
             reservationId: reservation.id,
             idempotencyKey: uuid(),
           },
           client,
         ),
-      );
+      ),
+    ).rejects.toThrow(ConflictError);
 
-      expect(await getAvailableSeats(eventId)).toBe(3);
+    expect(await getReservationStatus(reservation.id)).toBe('active');
+    expect(await getAvailableSeats(eventId)).toBe(4);
+  }, 15000);
 
-      expect(await getReservationStatus(reservation.id)).toBe('converted');
-    },
-    15000,
-  );
+  it('rejects checkout when quantity differs from reservation', async () => {
+    const reservationService = new ReservationService();
+    const checkoutService = new CheckoutService();
+    const { eventId, tierId, userIds } = await setupEventAndUsers({
+      seats: 5,
+      userCount: 1,
+    });
 
-  it(
-    'rejects checkout when userId differs from reservation',
-    async () => {
-      const reservationService = new ReservationService();
-      const checkoutService = new CheckoutService();
-      const { eventId, tierId, userIds } = await setupEventAndUsers({
-        seats: 5,
-        userCount: 2,
-      });
+    const reservation = await reservationService.createReservation({
+      eventId,
+      userId: userIds[0],
+      quantity: 2,
+      tierId,
+    });
 
-      const reservation = await reservationService.createReservation({
-        eventId,
-        userId: userIds[0],
-        quantity: 1,
-        tierId,
-      });
-
-      await expect(
-        serializableTransactionWithRetry((client) =>
-          checkoutService.checkout(
-            {
-              eventId,
-              userId: userIds[1],
-              quantity: 1,
-              tierId,
-              reservationId: reservation.id,
-              idempotencyKey: uuid(),
-            },
-            client,
-          ),
+    await expect(
+      serializableTransactionWithRetry((client) =>
+        checkoutService.checkout(
+          {
+            eventId,
+            userId: userIds[0],
+            quantity: 5,
+            tierId,
+            reservationId: reservation.id,
+            idempotencyKey: uuid(),
+          },
+          client,
         ),
-      ).rejects.toThrow(ConflictError);
-
-      expect(await getReservationStatus(reservation.id)).toBe('active');
-      expect(await getAvailableSeats(eventId)).toBe(4);
-    },
-    15000,
-  );
-
-  it(
-    'rejects checkout when quantity differs from reservation',
-    async () => {
-      const reservationService = new ReservationService();
-      const checkoutService = new CheckoutService();
-      const { eventId, tierId, userIds } = await setupEventAndUsers({
-        seats: 5,
-        userCount: 1,
-      });
-
-      const reservation = await reservationService.createReservation({
-        eventId,
-        userId: userIds[0],
-        quantity: 2,
-        tierId,
-      });
-
-      await expect(
-        serializableTransactionWithRetry((client) =>
-          checkoutService.checkout(
-            {
-              eventId,
-              userId: userIds[0],
-              quantity: 5,
-              tierId,
-              reservationId: reservation.id,
-              idempotencyKey: uuid(),
-            },
-            client,
-          ),
-        ),
-      ).rejects.toThrow(ConflictError);
-    },
-    15000,
-  );
+      ),
+    ).rejects.toThrow(ConflictError);
+  }, 15000);
 
   // concurrency.test.ts에 추가 권장
   it('returns idempotent order when same idempotency_key arrives concurrently', async () => {
@@ -397,54 +405,50 @@ describe('concurrency integration tests', () => {
     expect(await getAvailableSeats(eventId)).toBe(5);
   });
 
-  it(
-    'rejects checkout when same idempotency_key is reused with different payload',
-    async () => {
-      const { eventId, tierId, userIds } = await setupEventAndUsers({
-        seats: 5,
-        userCount: 1,
-      });
-      const idempotencyKey = uuid();
-      const checkoutService = new CheckoutService();
+  it('rejects checkout when same idempotency_key is reused with different payload', async () => {
+    const { eventId, tierId, userIds } = await setupEventAndUsers({
+      seats: 5,
+      userCount: 1,
+    });
+    const idempotencyKey = uuid();
+    const checkoutService = new CheckoutService();
 
-      const firstInput: CheckoutInput = {
-        eventId,
-        userId: userIds[0],
-        quantity: 1,
-        tierId,
-        idempotencyKey,
-      };
-      const firstResult = await serializableTransactionWithRetry((client) =>
-        checkoutService.checkout(firstInput, client),
-      );
-      if ('reservationExpired' in firstResult) throw new Error('Unexpected expired reservation');
-      expect(firstResult.order.quantity).toBe(1);
+    const firstInput: CheckoutInput = {
+      eventId,
+      userId: userIds[0],
+      quantity: 1,
+      tierId,
+      idempotencyKey,
+    };
+    const firstResult = await serializableTransactionWithRetry((client) =>
+      checkoutService.checkout(firstInput, client),
+    );
+    if ('reservationExpired' in firstResult) throw new Error('Unexpected expired reservation');
+    expect(firstResult.order.quantity).toBe(1);
 
-      // 같은 idempotency_key, 다른 quantity → 409 (ConflictError)
-      const conflictingInput: CheckoutInput = {
-        eventId,
-        userId: userIds[0],
-        quantity: 3,
-        tierId,
-        idempotencyKey,
-      };
+    // 같은 idempotency_key, 다른 quantity → 409 (ConflictError)
+    const conflictingInput: CheckoutInput = {
+      eventId,
+      userId: userIds[0],
+      quantity: 3,
+      tierId,
+      idempotencyKey,
+    };
 
-      await expect(
-        serializableTransactionWithRetry((client) =>
-          checkoutService.checkout(conflictingInput, client),
-        ),
-      ).rejects.toThrow(ConflictError);
+    await expect(
+      serializableTransactionWithRetry((client) =>
+        checkoutService.checkout(conflictingInput, client),
+      ),
+    ).rejects.toThrow(ConflictError);
 
-      // 같은 key + 같은 payload는 여전히 idempotent해야 함
-      const idempotentResult = await serializableTransactionWithRetry((client) =>
-        checkoutService.checkout(firstInput, client),
-      );
-      if ('reservationExpired' in idempotentResult) throw new Error('Unexpected expired reservation');
-      expect(idempotentResult.order.id).toBe(firstResult.order.id);
+    // 같은 key + 같은 payload는 여전히 idempotent해야 함
+    const idempotentResult = await serializableTransactionWithRetry((client) =>
+      checkoutService.checkout(firstInput, client),
+    );
+    if ('reservationExpired' in idempotentResult) throw new Error('Unexpected expired reservation');
+    expect(idempotentResult.order.id).toBe(firstResult.order.id);
 
-      // 좌석은 1개만 차감되어 있어야 함
-      expect(await getAvailableSeats(eventId)).toBe(4);
-    },
-    15000,
-  );
+    // 좌석은 1개만 차감되어 있어야 함
+    expect(await getAvailableSeats(eventId)).toBe(4);
+  }, 15000);
 });

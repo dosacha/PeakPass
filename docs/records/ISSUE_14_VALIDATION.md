@@ -15,14 +15,14 @@ Before that, an internal read-only review was done by a subagent of the implemen
 - P2 v261 index SHA256 `64d33e60a8e50c704d8fcd6f789974162fd096a564f4e2c95e5bcc286c81cea6`. No load experiment was run.
 - `admission-v1-seed` is unchanged: R2/s, C8, TTL30s, claim15s, tick250ms. These are correctness-test assumptions, not capacity.
 - At the start #9 listed P4 valid and P5/P6 ready; #9, #12–#18 and #25 had no comments and no PR was open.
-- The user reviewed the design in chat on 2026-10-02 and answered "proceed as recommended". The ten decisions are in [the plan](superpowers/plans/2026-10-02-issue-14-admission-purchase.md).
+- The user reviewed the design in chat on 2026-10-02 and answered "proceed as recommended". The ten decisions are in the plan.
 
 ## Implementation boundaries
 
 | Area | Implementation and invariant |
 | --- | --- |
 | Ledger | Migration 013 adds `admission_results`: one row per admission with owner, event, epoch, operation, canonical fingerprint and outcome. `consumed` references exactly one reservation or one direct order; `rejected` and `closed` carry code, HTTP status and message instead. `reservation_id` and `order_id` are each UNIQUE. Referenced users, events, reservations and orders cannot be deleted. A trigger rejects UPDATE; DELETE stays possible for owned cleanup. No backfill: existing reservations and orders get no row. |
-| Gate placement | No global middleware and no change to `InventoryService`. `ReservationService.createReservation` and the reservation-free branch of `CheckoutService.checkout` call the common module [`admission-consumption.ts`](../src/core/services/admission-consumption.ts) on their own `PoolClient`. A checkout that carries `reservationId` takes no gate. |
+| Gate placement | No global middleware and no change to `InventoryService`. `ReservationService.createReservation` and the reservation-free branch of `CheckoutService.checkout` call the common module [`admission-consumption.ts`](../../src/core/services/admission-consumption.ts) on their own `PoolClient`. A checkout that carries `reservationId` takes no gate. |
 | Lock order | Shared event gate → policy ensure and `FOR SHARE` → admission lock → existing checkout-key lock → existing rows. The gate and the admission lock are taken before the savepoint. |
 | New reservation | Without admission fields: the existing READ COMMITTED transaction plus the gate and policy read; a protected event answers 400. With admission fields: SERIALIZABLE with the existing three attempts. The admission ID is the retry key. |
 | New direct checkout | SERIALIZABLE as before. The order of the Idempotency-Key is read first, without a lock: if it exists the request is a replay and takes neither the gate nor the admission lock. Otherwise gate, policy, admission lock and the read of the submitted admission's durable result come before the checkout-key lock, and that result is judged, and the admission consumed, for the new order. The fingerprint includes the Idempotency-Key, so another key for the same admission is 409. |
@@ -105,7 +105,7 @@ Evidence kinds: **real** is owned PostgreSQL/Redis and an HTTP exchange with a l
 | Skips | Seven redis-recovery, two order-sweeper Redis-outage and one order-expiration-http Redis-stop cases still need their original fixed-port container and stay skipped. All 15 names are in the archive. |
 | GitHub Actions | `install-lint-test` passed on `a4e0b9b`, on the PR head `e3fb7e2`, which carries the final code, and on the merge commit `2d67cc3`. |
 
-Raw outputs: [manifest](../test-results/admission-v1/p5-final-20261002.json) / [ZIP](../test-results/admission-v1/p5-final-20261002.zip). The manifest records the ZIP and file SHA256 values, the image id, the results and the skipped tests. The archive holds the final outputs, the baseline, the RED output of each task and of the review findings, and the upgrade and mutation scripts, which are not part of the source tree. No credentials or `.env` are archived.
+Raw outputs: [manifest](../../test-results/admission-v1/p5-final-20261002.json) / [ZIP](../../test-results/admission-v1/p5-final-20261002.zip). The manifest records the ZIP and file SHA256 values, the image id, the results and the skipped tests. The archive holds the final outputs, the baseline, the RED output of each task and of the review findings, and the upgrade and mutation scripts, which are not part of the source tree. No credentials or `.env` are archived.
 
 ### Contract scenarios
 

@@ -1,6 +1,6 @@
 # Issue #10 구현·검증 기록
 
-2026-10-10 추가: 이 구현은 PR #19로 병합됐다(main `8f64539`, 2026-10-01). 맨 아래의 '아직 측정하지 않았다'는 그때의 기록이다. 과부하 구간은 이후 P2([FLASH_SALE_BASELINE.md](FLASH_SALE_BASELINE.md))가, 같은 조건의 A/B/C 비교는 P8([ISSUE_17_VALIDATION.md](ISSUE_17_VALIDATION.md))이 측정했다.
+2026-10-10 추가: 이 구현은 PR #19로 병합됐다(main `8f64539`, 2026-10-01). 맨 아래의 '아직 측정하지 않았다'는 그때의 기록이다. 과부하 구간은 이후 P2([FLASH_SALE_BASELINE.md](../FLASH_SALE_BASELINE.md))가, 같은 조건의 A/B/C 비교는 P8([ISSUE_17_VALIDATION.md](ISSUE_17_VALIDATION.md))이 측정했다.
 
 구현 branch: `codex/issue-10-write-load-harness`
 
@@ -41,13 +41,13 @@ docker run --rm --mount 'type=bind,source=C:/Users/dosac/.codex/worktrees/peakpa
 
 ## 승인된 실제 HTTP·SQL 증거
 
-세 실행 모두 위 구현 SHA의 clean working tree에서 새 자원·새 fixture로 실행했다. 각 ZIP은 원본 JSONL·로그·manifest·SQL·정리 결과 21개 파일을 포함한다. manifest의 20개 artifact 해시와 현재 구현 source hash를 대조했고, JWT 패턴이 결과에 없음을 확인했다. 인덱스는 [verification.json](../load-test/results/flash-sale-reference/verification.json), ZIP 해시는 [archives.sha256](../load-test/results/flash-sale-reference/archives.sha256)이다.
+세 실행 모두 위 구현 SHA의 clean working tree에서 새 자원·새 fixture로 실행했다. 각 ZIP은 원본 JSONL·로그·manifest·SQL·정리 결과 21개 파일을 포함한다. manifest의 20개 artifact 해시와 현재 구현 source hash를 대조했고, JWT 패턴이 결과에 없음을 확인했다. 인덱스는 [verification.json](../../load-test/results/flash-sale-reference/verification.json), ZIP 해시는 [archives.sha256](../../load-test/results/flash-sale-reference/archives.sha256)이다.
 
 | 실행 명령 | 실제 결과 | 원본 |
 | --- | --- | --- |
-| `node load-test/flash-sale-fixture.mjs --run-id p1-reference-ample-01` | 12 시작 / 12 paid / 24 tickets / dropped 0 | [ZIP](../load-test/results/flash-sale-reference/p1-reference-ample-01.zip) |
-| `node load-test/flash-sale-fixture.mjs --run-id p1-reference-ample-02` | 12 시작 / 12 paid / 24 tickets / dropped 0 | [ZIP](../load-test/results/flash-sale-reference/p1-reference-ample-02.zip) |
-| `node load-test/flash-sale-fixture.mjs --run-id p1-reference-limited-01 --stock limited --seats 6` | 12 시작 / 3 paid / 6 tickets / 재고 부족 409 9건 / dropped 0 | [ZIP](../load-test/results/flash-sale-reference/p1-reference-limited-01.zip) |
+| `node load-test/flash-sale-fixture.mjs --run-id p1-reference-ample-01` | 12 시작 / 12 paid / 24 tickets / dropped 0 | [ZIP](../../load-test/results/flash-sale-reference/p1-reference-ample-01.zip) |
+| `node load-test/flash-sale-fixture.mjs --run-id p1-reference-ample-02` | 12 시작 / 12 paid / 24 tickets / dropped 0 | [ZIP](../../load-test/results/flash-sale-reference/p1-reference-ample-02.zip) |
+| `node load-test/flash-sale-fixture.mjs --run-id p1-reference-limited-01 --stock limited --seats 6` | 12 시작 / 3 paid / 6 tickets / 재고 부족 409 9건 / dropped 0 | [ZIP](../../load-test/results/flash-sale-reference/p1-reference-limited-01.zip) |
 
 각 실행에서 invalid JWT 401, body user 불일치 403, invalid HMAC 401과 DB 불변을 확인했다. 충분한 재고 실행은 예약 경유 6명·직접 구매 6명, checkout replay 4회·settlement replay 4회다. SQL 수량·키·소유자 불변식 15개와 fixture 정리·무관한 sentinel 보존이 모두 통과했다. 실행용 컨테이너·네트워크·volume은 제거됐다. 이미지와 증거만 유지한다.
 
@@ -77,4 +77,4 @@ export default function () {}
 
 인수 tuple은 구현 SHA `e0fbc78754e17dd6380b1a899373168c3ddf6153`, `flash-sale-v1`, 위 세 reference run ID와 각 source hash다. 후속 evidence-only 커밋은 측정한 구현을 변경하지 않는다. #11 시작 시 이 tuple과 새 작업 코드·환경을 대조하고 총괄 #9의 변경 영향 gate를 적용한다.
 
-최대 처리량·과부하 병목·개선 효과는 아직 측정하지 않았다. 로컬 Docker와 부하 생성기를 공유하는 작은 smoke이고, PG/pool/Redis 관측은 표본이다. Redis 지표는 observer PING RTT와 commandstats이며 앱 명령별 percentile이 아니다. timeout/5xx 강제 주입은 VM 검사이고 하네스 자체의 실제 네트워크 장애 실험으로 주장하지 않는다. 하네스 실패/cleanup 오류가 있는 run은 인수하지 않는다. 재현·계측 정의는 [FLASH_SALE_EVIDENCE.md](FLASH_SALE_EVIDENCE.md)를 따른다.
+최대 처리량·과부하 병목·개선 효과는 아직 측정하지 않았다. 로컬 Docker와 부하 생성기를 공유하는 작은 smoke이고, PG/pool/Redis 관측은 표본이다. Redis 지표는 observer PING RTT와 commandstats이며 앱 명령별 percentile이 아니다. timeout/5xx 강제 주입은 VM 검사이고 하네스 자체의 실제 네트워크 장애 실험으로 주장하지 않는다. 하네스 실패/cleanup 오류가 있는 run은 인수하지 않는다. 재현·계측 정의는 [FLASH_SALE_EVIDENCE.md](../FLASH_SALE_EVIDENCE.md)를 따른다.

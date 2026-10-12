@@ -12,7 +12,7 @@ import {
 } from './admission-fault-fixture';
 
 /**
- * P7: several application processes, real process failures and the real timers of admission-v1
+ * Several application processes, real process failures and the real timers of admission-v1
  * (claim deadline 15 s, admission TTL 30 s, the transaction bounds of contract §5).
  *
  * Opt-in: ADMISSION_FAULT_IMAGE names the production image under test. Everything this file
@@ -27,7 +27,9 @@ faultSuite('admission across application processes and process failures (real co
   let previous: string | null = null;
   beforeAll(async () => {
     // Two instances run a scheduler; the third has the feature off and must never open the event.
-    t = await startTopology({ apps: [{ admission: true }, { admission: true }, { admission: false }] });
+    t = await startTopology({
+      apps: [{ admission: true }, { admission: true }, { admission: false }],
+    });
   });
   afterAll(async () => {
     await t?.destroy('process');
@@ -40,7 +42,12 @@ faultSuite('admission across application processes and process failures (real co
     previous = await t.event(seats);
     return previous;
   }
-  const brief = (answer: Answer) => ({ app: answer.app, status: answer.status, code: answer.code, ms: answer.ms });
+  const brief = (answer: Answer) => ({
+    app: answer.app,
+    status: answer.status,
+    code: answer.code,
+    ms: answer.ms,
+  });
   const resultOf = async (eventId: string, admission: AdmissionRef) =>
     (await t.results(eventId)).find((row) => row.admissionId === admission.admissionId);
   /** An admitted buyer whose polls go to `app`, with the body of the one reservation it will ask for. */
@@ -74,7 +81,12 @@ faultSuite('admission across application processes and process failures (real co
     ];
     const buyers = [];
     for (const [index, kind] of kinds.entries())
-      buyers.push({ kind, index, buyer: await t.buyer(), targets: rotations[index % rotations.length] });
+      buyers.push({
+        kind,
+        index,
+        buyer: await t.buyer(),
+        targets: rotations[index % rotations.length],
+      });
 
     // Everyone joins in a known order; the cancellers are last and still waiting when they cancel.
     const joined: AdmissionRef[] = [];
@@ -87,12 +99,17 @@ faultSuite('admission across application processes and process failures (real co
       // A01 across processes: one join key sent to both instances at the same moment.
       const epoch = (await buyer.status(eventId, poll)).body!.queue.epoch;
       const key = randomUUID();
-      const both = await Promise.all([buyer.join(eventId, epoch, key, first), buyer.join(eventId, epoch, key, second)]);
+      const both = await Promise.all([
+        buyer.join(eventId, epoch, key, first),
+        buyer.join(eventId, epoch, key, second),
+      ]);
       expect(both.map((answer) => answer.status).sort()).toEqual([200, 201]);
       expect(both[0].body!.admission.admissionId).toBe(both[1].body!.admission.admissionId);
       joined.push({ admissionId: both[0].body!.admission.admissionId, admissionEpoch: epoch });
     }
-    const sequences = await Promise.all(joined.map(async (admission) => Number((await t.entry(eventId, admission))!.sequence)));
+    const sequences = await Promise.all(
+      joined.map(async (admission) => Number((await t.entry(eventId, admission))!.sequence)),
+    );
     expect(sequences).toEqual(sequences.map((_, i) => i + 1));
 
     const outcomes = await Promise.all(
@@ -116,7 +133,12 @@ faultSuite('admission across application processes and process failures (real co
             buyer.reserve(eventId, admission, 1, [first]),
             buyer.reserve(eventId, admission, 1, [second]),
           ]);
-          return { kind, admission, answers: pair.map((p) => p.final), attempts: pair.flatMap((p) => p.attempts) };
+          return {
+            kind,
+            admission,
+            answers: pair.map((p) => p.final),
+            attempts: pair.flatMap((p) => p.attempts),
+          };
         }
         const purchase = await buyer.reserve(eventId, admission, 1 + (index % 2), targets);
         return { kind, admission, answers: [purchase.final], attempts: purchase.attempts };
@@ -124,7 +146,9 @@ faultSuite('admission across application processes and process failures (real co
     );
 
     // The instance with the feature off answered 503 for every purchase it received and none else.
-    const viaOff = outcomes.flatMap((o) => o.attempts).filter((a: Answer) => a.app === off.index + 1);
+    const viaOff = outcomes
+      .flatMap((o) => o.attempts)
+      .filter((a: Answer) => a.app === off.index + 1);
     expect(viaOff.length).toBeGreaterThan(0);
     expect(viaOff.every((a) => a.status === 503 && a.code === 'ADMISSION_UNAVAILABLE')).toBe(true);
 
@@ -135,7 +159,9 @@ faultSuite('admission across application processes and process failures (real co
     }
     const purchases = outcomes.filter((o) => !['cancel', 'abandon'].includes(o.kind));
     const bought = purchases.filter((o) => o.answers.every((a) => a.status === 201));
-    const soldOut = purchases.filter((o) => o.answers.every((a) => a.status === 409 && a.code === 'INSUFFICIENT_INVENTORY'));
+    const soldOut = purchases.filter((o) =>
+      o.answers.every((a) => a.status === 409 && a.code === 'INSUFFICIENT_INVENTORY'),
+    );
     // Every purchase ended as one of the two; nothing stayed unknown.
     expect(bought.length + soldOut.length).toBe(purchases.length);
     expect(soldOut.length).toBeGreaterThan(0);
@@ -145,17 +171,26 @@ faultSuite('admission across application processes and process failures (real co
     // Real time: the two abandoned admissions expire after their 30 s and give their slots back.
     await t.quiet(eventId);
     for (const outcome of outcomes.filter((o) => o.kind === 'abandon'))
-      expect(await t.entry(eventId, outcome.admission)).toMatchObject({ state: 'expired', reason: 'ADMISSION_EXPIRED' });
+      expect(await t.entry(eventId, outcome.admission)).toMatchObject({
+        state: 'expired',
+        reason: 'ADMISSION_EXPIRED',
+      });
 
     const results = await t.results(eventId);
     const targetOf = (o: (typeof outcomes)[number]) =>
       o.kind === 'direct' ? o.answers[0].body!.order.id : o.answers[0].body!.id;
-    expect(results.filter((r) => r.outcome === 'consumed').map((r) => r.reservationId ?? r.orderId).sort()).toEqual(
-      bought.map(targetOf).sort(),
-    );
-    expect(results.filter((r) => r.outcome === 'rejected').map((r) => r.admissionId).sort()).toEqual(
-      soldOut.map((o) => o.admission.admissionId).sort(),
-    );
+    expect(
+      results
+        .filter((r) => r.outcome === 'consumed')
+        .map((r) => r.reservationId ?? r.orderId)
+        .sort(),
+    ).toEqual(bought.map(targetOf).sort());
+    expect(
+      results
+        .filter((r) => r.outcome === 'rejected')
+        .map((r) => r.admissionId)
+        .sort(),
+    ).toEqual(soldOut.map((o) => o.admission.admissionId).sort());
     expect(results.filter((r) => r.outcome === 'closed')).toEqual([]);
     // Redis tells the same story as the ledger for every admission that reached a purchase.
     for (const outcome of purchases) {
@@ -169,7 +204,9 @@ faultSuite('admission across application processes and process failures (real co
     }
     const seats = await t.seats(eventId);
     const taken = bought.reduce(
-      (sum, o) => sum + (o.kind === 'direct' ? o.answers[0].body!.order.quantity : o.answers[0].body!.quantity),
+      (sum, o) =>
+        sum +
+        (o.kind === 'direct' ? o.answers[0].body!.order.quantity : o.answers[0].body!.quantity),
       0,
     );
     expect(seats.available).toBe(16 - taken);
@@ -178,9 +215,17 @@ faultSuite('admission across application processes and process failures (real co
     // Every entry that was admitted is in the log once: 18 purchasers and the two that abandoned.
     expect(log.promotions).toBe(20);
     // The log counts because it began on an empty keyspace. A capture that begins now says so.
-    expect(await t.lateCapture()).toEqual([expect.stringMatching(/capture began with \d+ admission keys present/)]);
-    t.note('M1', { buyers: buyers.length, bought: bought.length, soldOut: soldOut.length, promotions: log.promotions,
-      viaOff: viaOff.length, seats });
+    expect(await t.lateCapture()).toEqual([
+      expect.stringMatching(/capture began with \d+ admission keys present/),
+    ]);
+    t.note('M1', {
+      buyers: buyers.length,
+      bought: bought.length,
+      soldOut: soldOut.length,
+      promotions: log.promotions,
+      viaOff: viaOff.length,
+      seats,
+    });
   });
 
   it('M2 one admission on two instances at once: one target, one deduction, the other command is refused', async () => {
@@ -200,7 +245,11 @@ faultSuite('admission across application processes and process failures (real co
       const after = await t.seats(eventId);
       expect(after).toMatchObject({ available: before.available - 1, results: before.results + 1 });
       expect(after.reservations + after.orders).toBe(before.reservations + before.orders + 1);
-      t.note('M2 round', { round, reservation: brief(reservation.final), direct: brief(direct.final) });
+      t.note('M2 round', {
+        round,
+        reservation: brief(reservation.final),
+        direct: brief(direct.final),
+      });
     }
     // A06 across processes: ten copies of one request, alternating between the instances.
     const { buyer, admission } = await admitted(eventId, first);
@@ -250,7 +299,11 @@ faultSuite('admission across application processes and process failures (real co
       // Whichever came first, the cancelled entry buys nothing.
       const late = await next.reserve(eventId, waiting, 1, [first]);
       expect(late.final).toMatchObject({ status: 410, code: 'ADMISSION_CANCELLED' });
-      t.note('M3 cancel against promotion', { round, delayMs, promotedBeforeCancel: entry.admittedAt != null });
+      t.note('M3 cancel against promotion', {
+        round,
+        delayMs,
+        promotedBeforeCancel: entry.admittedAt != null,
+      });
     }
     expect(await t.seats(eventId)).toEqual(before);
 
@@ -269,8 +322,14 @@ faultSuite('admission across application processes and process failures (real co
         // The claim won: the cancel is refused and the purchase is the one result.
         expect(cancel.status).toBe(409);
         expect(['ADMISSION_IN_PROGRESS', 'ADMISSION_ALREADY_CONSUMED']).toContain(cancel.code);
-        expect(seatsAfter).toMatchObject({ available: seatsBefore.available - 1, results: seatsBefore.results + 1 });
-        expect(await resultOf(eventId, admission)).toMatchObject({ outcome: 'consumed', reservationId: purchase.final.body!.id });
+        expect(seatsAfter).toMatchObject({
+          available: seatsBefore.available - 1,
+          results: seatsBefore.results + 1,
+        });
+        expect(await resultOf(eventId, admission)).toMatchObject({
+          outcome: 'consumed',
+          reservationId: purchase.final.body!.id,
+        });
         tally.bought += 1;
       } else {
         // The cancel won: nothing is occupied and nothing is recorded.
@@ -281,7 +340,12 @@ faultSuite('admission across application processes and process failures (real co
         expect(await resultOf(eventId, admission)).toBeUndefined();
         tally.cancelled += 1;
       }
-      t.note('M3 cancel against claim', { round, cancelAfterMs, purchase: brief(purchase.final), cancel: brief(cancel) });
+      t.note('M3 cancel against claim', {
+        round,
+        cancelAfterMs,
+        purchase: brief(purchase.final),
+        cancel: brief(cancel),
+      });
     }
     t.note('M3', tally);
     await t.quiet(eventId);
@@ -316,16 +380,26 @@ faultSuite('admission across application processes and process failures (real co
         // An expired admission occupies nothing and leaves no ledger row.
         expect(answer).toMatchObject({ status: 410, code: 'ADMISSION_EXPIRED' });
         expect(result).toBeUndefined();
-        expect(await t.entry(eventId, admission)).toMatchObject({ state: 'expired', reason: 'ADMISSION_EXPIRED' });
+        expect(await t.entry(eventId, admission)).toMatchObject({
+          state: 'expired',
+          reason: 'ADMISSION_EXPIRED',
+        });
       }
       // Well before the end it buys, unless its first answer was a transient 503; after it, never.
       if (offsetMs <= -300 && purchase.attempts.length === 1) expect(answer.status).toBe(201);
       if (offsetMs >= 100) expect(answer.status).toBe(410);
     }
     const bought = outcomes.filter((outcome) => outcome.purchase.final.status === 201).length;
-    expect(await t.seats(eventId)).toMatchObject({ available: before.available - bought, results: before.results + bought });
+    expect(await t.seats(eventId)).toMatchObject({
+      available: before.available - bought,
+      results: before.results + bought,
+    });
     t.note('M4', {
-      outcomes: outcomes.map((o) => ({ offsetMs: o.offsetMs, ...brief(o.purchase.final), attempts: o.purchase.attempts.length })),
+      outcomes: outcomes.map((o) => ({
+        offsetMs: o.offsetMs,
+        ...brief(o.purchase.final),
+        attempts: o.purchase.attempts.length,
+      })),
     });
     await t.quiet(eventId);
     await t.verify();
@@ -344,17 +418,30 @@ faultSuite('admission across application processes and process failures (real co
       expect(await t.appFaults.exited(first)).toBe(137);
       expect((await lost).status).toBe(0);
       // The claim outlives the process: Redis still holds the entry as a claim in progress.
-      expect(await t.entry(eventId, admission)).toMatchObject({ state: 'admitted', phase: 'processing' });
+      expect(await t.entry(eventId, admission)).toMatchObject({
+        state: 'admitted',
+        phase: 'processing',
+      });
       // Within the claim deadline the same request resumes the same claim on another instance.
       // PostgreSQL still runs the dead process's statement and holds its admission lock for a
       // few seconds: until then the request is told that it is in progress.
       const retry = await buyer.reserve(eventId, admission, 1, [second]);
       t.note('K1 the same request on the other instance', { attempts: retry.attempts.map(brief) });
-      expect(retry.attempts.some((attempt) => attempt.status === 409 && attempt.code === 'ADMISSION_IN_PROGRESS')).toBe(true);
+      expect(
+        retry.attempts.some(
+          (attempt) => attempt.status === 409 && attempt.code === 'ADMISSION_IN_PROGRESS',
+        ),
+      ).toBe(true);
       expect(retry.final.status).toBe(201);
       const after = await t.seats(eventId);
-      expect(after).toMatchObject({ available: before.available - 1, reservations: before.reservations + 1 });
-      expect(await resultOf(eventId, admission)).toMatchObject({ outcome: 'consumed', reservationId: retry.final.body!.id });
+      expect(after).toMatchObject({
+        available: before.available - 1,
+        reservations: before.reservations + 1,
+      });
+      expect(await resultOf(eventId, admission)).toMatchObject({
+        outcome: 'consumed',
+        reservationId: retry.final.body!.id,
+      });
     } finally {
       await remove();
       await t.appFaults.start(first);
@@ -377,18 +464,36 @@ faultSuite('admission across application processes and process failures (real co
       expect((await lost).status).toBe(0);
       await remove();
       // Real time: nothing is closed before the deadline; after it the surviving reclaimer closes.
-      const closed = await until(() => resultOf(eventId, admission), 40000, 'the abandoned claim to be closed', 500);
-      expect(closed).toMatchObject({ outcome: 'closed', errorCode: 'ADMISSION_EXPIRED', reservationId: null });
+      const closed = await until(
+        () => resultOf(eventId, admission),
+        40000,
+        'the abandoned claim to be closed',
+        500,
+      );
+      expect(closed).toMatchObject({
+        outcome: 'closed',
+        errorCode: 'ADMISSION_EXPIRED',
+        reservationId: null,
+      });
       expect(new Date(closed.committedAt).getTime()).toBeGreaterThanOrEqual(deadline);
       t.note('K2 closed', { afterDeadlineMs: new Date(closed.committedAt).getTime() - deadline });
-      await until(async () => (await t.entry(eventId, admission))?.state === 'expired', 10000, 'the slot to be returned');
+      await until(
+        async () => (await t.entry(eventId, admission))?.state === 'expired',
+        10000,
+        'the slot to be returned',
+      );
       expect(await t.slots(eventId)).toBe(0);
       // The slot went back only after that row was committed.
-      expect(t.freedAt(eventId, admission)).toBeGreaterThanOrEqual(new Date(closed.committedAt).getTime());
+      expect(t.freedAt(eventId, admission)).toBeGreaterThanOrEqual(
+        new Date(closed.committedAt).getTime(),
+      );
       // The writer that comes back late reads the closed result and occupies nothing.
       const late = await buyer.reserve(eventId, admission, 1, [second]);
       expect(late.final).toMatchObject({ status: 410, code: 'ADMISSION_EXPIRED' });
-      expect(await t.seats(eventId)).toMatchObject({ available: before.available, reservations: before.reservations });
+      expect(await t.seats(eventId)).toMatchObject({
+        available: before.available,
+        reservations: before.reservations,
+      });
     } finally {
       await remove();
       await t.appFaults.start(first);
@@ -409,7 +514,12 @@ faultSuite('admission across application processes and process failures (real co
       // Redis stops answering, so the instance commits and then waits to tell Redis.
       await t.redisFaults.pause();
       try {
-        committed = await until(() => resultOf(eventId, admission), 15000, 'the purchase to commit', 50);
+        committed = await until(
+          () => resultOf(eventId, admission),
+          15000,
+          'the purchase to commit',
+          50,
+        );
         const beforeKill = await t.pgNow();
         await t.appFaults.kill(first);
         expect((await lost).status).toBe(0);
@@ -420,18 +530,32 @@ faultSuite('admission across application processes and process failures (real co
       }
       expect(committed).toMatchObject({ outcome: 'consumed' });
       // Redis never heard of the result: the entry is still a claim and holds its slot.
-      expect(await t.entry(eventId, admission)).toMatchObject({ state: 'admitted', phase: 'processing' });
+      expect(await t.entry(eventId, admission)).toMatchObject({
+        state: 'admitted',
+        phase: 'processing',
+      });
       expect(await t.slots(eventId)).toBe(1);
       // The buyer cannot tell this from a failure before the commit and sends the same request.
       const replay = await buyer.reserve(eventId, admission, 1, [second]);
       expect(replay.final.status).toBe(201);
       expect(replay.final.body!.id).toBe(committed.reservationId);
-      expect(await t.seats(eventId)).toMatchObject({ available: before.available - 1, reservations: before.reservations + 1 });
+      expect(await t.seats(eventId)).toMatchObject({
+        available: before.available - 1,
+        reservations: before.reservations + 1,
+      });
       // Real time: after the 15 s deadline a reclaimer reflects the committed result.
       const deadline: number = (await t.entry(eventId, admission))!.deadline;
-      await until(async () => (await t.entry(eventId, admission))?.state === 'consumed', 40000, 'the reclaimer to reflect the result', 500);
+      await until(
+        async () => (await t.entry(eventId, admission))?.state === 'consumed',
+        40000,
+        'the reclaimer to reflect the result',
+        500,
+      );
       expect(await t.redisNow()).toBeGreaterThanOrEqual(deadline);
-      expect((await t.entry(eventId, admission))!.outcome).toMatchObject({ kind: 'reservation', resourceId: committed.reservationId });
+      expect((await t.entry(eventId, admission))!.outcome).toMatchObject({
+        kind: 'reservation',
+        resourceId: committed.reservationId,
+      });
     } finally {
       await remove();
       await t.appFaults.start(first);
@@ -459,19 +583,45 @@ faultSuite('admission across application processes and process failures (real co
       await t.appFaults.pause(first);
       try {
         // Real time: the claim deadline passes while PostgreSQL still holds the admission lock.
-        await until(async () => (await t.redisNow()) > deadline + 1500, 40000, 'the claim deadline to pass', 250);
+        await until(
+          async () => (await t.redisNow()) > deadline + 1500,
+          40000,
+          'the claim deadline to pass',
+          250,
+        );
         expect(await t.session(pid)).toBe('idle in transaction');
         expect(await resultOf(eventId, admission)).toBeUndefined();
-        expect(await t.entry(eventId, admission)).toMatchObject({ state: 'admitted', phase: 'reconciling' });
+        expect(await t.entry(eventId, admission)).toMatchObject({
+          state: 'admitted',
+          phase: 'reconciling',
+        });
         expect(await t.slots(eventId)).toBe(1);
         // idle_in_transaction_session_timeout fires by its own timer and PostgreSQL ends the session.
-        await until(async () => (await t.session(pid)) === null, 30000, 'PostgreSQL to end the idle session', 250);
-        expect(await t.pgLog(began)).toContain('terminating connection due to idle-in-transaction timeout');
+        await until(
+          async () => (await t.session(pid)) === null,
+          30000,
+          'PostgreSQL to end the idle session',
+          250,
+        );
+        expect(await t.pgLog(began)).toContain(
+          'terminating connection due to idle-in-transaction timeout',
+        );
         // Only now the reclaimer can decide: it closes the claim and then returns the slot.
-        const closed = await until(() => resultOf(eventId, admission), 20000, 'the claim to be closed', 250);
+        const closed = await until(
+          () => resultOf(eventId, admission),
+          20000,
+          'the claim to be closed',
+          250,
+        );
         expect(closed).toMatchObject({ outcome: 'closed', errorCode: 'ADMISSION_EXPIRED' });
-        await until(async () => (await t.entry(eventId, admission))?.state === 'expired', 10000, 'the slot to be returned');
-        expect(t.freedAt(eventId, admission)).toBeGreaterThanOrEqual(new Date(closed.committedAt).getTime());
+        await until(
+          async () => (await t.entry(eventId, admission))?.state === 'expired',
+          10000,
+          'the slot to be returned',
+        );
+        expect(t.freedAt(eventId, admission)).toBeGreaterThanOrEqual(
+          new Date(closed.committedAt).getTime(),
+        );
       } finally {
         await t.appFaults.unpause(first);
       }
@@ -483,8 +633,14 @@ faultSuite('admission across application processes and process failures (real co
     }
     t.note('K4 the resumed writer', brief(answer));
     expect(answer).toMatchObject({ status: 503, code: 'ADMISSION_UNAVAILABLE' });
-    expect(await t.seats(eventId)).toMatchObject({ available: before.available, reservations: before.reservations });
-    expect((await buyer.reserve(eventId, admission, 1, [first])).final).toMatchObject({ status: 410, code: 'ADMISSION_EXPIRED' });
+    expect(await t.seats(eventId)).toMatchObject({
+      available: before.available,
+      reservations: before.reservations,
+    });
+    expect((await buyer.reserve(eventId, admission, 1, [first])).final).toMatchObject({
+      status: 410,
+      code: 'ADMISSION_EXPIRED',
+    });
     // The instance survived the session PostgreSQL ended under it.
     expect((await t.http(first, 'GET', '/ready')).status).toBe(200);
     await t.quiet(eventId);
@@ -500,7 +656,11 @@ faultSuite('admission across application processes and process failures (real co
     let seconds: number;
     try {
       const inflight = t.http(first, 'POST', '/reservations', {
-        token: buyer.token, body, timeoutMs: 30000, user: buyer.userId, closing,
+        token: buyer.token,
+        body,
+        timeoutMs: 30000,
+        user: buyer.userId,
+        closing,
       });
       await t.sleeping('%INSERT INTO reservations%');
       const signalled = Date.now();
@@ -512,7 +672,9 @@ faultSuite('admission across application processes and process failures (real co
       const code = await t.appFaults.exited(first, 150000);
       seconds = (Date.now() - signalled) / 1000;
       t.note(closing ? 'K5 client that closes its connection' : 'K5b keep-alive client', {
-        answer: brief(answer), exitCode: code, secondsToExit: Math.round(seconds * 10) / 10,
+        answer: brief(answer),
+        exitCode: code,
+        secondsToExit: Math.round(seconds * 10) / 10,
       });
       expect(code).toBe(0);
       // Redis is fenced first, the HTTP server drains, PostgreSQL closes last.
@@ -526,9 +688,17 @@ faultSuite('admission across application processes and process failures (real co
       ].map((line) => log.lastIndexOf(line));
       expect(steps.every((at) => at >= 0)).toBe(true);
       expect([...steps].sort((a, b) => a - b)).toEqual(steps);
-      expect(await resultOf(eventId, admission)).toMatchObject({ outcome: 'consumed', reservationId: answer.body!.id });
+      expect(await resultOf(eventId, admission)).toMatchObject({
+        outcome: 'consumed',
+        reservationId: answer.body!.id,
+      });
       // The result could not be told to Redis; the other instance's reclaimer reflects it.
-      await until(async () => (await t.entry(eventId, admission))?.state === 'consumed', 40000, 'the reclaimer to reflect the result', 500);
+      await until(
+        async () => (await t.entry(eventId, admission))?.state === 'consumed',
+        40000,
+        'the reclaimer to reflect the result',
+        500,
+      );
     } finally {
       await remove();
       await t.appFaults.start(first);
@@ -560,8 +730,14 @@ faultSuite('admission across application processes and process failures (real co
       expect(answer.ms).toBeLessThan(5900);
       expect(await t.pgLog(began)).toContain('canceling statement due to statement timeout');
       expect(await resultOf(eventId, admission)).toBeUndefined();
-      expect(await t.seats(eventId)).toMatchObject({ available: before.available, reservations: before.reservations });
-      expect(await t.entry(eventId, admission)).toMatchObject({ state: 'admitted', phase: 'processing' });
+      expect(await t.seats(eventId)).toMatchObject({
+        available: before.available,
+        reservations: before.reservations,
+      });
+      expect(await t.entry(eventId, admission)).toMatchObject({
+        state: 'admitted',
+        phase: 'processing',
+      });
     } finally {
       await remove();
     }
@@ -575,7 +751,11 @@ faultSuite('admission across application processes and process failures (real co
   async function databaseLoss(kind: 'restart' | 'crash') {
     const eventId = await event(20);
     const [first, second] = t.apps;
-    const buyers = [await admitted(eventId, first), await admitted(eventId, second), await admitted(eventId, first)];
+    const buyers = [
+      await admitted(eventId, first),
+      await admitted(eventId, second),
+      await admitted(eventId, first),
+    ];
     const startedAt = await Promise.all(t.apps.map((app) => t.appFaults.startedAt(app)));
     const remove = await t.slow('reservations', buyers[0].buyer.userId, 3);
     let away = false;
@@ -595,7 +775,11 @@ faultSuite('admission across application processes and process failures (real co
       ]);
       await t.pgFaults.start();
       away = false;
-      t.note(`T2 ${kind}`, { inflight: brief(answer), status: brief(status), purchase: brief(purchase) });
+      t.note(`T2 ${kind}`, {
+        inflight: brief(answer),
+        status: brief(status),
+        purchase: brief(purchase),
+      });
       // An outage is answered 503 and the request keeps its identity (contract §3, §5).
       expect(answer).toMatchObject({ status: 503, code: 'ADMISSION_UNAVAILABLE' });
       expect(status.status).toBe(200);
@@ -605,7 +789,9 @@ faultSuite('admission across application processes and process failures (real co
       await remove();
     }
     // The same requests, repeated, land exactly once each.
-    const finals = await Promise.all(buyers.map(({ buyer, admission }) => buyer.reserve(eventId, admission, 1, [first, second])));
+    const finals = await Promise.all(
+      buyers.map(({ buyer, admission }) => buyer.reserve(eventId, admission, 1, [first, second])),
+    );
     expect(finals.map((purchase) => purchase.final.status)).toEqual([201, 201, 201]);
     expect(new Set(finals.map((purchase) => purchase.final.body!.id)).size).toBe(3);
     expect(await t.seats(eventId)).toMatchObject({ available: 17, reservations: 3, results: 3 });
@@ -617,7 +803,8 @@ faultSuite('admission across application processes and process failures (real co
   }
   it('T2 PostgreSQL restarts with a purchase in flight: 503 with the same identity, the instances survive, every purchase lands once', () =>
     databaseLoss('restart'));
-  it('T2b PostgreSQL is killed and started again with a purchase in flight: the same', () => databaseLoss('crash'));
+  it('T2b PostgreSQL is killed and started again with a purchase in flight: the same', () =>
+    databaseLoss('crash'));
 
   it('T3 eight admitted buyers at the same moment: serialization retries may run out, and every 503 converges', async () => {
     const eventId = await event(40);
@@ -625,21 +812,35 @@ faultSuite('admission across application processes and process failures (real co
     const buyers = [];
     for (let i = 0; i < 8; i++) {
       const buyer = await t.buyer();
-      buyers.push({ buyer, admission: await buyer.queue(eventId, i % 2 ? first : second), app: i % 2 ? first : second });
+      buyers.push({
+        buyer,
+        admission: await buyer.queue(eventId, i % 2 ? first : second),
+        app: i % 2 ? first : second,
+      });
     }
     await Promise.all(buyers.map(({ buyer, app }) => buyer.admitted(eventId, 60000, app)));
     expect(await t.slots(eventId)).toBe(8);
     const answers = await Promise.all(
-      buyers.map(({ buyer, admission, app }) => send(buyer, app, buyer.reservationBody(eventId, admission, 1))),
+      buyers.map(({ buyer, admission, app }) =>
+        send(buyer, app, buyer.reservationBody(eventId, admission, 1)),
+      ),
     );
     const seen: Record<string, number> = {};
-    for (const answer of answers) seen[`${answer.status} ${answer.code ?? ''}`.trim()] = (seen[`${answer.status} ${answer.code ?? ''}`.trim()] ?? 0) + 1;
+    for (const answer of answers)
+      seen[`${answer.status} ${answer.code ?? ''}`.trim()] =
+        (seen[`${answer.status} ${answer.code ?? ''}`.trim()] ?? 0) + 1;
     // An observation of one local run, not a rate.
     t.note('T3 first answers of eight simultaneous purchases', seen);
-    expect(Object.keys(seen).filter((answer) => answer !== '201' && answer !== '503 ADMISSION_UNAVAILABLE')).toEqual([]);
+    expect(
+      Object.keys(seen).filter(
+        (answer) => answer !== '201' && answer !== '503 ADMISSION_UNAVAILABLE',
+      ),
+    ).toEqual([]);
     // A 503 left nothing behind: exactly the answered purchases exist.
     expect((await t.seats(eventId)).reservations).toBe(seen['201'] ?? 0);
-    const finals = await Promise.all(buyers.map(({ buyer, admission, app }) => buyer.reserve(eventId, admission, 1, [app])));
+    const finals = await Promise.all(
+      buyers.map(({ buyer, admission, app }) => buyer.reserve(eventId, admission, 1, [app])),
+    );
     expect(finals.map((purchase) => purchase.final.status)).toEqual(Array(8).fill(201));
     expect(new Set(finals.map((purchase) => purchase.final.body!.id)).size).toBe(8);
     expect(await t.seats(eventId)).toMatchObject({ available: 32, reservations: 8, results: 8 });

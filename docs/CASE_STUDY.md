@@ -12,9 +12,9 @@ PeakPass는 고트래픽 워크숍과 세미나 예약을 다루는 백엔드 �
 ## 목표
 
 - PostgreSQL을 기준으로 정합성 보장
-- Redis를 실제 사용 사례처럼 활용
+- Redis는 TTL hold, rate limit, 멱등성 lock과 결과 cache, 입장 대기열에 사용
 - REST write-side, GraphQL read-side 분리
-- 부하 테스트로 정합성 동작을 정량 검증
+- 정합성은 통합 테스트로, 유입 제어의 효과와 비용은 같은 조건의 부하 비교로 검증
 
 ## 해결 방식
 
@@ -24,7 +24,7 @@ PeakPass는 고트래픽 워크숍과 세미나 예약을 다루는 백엔드 �
 - `src/core`
 - `src/infra`
 
-구조로 분리해 설명 가능성을 높였습니다.
+구조로 나눴습니다.
 
 ### 2. 쓰기 흐름과 읽기 흐름 분리
 
@@ -57,8 +57,10 @@ PeakPass는 고트래픽 워크숍과 세미나 예약을 다루는 백엔드 �
 - checkout 직후 티켓이 비어 있고, settlement 이후 티켓이 생기는 흐름 확인
 - **route-level 통합 테스트**로 middleware(HMAC, rate limit, idempotency)를 포함한
   checkout 멱등성·settlement 동시성 계약 고정 (`test:routes`)
-- Redis를 의도적으로 중단시킨 상태에서도 동일 멱등키의 동시 checkout이
-  PostgreSQL advisory lock + UNIQUE로 order 1건에 수렴함을 확인
+- Redis lock을 얻지 못하는 상황을 주입한 route 단위 테스트(T03)에서, 같은 멱등키의 동시 checkout이
+  주문 1건으로 수렴함을 확인. PostgreSQL advisory lock이 줄을 세우고, 기다린 요청은 직렬화 실패 뒤
+  재시도에서 기존 주문을 반환한다. `orders.idempotency_key` UNIQUE는 마지막 방어선이다.
+  Redis를 실제로 멈춘 것이 아니라 연결 획득 실패를 주입한 테스트이고, rate limiter는 fail-open으로 둔 설정이다
 - failed webhook의 좌석 원복, paid 이후 late failure의 좌석 미복구,
   duplicate settlement 방어를 통합 테스트로 고정 (`test:webhook`)
 - DB 제약 계층 검증: command별 idempotency scope(005), status 허용 집합 CHECK(006),
@@ -71,12 +73,13 @@ PeakPass는 고트래픽 워크숍과 세미나 예약을 다루는 백엔드 �
   [ADMISSION_DESIGN_AND_OPERATIONS.md](./ADMISSION_DESIGN_AND_OPERATIONS.md),
   [PERFORMANCE_REPORT.md](./PERFORMANCE_REPORT.md) — 로컬 단일 인스턴스 측정 한정)
 
-현재 남아 있는 과제는 다음과 같습니다.
+만들지 않은 것과 받아들인 한계는 다음과 같습니다.
 
-- 사용자용 명시적 예약 취소(release) HTTP route는 미구현 (서비스 메서드만 존재)
-- 이벤트/재고 read-through cache는 미구현 — 도입 시 무효화 hook과 짝 맞추기
-- 데모 데이터 누적에 대한 정리 전략 (공개 데모 서버는 2026-10-10 기준 운영하지 않는다)
-- 입장 제어 각 단계가 고치지 않고 남긴 한계와 미실시 검증 (follow-up Issue #25, #27, #29, #32, #34, #36)
+- 사용자용 명시적 예약 취소(release) HTTP route는 없음 (서비스 메서드만 존재)
+- 이벤트/재고 read-through cache는 없음
+- tier별 수량과 결제 금액 대조는 범위 밖. 수량은 이벤트 단위로만 지킨다
+- 공개 데모 서버는 2026-10-10 기준 운영하지 않음
+- 입장 제어에서 고치지 않고 받아들인 한계는 [ADMISSION_DESIGN_AND_OPERATIONS.md](./ADMISSION_DESIGN_AND_OPERATIONS.md)의 "알려진 한계"에 있음. 관련 Issue(#25, #27, #29, #32, #34, #36)는 항목마다 고치거나 수용 결정을 적고 닫았다
 
 ## 다루는 핵심 기술 영역
 
@@ -85,4 +88,4 @@ PeakPass는 고트래픽 워크숍과 세미나 예약을 다루는 백엔드 �
 - Redis를 source of truth로 두지 않는 보조 계층 활용
 - GraphQL을 조회 전용으로 제한하는 구조적 판단
 - settlement 이후 발급과 duplicate webhook 방어 설계
-- k6 기반 부하 테스트로 정합성 동작을 정량 검증
+- 같은 조건의 k6 부하 비교로 유입 제어의 효과와 비용 측정

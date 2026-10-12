@@ -41,7 +41,10 @@ describe('final SQL of admission-v1 §8', () => {
         [ids.event, JSON.stringify([{ id: 'general', name: 'General', price: 50, quantity: 10 }])],
       );
       await build(c, ids);
-      const rows = (await c.query(finalSql())).rows as Array<{ check_name: string; event_id: string }>;
+      const rows = (await c.query(finalSql())).rows as Array<{
+        check_name: string;
+        event_id: string;
+      }>;
       return rows
         .filter((row) => row.event_id === ids.event)
         .map((row) => row.check_name)
@@ -161,25 +164,61 @@ describe('final SQL of admission-v1 §8', () => {
       await checks(async (c, ids) => {
         await protect(c, ids);
         const held = await reservation(c, ids, 2);
-        await consumed(c, ids, 'reservation', held, [ids.user, ids.event, EPOCH, 'reservation', 'general', 2, null]);
+        await consumed(c, ids, 'reservation', held, [
+          ids.user,
+          ids.event,
+          EPOCH,
+          'reservation',
+          'general',
+          2,
+          null,
+        ]);
         const converted = await reservation(c, ids, 3, 'converted');
-        await consumed(c, ids, 'reservation', converted, [ids.user, ids.event, EPOCH, 'reservation', 'general', 3, null]);
+        await consumed(c, ids, 'reservation', converted, [
+          ids.user,
+          ids.event,
+          EPOCH,
+          'reservation',
+          'general',
+          3,
+          null,
+        ]);
         await order(c, ids, 3, 'pending', converted);
         const direct = await paid(c, ids, 1);
-        await consumed(c, ids, 'direct-checkout', direct.id, [ids.user, ids.event, EPOCH, 'direct-checkout', 'general', 1, direct.key]);
+        await consumed(c, ids, 'direct-checkout', direct.id, [
+          ids.user,
+          ids.event,
+          EPOCH,
+          'direct-checkout',
+          'general',
+          1,
+          direct.key,
+        ]);
         // An expired reservation holds no seat but keeps the result that created it.
         const expired = await reservation(c, ids, 4, 'expired');
-        await consumed(c, ids, 'reservation', expired, [ids.user, ids.event, EPOCH, 'reservation', 'general', 4, null]);
+        await consumed(c, ids, 'reservation', expired, [
+          ids.user,
+          ids.event,
+          EPOCH,
+          'reservation',
+          'general',
+          4,
+          null,
+        ]);
         await seats(c, ids, 10 - 2 - 3 - 1);
       }),
     ).toEqual([]);
   });
 
   it('reports a seat count that does not add up, and a count outside its bounds', async () => {
-    expect(await checks(async (c, ids) => void (await reservation(c, ids, 2)))).toEqual(['seat_equation']);
+    expect(await checks(async (c, ids) => void (await reservation(c, ids, 2)))).toEqual([
+      'seat_equation',
+    ]);
     expect(
       await checks(async (c, ids) => {
-        await c.query('ALTER TABLE events DROP CONSTRAINT events_available_seats_not_above_total_check');
+        await c.query(
+          'ALTER TABLE events DROP CONSTRAINT events_available_seats_not_above_total_check',
+        );
         await seats(c, ids, 11);
       }),
     ).toEqual(['seat_bounds', 'seat_equation']);
@@ -230,21 +269,45 @@ describe('final SQL of admission-v1 §8', () => {
     expect(
       await checks(async (c, ids) => {
         const held = await reservation(c, ids, 2);
-        await consumed(c, ids, 'reservation', held, [ids.user, ids.event, EPOCH, 'reservation', 'general', 3, null]);
+        await consumed(c, ids, 'reservation', held, [
+          ids.user,
+          ids.event,
+          EPOCH,
+          'reservation',
+          'general',
+          3,
+          null,
+        ]);
         await seats(c, ids, 8);
       }),
     ).toEqual(['result_target']);
     expect(
       await checks(async (c, ids) => {
         const direct = await order(c, ids, 1);
-        await consumed(c, ids, 'direct-checkout', direct.id, [ids.user, ids.event, EPOCH, 'direct-checkout', 'general', 1, randomUUID()]);
+        await consumed(c, ids, 'direct-checkout', direct.id, [
+          ids.user,
+          ids.event,
+          EPOCH,
+          'direct-checkout',
+          'general',
+          1,
+          randomUUID(),
+        ]);
         await seats(c, ids, 9);
       }),
     ).toEqual(['result_target']);
     expect(
       await checks(async (c, ids) => {
         const held = await reservation(c, ids, 2);
-        await consumed(c, ids, 'reservation', held, [ids.other, ids.event, EPOCH, 'reservation', 'general', 2, null]);
+        await consumed(c, ids, 'reservation', held, [
+          ids.other,
+          ids.event,
+          EPOCH,
+          'reservation',
+          'general',
+          2,
+          null,
+        ]);
         await seats(c, ids, 8);
       }),
     ).toEqual(['result_fingerprint']);
@@ -252,14 +315,29 @@ describe('final SQL of admission-v1 §8', () => {
     expect(
       await checks(async (c, ids) => {
         const held = await reservation(c, ids, 2);
-        await consumed(c, ids, 'reservation', held, [ids.user, ids.event, EPOCH, 'reservation', 'general', 2, randomUUID()]);
+        await consumed(c, ids, 'reservation', held, [
+          ids.user,
+          ids.event,
+          EPOCH,
+          'reservation',
+          'general',
+          2,
+          randomUUID(),
+        ]);
         await seats(c, ids, 8);
       }),
     ).toEqual(['result_fingerprint']);
     expect(
       await checks(async (c, ids) => {
         const held = await reservation(c, ids, 2);
-        await consumed(c, ids, 'reservation', held, [ids.user, ids.event, EPOCH, 'reservation', 'general', 2]);
+        await consumed(c, ids, 'reservation', held, [
+          ids.user,
+          ids.event,
+          EPOCH,
+          'reservation',
+          'general',
+          2,
+        ]);
         await seats(c, ids, 8);
       }),
     ).toEqual(['result_fingerprint']);
@@ -347,7 +425,10 @@ describe('final SQL of admission-v1 §8', () => {
     expect(
       await checks(async (c, ids) => {
         const created = await paid(c, ids, 1);
-        await c.query(`UPDATE payment_callback_keys SET callback_status = 'failed' WHERE order_id = $1`, [created.id]);
+        await c.query(
+          `UPDATE payment_callback_keys SET callback_status = 'failed' WHERE order_id = $1`,
+          [created.id],
+        );
         await seats(c, ids, 9);
       }),
     ).toEqual(['payment_callback_key']);
@@ -355,7 +436,10 @@ describe('final SQL of admission-v1 §8', () => {
       await checks(async (c, ids) => {
         const created = await order(c, ids, 1, 'expired');
         await settlement(c, created.id, { reconciliation: true });
-        await c.query(`UPDATE payment_callback_keys SET callback_status = 'failed' WHERE order_id = $1`, [created.id]);
+        await c.query(
+          `UPDATE payment_callback_keys SET callback_status = 'failed' WHERE order_id = $1`,
+          [created.id],
+        );
       }),
     ).toEqual([]);
     expect(
@@ -369,18 +453,19 @@ describe('final SQL of admission-v1 §8', () => {
     expect(
       await checks(async (c, ids) => {
         const created = await order(c, ids, 1);
-        await c.query(`INSERT INTO payment_records(id,order_id,status,idempotency_key) VALUES($1,$2,'pending',$3)`, [
-          randomUUID(),
-          created.id,
-          randomUUID(),
-        ]);
+        await c.query(
+          `INSERT INTO payment_records(id,order_id,status,idempotency_key) VALUES($1,$2,'pending',$3)`,
+          [randomUUID(), created.id, randomUUID()],
+        );
         await seats(c, ids, 9);
       }),
     ).toEqual(['payment_checkout_record']);
     expect(
       await checks(async (c, ids) => {
         const created = await order(c, ids, 1);
-        await c.query(`UPDATE payment_records SET status = 'failed' WHERE order_id = $1`, [created.id]);
+        await c.query(`UPDATE payment_records SET status = 'failed' WHERE order_id = $1`, [
+          created.id,
+        ]);
         await seats(c, ids, 9);
       }),
     ).toEqual(['payment_checkout_record']);
@@ -388,7 +473,10 @@ describe('final SQL of admission-v1 §8', () => {
     expect(
       await checks(async (c, ids) => {
         const created = await order(c, ids, 1);
-        await c.query('UPDATE payment_records SET idempotency_key = upper(idempotency_key) WHERE order_id = $1', [created.id]);
+        await c.query(
+          'UPDATE payment_records SET idempotency_key = upper(idempotency_key) WHERE order_id = $1',
+          [created.id],
+        );
         await seats(c, ids, 9);
       }),
     ).toEqual([]);

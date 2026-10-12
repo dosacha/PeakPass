@@ -16,6 +16,7 @@ import { PaymentWebhookService } from '@/core/services/payment-webhook.service';
 import { OrderService } from '@/core/services/order.service';
 import { CheckoutResult } from '@/core/services/checkout.service';
 import { Order } from '@/core/models/order';
+import { uuid } from '@/core/models/uuid';
 import { AuthUser } from '@/api/middleware/auth';
 
 type DemoUser = {
@@ -30,9 +31,11 @@ type DemoSession = {
   expiresAt: string;
 };
 
-const DemoSettlementSchema = z.object({
-  orderId: z.string().uuid(),
-}).strict();
+const DemoSettlementSchema = z
+  .object({
+    orderId: uuid,
+  })
+  .strict();
 
 export type DemoSettlementRequest = {
   orderId: string;
@@ -62,14 +65,10 @@ export async function findDemoUserByEmail(email: string): Promise<DemoUser | nul
 
 export function createDemoSession(user: DemoUser, config: Config): DemoSession {
   const expiresAt = new Date(Date.now() + config.DEMO_SESSION_TTL_SECONDS * 1000).toISOString();
-  const token = jwt.sign(
-    { email: user.email, role: 'demo' },
-    config.JWT_SECRET,
-    {
-      subject: user.id,
-      expiresIn: config.DEMO_SESSION_TTL_SECONDS,
-    },
-  );
+  const token = jwt.sign({ email: user.email, role: 'demo' }, config.JWT_SECRET, {
+    subject: user.id,
+    expiresIn: config.DEMO_SESSION_TTL_SECONDS,
+  });
 
   return {
     userId: user.id,
@@ -103,6 +102,8 @@ function requireDemoIdempotencyKey(request: FastifyRequest): string {
     throw new ValidationError('Idempotency-Key header is required');
   }
 
+  // 정산의 Idempotency-Key는 텍스트로 저장되고 보낸 문자열 그대로가 key다. 실제 webhook과 같게
+  // 형식만 검사하고 값은 바꾸지 않는다.
   const result = z.string().uuid().safeParse(idempotencyKey);
   if (!result.success) {
     throw new ValidationError('Idempotency-Key header must be a UUID');
@@ -162,41 +163,42 @@ export async function registerDemoSessionRoutes(
   const findUserByEmail = dependencies.findUserByEmail ?? findDemoUserByEmail;
   const processSettlement = dependencies.processSettlement ?? processDemoSettlement;
 
-  app.post('/demo/session', async (request, reply) => {
+  app.post('/demo/session', { config: { rateLimit: 'demoSession' } }, async (request, reply) => {
     const user = await findUserByEmail(config.DEMO_USER_EMAIL);
     if (!user) {
       throw new DemoSessionConfigurationError();
     }
 
     const session = createDemoSession(user, config);
-    logger.info(
-      { requestId: request.id, userId: user.id },
-      'Issued live demo session',
-    );
+    logger.info({ requestId: request.id, userId: user.id }, 'Issued live demo session');
 
     return reply.header('Cache-Control', 'no-store').send(session);
   });
 
-  app.post<{ Body: unknown }>('/demo/settlement', async (request, reply) => {
-    const demoUser = requireDemoSession(request);
-    const body = DemoSettlementSchema.parse(request.body);
-    const idempotencyKey = requireDemoIdempotencyKey(request);
-    const result = await processSettlement({
-      orderId: body.orderId,
-      userId: demoUser.id,
-      idempotencyKey,
-    });
+  app.post<{ Body: unknown }>(
+    '/demo/settlement',
+    { config: { rateLimit: 'demoSettlement' } },
+    async (request, reply) => {
+      const demoUser = requireDemoSession(request);
+      const body = DemoSettlementSchema.parse(request.body);
+      const idempotencyKey = requireDemoIdempotencyKey(request);
+      const result = await processSettlement({
+        orderId: body.orderId,
+        userId: demoUser.id,
+        idempotencyKey,
+      });
 
-    logger.info(
-      {
-        requestId: request.id,
-        orderId: result.order.id,
-        duplicate: result.duplicate,
-        ticketCount: result.tickets.length,
-      },
-      'Live demo settlement processed',
-    );
+      logger.info(
+        {
+          requestId: request.id,
+          orderId: result.order.id,
+          duplicate: result.duplicate,
+          ticketCount: result.tickets.length,
+        },
+        'Live demo settlement processed',
+      );
 
-    return reply.header('Cache-Control', 'no-store').send(result);
-  });
+      return reply.header('Cache-Control', 'no-store').send(result);
+    },
+  );
 }

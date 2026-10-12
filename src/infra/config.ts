@@ -2,25 +2,30 @@ import 'dotenv/config';
 import { z } from 'zod';
 
 const DEVELOPMENT_JWT_SECRET = 'dev-secret-change-in-production-32chars';
+// 공개된 적이 있는 값들. 이 저장소의 `.env.example`이 2026-10-12까지 둘째 값을 싣고 있었으므로
+// 그대로 복사해 쓴 환경이 있을 수 있다. production에서는 둘 다 거부한다.
+const PUBLIC_JWT_SECRETS = new Set([
+  DEVELOPMENT_JWT_SECRET,
+  'your-jwt-secret-change-in-production-32chars',
+]);
+const MIN_SECRET_LENGTH = 32;
 
 // 환경변수에서 boolean을 안전하게 읽는다.
 // `z.coerce.boolean()`은 자바스크립트 `Boolean(string)` 룰을 따라
 // 빈 문자열을 제외한 모든 string("false"·"0"·"FALSE" 등)을 true로 변환하는 함정이 있다.
-// 실제 운영에서 ENABLE_RATE_LIMITING=false로 끄려고 해도 안 꺼지는 *진짜 버그*였다.
+// ENABLE_RATE_LIMITING=false로 꺼도 꺼지지 않는 버그가 실제로 있었다.
 // 명시적 파서로 "true"/"1"만 true로, "false"/"0"은 false로 정확히 매핑한다.
 //
 // export하는 이유: 테스트가 inline 재정의 대신 production parser를 직접 검증하도록 함.
 export const booleanFromEnv = (defaultValue: boolean) =>
-  z
-    .union([z.string(), z.boolean(), z.undefined()])
-    .transform((v) => {
-      if (typeof v === 'boolean') return v;
-      if (v === undefined || v === '') return defaultValue;
-      const normalized = v.toLowerCase();
-      if (normalized === 'true' || normalized === '1') return true;
-      if (normalized === 'false' || normalized === '0') return false;
-      return defaultValue;
-    });
+  z.union([z.string(), z.boolean(), z.undefined()]).transform((v) => {
+    if (typeof v === 'boolean') return v;
+    if (v === undefined || v === '') return defaultValue;
+    const normalized = v.toLowerCase();
+    if (normalized === 'true' || normalized === '1') return true;
+    if (normalized === 'false' || normalized === '0') return false;
+    return defaultValue;
+  });
 
 const envSchema = z.object({
   NODE_ENV: z.enum(['development', 'production', 'test']).default('development'),
@@ -28,7 +33,6 @@ const envSchema = z.object({
   PORT: z.coerce.number().default(3000),
 
   // 데이터베이스 설정
-  DATABASE_URL: z.string().default('postgresql://peakpass:peakpass@localhost:5432/peakpass'),
   DB_HOST: z.string().default('localhost'),
   DB_PORT: z.coerce.number().default(5432),
   DB_USER: z.string().default('peakpass'),
@@ -40,22 +44,22 @@ const envSchema = z.object({
   DB_POOL_SAMPLE_INTERVAL_MS: z.coerce.number().int().min(0).max(2147483647).default(0),
 
   // Redis 설정
-  REDIS_URL: z.string().optional(),
   REDIS_HOST: z.string().default('localhost'),
   REDIS_PORT: z.coerce.number().default(6379),
   REDIS_PASSWORD: z.string().optional(),
-  REDIS_POOL_SIZE: z.coerce.number().default(10),
 
   // 애플리케이션 설정
-  JWT_SECRET: z.string().min(32).default(DEVELOPMENT_JWT_SECRET),
-  API_KEY: z.string().default('dev-api-key-change-in-production'),
+  JWT_SECRET: z.string().min(MIN_SECRET_LENGTH).default(DEVELOPMENT_JWT_SECRET),
   ORDER_PAYMENT_WINDOW_MINUTES: z.coerce.number().finite().positive().default(10),
   ORDER_SWEEP_INTERVAL_MS: z.coerce.number().int().positive().max(2147483647).default(500),
-  ORDER_SWEEP_BATCH_SIZE: z.coerce.number().int().positive().max(Number.MAX_SAFE_INTEGER).default(20),
+  ORDER_SWEEP_BATCH_SIZE: z.coerce
+    .number()
+    .int()
+    .positive()
+    .max(Number.MAX_SAFE_INTEGER)
+    .default(20),
 
   // 외부 서비스 설정
-  PAYMENT_SERVICE_URL: z.string().url().default('https://api.payment-provider.example.com'),
-  PAYMENT_API_KEY: z.string().default('test-key-change-in-production'),
   WEBHOOK_SIGNING_SECRET: z.string().optional(),
   // webhook timestamp ± 허용 범위 (초). default 5분 (Stripe 권장값과 동일).
   WEBHOOK_REPLAY_TOLERANCE_SECONDS: z.coerce.number().int().positive().default(300),
@@ -119,20 +123,25 @@ function assertProductionInvariants(config: Config): void {
     return;
   }
 
-  if (config.JWT_SECRET === DEVELOPMENT_JWT_SECRET) {
+  if (PUBLIC_JWT_SECRETS.has(config.JWT_SECRET)) {
     throw new Error('JWT_SECRET must be set in production environment');
-  }
-
-  if (config.API_KEY === 'dev-api-key-change-in-production') {
-    throw new Error('API_KEY must be set in production environment');
   }
 
   // WEBHOOK_SIGNING_SECRET이 미설정이면 webhook-signature 미들웨어가 검증을 skip한다.
   // production에서는 fail-open이 보안 사고로 직결되므로 fail-fast로 강제한다.
-  if (!config.WEBHOOK_SIGNING_SECRET || config.WEBHOOK_SIGNING_SECRET.trim().length === 0) {
+  const webhookSecret = config.WEBHOOK_SIGNING_SECRET?.trim() ?? '';
+  if (webhookSecret.length === 0) {
     throw new Error(
       'WEBHOOK_SIGNING_SECRET must be set in production environment ' +
         '(missing secret would cause webhook signature verification to silently skip)',
+    );
+  }
+
+  // HMAC-SHA256의 key는 출력 길이(32바이트)보다 짧으면 그만큼 약해진다(RFC 2104).
+  // JWT_SECRET과 같은 하한을 둔다.
+  if (webhookSecret.length < MIN_SECRET_LENGTH) {
+    throw new Error(
+      `WEBHOOK_SIGNING_SECRET must be at least ${MIN_SECRET_LENGTH} characters in production environment`,
     );
   }
 

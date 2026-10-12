@@ -342,7 +342,7 @@ const DemoFlow = ({ state, actions }) => {
     reservation, order, settlement, duplicateReplay, duplicateSemantic,
     ticketByCode, stepStatus, stepTiming, requests, activeStep, expandedSteps,
     checkoutIdemKey, settlementIdemKey, providerTxnId,
-    dupBusy = { A: false, B: false } // [FIX] per-button busy flags for Step 6
+    dupBusy = { A: false, B: false } // per-button busy flags for Step 6
   } = state;
 
   const selectedEvent = events?.find(e => e.id === selectedEventId);
@@ -430,7 +430,7 @@ const DemoFlow = ({ state, actions }) => {
                   <div className="field-label">응답 · {events.length}개 이벤트</div>
                   <div className="event-grid" style={{marginTop:8}}>
                     {events.map(ev => {
-                      // [FIX] defensive guards — backend may return events with missing
+                      // defensive guards — backend may return events with missing
                       // totalSeats / availableSeats / pricing fields. Without these checks
                       // a single undefined field crashes the entire DemoFlow render tree.
                       const total = Number(ev?.totalSeats) || 0;
@@ -736,7 +736,7 @@ const DemoFlow = ({ state, actions }) => {
           >
             <div style={{fontSize:13, color:"var(--ink-2)"}}>
               Webhook은 재시도/중복 호출이 흔합니다. PeakPass는 두 층의 방어를 둡니다:
-              <b> (A) Idempotency-Key 캐시</b> 리플레이, <b>(B) DB UNIQUE 제약</b>을 통한 의미적 중복 방어. 두 케이스 모두 <b>티켓 수가 늘지 않습니다</b>.
+              <b> (A) 같은 Idempotency-Key</b>의 재전송은 기존 결과로 답하고, <b>(B) 새 key로 온 같은 결제</b>는 주문 행을 잠근 뒤 이미 paid인지 확인해 한 번만 처리합니다. <code style={{fontFamily:"var(--font-mono)"}}>provider_transaction_id</code>의 UNIQUE 인덱스는 마지막 방어선입니다. 두 케이스 모두 <b>티켓 수가 늘지 않습니다</b>.
             </div>
             <div className="dup-grid">
               <div className="dup-card">
@@ -756,10 +756,9 @@ const DemoFlow = ({ state, actions }) => {
                 </button>
                 {duplicateReplay && (
                   <div className="dup-result">
-                    <div>status · <b style={{color:"#206a41"}}>200 (cache hit)</b></div>
+                    <div>status · <b style={{color:"#206a41"}}>200</b></div>
                     <div>tickets · <b>{duplicateReplay.tickets?.length ?? tickets.length}</b> <span style={{color:"var(--green)"}}>(unchanged)</span></div>
-                    <div>duplicate · <b>{String(duplicateReplay.duplicate ?? true)}</b></div>
-                    <div style={{color:"var(--muted)", marginTop:4}}>source: redis idempotency:settlement:{(settlementIdemKey || "").slice(0,8)}</div>
+                    <div>duplicate · <b>{String(duplicateReplay.duplicate)}</b></div>
                   </div>
                 )}
               </div>
@@ -772,7 +771,7 @@ const DemoFlow = ({ state, actions }) => {
               <div className="dup-desc">
                   {isLiveDemo
                     ? <><b>새로운</b> Idempotency-Key와 동일 <code style={{fontFamily:"var(--font-mono)"}}>orderId</code>를 전송합니다. 서버가 같은 provider transaction ID를 결정론적으로 생성하므로 payment domain service가 기존 티켓만 반환합니다.</>
-                    : <><b>새로운</b> Idempotency-Key지만 동일 <code style={{fontFamily:"var(--font-mono)"}}>orderId / providerTransactionId</code>. Redis 캐시를 지나가더라도 DB <code style={{fontFamily:"var(--font-mono)"}}>UNIQUE(provider_txn_id)</code> 위반으로 방어됩니다.</>}
+                    : <><b>새로운</b> Idempotency-Key지만 동일 <code style={{fontFamily:"var(--font-mono)"}}>orderId / providerTransactionId</code>. 결과 캐시에 없는 key여도, 서버는 주문 행을 잠근 뒤 이미 paid인 것을 확인하고 기존 티켓을 반환합니다.</>}
                 </div>
                 <button className="btn btn-secondary" onClick={actions.runDupSemantic}
                         disabled={!settlement || dupBusy.B || !liveSessionReady}>
@@ -781,10 +780,9 @@ const DemoFlow = ({ state, actions }) => {
                 </button>
                 {duplicateSemantic && (
                   <div className="dup-result">
-                    <div>status · <b style={{color:"#206a41"}}>200 (idempotent)</b></div>
+                    <div>status · <b style={{color:"#206a41"}}>200</b></div>
                     <div>tickets · <b>{duplicateSemantic.tickets?.length ?? tickets.length}</b> <span style={{color:"var(--green)"}}>(unchanged)</span></div>
-                    <div>duplicate · <b>true</b></div>
-                    <div style={{color:"var(--muted)", marginTop:4}}>guarded by: payments.provider_txn_id UNIQUE</div>
+                    <div>duplicate · <b>{String(duplicateSemantic.duplicate)}</b></div>
                   </div>
                 )}
               </div>
@@ -924,9 +922,9 @@ const EXPLANATION_NOTES = {
     { b: "TX", t: "payment.status, order.status, tickets INSERT가 단일 트랜잭션에서 일어납니다." },
   ],
   6: [
-    { b: "CACHE", t: "같은 Idempotency-Key면 Redis가 기존 응답을 그대로 반환합니다." },
-    { b: "UNIQUE", t: "DB는 payments.provider_txn_id UNIQUE로 의미적 중복을 다시 막습니다." },
-    { b: "WHY", t: "Idempotency-Key와 DB UNIQUE 제약으로 중복 webhook을 이중 방어합니다." },
+    { b: "CACHE", t: "settlement webhook은 같은 Idempotency-Key면 Redis에 저장한 기존 응답을 그대로 반환합니다." },
+    { b: "LOCK", t: "새 key로 같은 결제가 오면 주문 행을 잠근 뒤 paid 상태를 확인해 기존 티켓을 반환합니다." },
+    { b: "UNIQUE", t: "provider_transaction_id의 UNIQUE 인덱스는 이 경로를 벗어난 중복을 막는 마지막 방어선입니다." },
   ],
   7: [
     { b: "READ", t: "ticketByCode 하나의 쿼리로 ticket, event, order를 조합 조회합니다." },

@@ -21,7 +21,6 @@ const env = {
   ...process.env,
   NODE_ENV: 'production',
   JWT_SECRET: randomBytes(32).toString('hex'),
-  API_KEY: randomBytes(32).toString('hex'),
   WEBHOOK_SIGNING_SECRET: randomBytes(32).toString('hex'),
   LOG_LEVEL: 'info',
   PORT: '3000',
@@ -30,7 +29,7 @@ const env = {
   RATE_LIMIT_FAIL_MODE: 'closed',
 };
 const containerEnv = [
-  'NODE_ENV', 'JWT_SECRET', 'API_KEY', 'WEBHOOK_SIGNING_SECRET', 'LOG_LEVEL', 'PORT',
+  'NODE_ENV', 'JWT_SECRET', 'WEBHOOK_SIGNING_SECRET', 'LOG_LEVEL', 'PORT',
   'DB_PORT', 'DB_USER', 'DB_PASSWORD', 'DB_NAME', 'REDIS_PORT', 'REDIS_PASSWORD',
   'ENFORCE_AUTH_USER_MATCH', 'ENABLE_RATE_LIMITING', 'RATE_LIMIT_FAIL_MODE',
   'ENABLE_ADMISSION',
