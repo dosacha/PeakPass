@@ -7,7 +7,7 @@ describe('GET /events pagination against PostgreSQL', () => {
   let pool: Pool;
   let postgres: typeof import('@/infra/postgres/client');
   let ids: string[] = [];
-  const prefix = `Task12 ${randomUUID()} `;
+  const prefix = `Limit test ${randomUUID()} `;
 
   beforeAll(async () => {
     const { loadConfig } = await import('@/infra/config');

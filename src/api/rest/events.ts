@@ -27,7 +27,7 @@ export async function registerEventRoutes(app: FastifyInstance) {
     //   - ENABLE_ADMIN_EVENT_WRITE=true + ENFORCE_AUTH_USER_MATCH=false (demo):
     //     flag만으로 통과 (k6/seed 등 demo 흐름용)
     //
-    // 별도 admin 도메인이 본 프로젝트의 학습 스코프 밖이므로 단순한 flag+role 조합만 둔다.
+    // 별도 admin 도메인이 이 프로젝트의 범위 밖이므로 단순한 flag+role 조합만 둔다.
     if (!config.ENABLE_ADMIN_EVENT_WRITE) {
       return reply.code(403).send({
         error: {

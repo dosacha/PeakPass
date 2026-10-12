@@ -1,6 +1,5 @@
 import 'dotenv/config';
 import { randomUUID } from 'crypto';
-import { existsSync } from 'fs';
 import jwt from 'jsonwebtoken';
 import { initRedis, closeRedis } from '@/infra/redis/client';
 import {
@@ -37,9 +36,7 @@ describe('admission actual authenticated HTTP and epoch lifecycle', () => {
       VALUES($1,'p4 http',NOW(),NOW()+interval '1 day',10,10)`,
       [eventId],
     );
-    expect(existsSync('src/core/services/admission.service.ts')).toBe(true);
-    const sp = '@/core/services/admission.service';
-    service = (await import(sp)).admissionService;
+    service = (await import('@/core/services/admission.service')).admissionService;
     await pool.query(
       `INSERT INTO admission_events(event_id,protected,redis_namespace)
       VALUES($1::uuid,true,'peakpass:admission:'||$1::uuid::text||':')`,
@@ -500,7 +497,7 @@ describe('admission actual authenticated HTTP and epoch lifecycle', () => {
       statusCode: 410,
     });
   });
-  // P4 has no release route. The fixture performs the contract's explicit transition under the exclusive gate.
+  // There is no release route. The fixture performs the contract's explicit transition under the exclusive gate.
   const setProtected = (value: boolean) =>
     serializableTransactionWithRetry(async (c) => {
       await readAdmissionPolicy(c, eventId, 'exclusive');

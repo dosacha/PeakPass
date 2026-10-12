@@ -18,7 +18,7 @@ import {
 import { ledgerMismatches } from '../helpers/admission-ledger';
 
 /**
- * Real failures at the integration boundary (admission-v1 §8, P7).
+ * Real failures at the integration boundary (admission-v1 §8).
  *
  * The product runs as containers of the production image named by ADMISSION_FAULT_IMAGE, next to
  * a PostgreSQL and a Redis that this fixture creates and removes. Faults are real: `docker pause`,

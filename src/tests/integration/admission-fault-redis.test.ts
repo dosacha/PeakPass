@@ -13,7 +13,7 @@ import {
 } from './admission-fault-fixture';
 
 /**
- * P7, contract scenarios A10 and A11: a real Redis that is paused, stopped, started again or
+ * Contract scenarios A10 and A11: a real Redis that is paused, stopped, started again or
  * emptied while buyers are attached, and coordinators killed at the stages of the reset.
  *
  * Opt-in: ADMISSION_FAULT_IMAGE names the production image under test. The Redis, the PostgreSQL

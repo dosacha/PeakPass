@@ -109,10 +109,10 @@ function createMockServer() {
       return { ok: true, status: 200, data: { ...cached, duplicate: true, _meta: { source: "redis_idempotency_cache" } }, replayed: true };
     }
     if (settledTxns.has(body.providerTransactionId)) {
-      // semantic duplicate — DB unique catches it
+      // semantic duplicate — the server finds the order already paid under its row lock
       const existing = Array.from(orders.values()).find(o => o.id === body.orderId);
       const existingTickets = tickets.get(body.orderId) || [];
-      const resp = { order: existing, paymentStatus: "SETTLED", tickets: existingTickets, duplicate: true, _meta: { guard: "payments.provider_txn_id UNIQUE" } };
+      const resp = { order: existing, paymentStatus: "SETTLED", tickets: existingTickets, duplicate: true, _meta: { guard: "order row lock + paid check" } };
       idempCache.set(cacheKey, resp);
       return { ok: true, status: 200, data: resp };
     }
@@ -276,7 +276,7 @@ const App = () => {
   // its own session exists, and that holds from the very render in which the base changed.
   const queueUserId = queueUser.apiBase === apiBase && queueUser.mode === mode ? queueUser.userId : "";
 
-  // [FIX] Per-button in-flight indicator for Step 6 (Duplicate / Retry).
+  // Per-button in-flight indicator for Step 6 (Duplicate / Retry).
   // A and B each track their own busy state so one button's pending request
   // does NOT lock the other one out via the shared stepStatus.s6 = "running" flag.
   const [dupBusy, setDupBusy] = useS({ A: false, B: false });
@@ -622,7 +622,7 @@ const App = () => {
       setRequests([]); setLookupCode("");
       setActiveStep(1);
       setExpandedSteps({ s1:true,s2:false,sq:true,s3:false,s4:false,s5:false,s6:false,s7:false });
-      setDupBusy({ A: false, B: false }); // [FIX] reset per-button busy flags
+      setDupBusy({ A: false, B: false }); // reset per-button busy flags
       setPurchaseError(null);
       // Reset is local: an entry in the queue stays on the server and is read again, on the
       // queue's own schedule. A purchase still being sent stops, so its answer cannot land on
@@ -793,7 +793,7 @@ const App = () => {
       } else setStep("s5", "error");
     },
 
-    // [FIX] runDupReplay — A 케이스 (Cache replay)
+    // runDupReplay — A 케이스 (같은 key 재전송)
     // - per-button busy flag(dupBusy.A)로 A 자신만 잠금. B는 영향 없음.
     // - 성공 시 자체적으로 setStep("s6", "done") 호출 — 더 이상 다른 케이스의 상태에 의존하지 않음.
     // - 이미 done이면 "running"으로 되돌리지 않아 progress flicker 방지 (functional update).
@@ -854,7 +854,7 @@ const App = () => {
       }
     },
 
-    // [FIX] runDupSemantic — B 케이스 (Semantic duplicate)
+    // runDupSemantic — B 케이스 (Semantic duplicate)
     // - 위와 동일 패턴. dupBusy.B만 사용.
     runDupSemantic: async () => {
       if (!order) return;
@@ -1030,7 +1030,7 @@ const App = () => {
     reservation, order, settlement, duplicateReplay, duplicateSemantic, ticketByCode, lookupCode,
     stepStatus, stepTiming, activeStep, expandedSteps, requests,
     checkoutIdemKey, settlementIdemKey, providerTxnId,
-    dupBusy, // [FIX] expose per-button busy state to DemoFlow
+    dupBusy, // expose per-button busy state to DemoFlow
     // admission queue (live mode): the controller's view and what the card needs around it
     admission, pollMode, purchaseError, queueUserId,
     queueEnabled: mode === "live" && isUuid(selectedEventId)

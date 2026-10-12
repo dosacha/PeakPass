@@ -100,7 +100,7 @@ function selectionComplexity(
         nestedCost = selectionComplexity(selection.selectionSet, returnType, context, depth + 1, fragmentPath);
       }
       const outputType = field && isNonNullType(field.type) ? field.type.ofType : field?.type;
-      // ponytail: unpaginated lists estimate 10 items; a tier-count bound or measurement must replace this if needed.
+      // Simplification: an unpaginated list is estimated at 10 items. A tier-count bound or a measurement should replace it if the estimate matters.
       const cardinality = outputType && isListType(outputType)
         ? numericLimit(args.limit, typeof rule === 'function' ? baseCost : 10) : 1;
       total += baseCost + cardinality * nestedCost;

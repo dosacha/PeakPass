@@ -12,7 +12,7 @@ import {
 } from './admission-fault-fixture';
 
 /**
- * P7: several application processes, real process failures and the real timers of admission-v1
+ * Several application processes, real process failures and the real timers of admission-v1
  * (claim deadline 15 s, admission TTL 30 s, the transaction bounds of contract §5).
  *
  * Opt-in: ADMISSION_FAULT_IMAGE names the production image under test. Everything this file

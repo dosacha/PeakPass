@@ -2,7 +2,7 @@ import { readFileSync } from 'fs';
 import vm from 'vm';
 
 /**
- * Runnable polling state check of the P6 frontend (admission-v1 §7, A14/A15).
+ * Runnable polling state check of the frontend (admission-v1 §7, A14/A15).
  *
  * The frontend has no build step: `frontend/admission-polling.js` is a plain script that
  * index.html loads next to React. It is loaded here the same way, as a script in a fresh

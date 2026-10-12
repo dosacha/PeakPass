@@ -12,7 +12,7 @@ import {
 } from './admission-fault-fixture';
 
 /**
- * P7: policy transitions with buyers attached, the existing flows on a protected event, and the
+ * Policy transitions with buyers attached, the existing flows on a protected event, and the
  * ways around the gate, through two application processes.
  *
  * Opt-in: ADMISSION_FAULT_IMAGE names the production image under test. Activation, release and

@@ -46,7 +46,7 @@ export async function jwtAuthMiddleware(request: FastifyRequest, reply: FastifyR
 
   const user = extractUserFromToken(token);
   if (!user) {
-    // 토큰을 *보낸 의도*가 있었는데 invalid → 정직하게 401로 거절.
+    // 토큰을 *보낸 의도*가 있었는데 invalid → 401로 거절.
     // (토큰 미존재와 토큰 변조/만료를 구분하지 않으면 escalation 시도가
     //  ENFORCE_AUTH_USER_MATCH=false 환경에서 silent로 통과한다.)
     logger.warn({ requestId: request.id }, 'Authorization header present but JWT is invalid');

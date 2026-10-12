@@ -166,7 +166,7 @@ export class AdmissionService {
     operation: Parameters<typeof runAdmission>[2],
     input: Record<string, unknown>,
     epoch?: string,
-    // P5's claim runs inside the purchase transaction, whose client already holds the event gate
+    // The purchase's claim runs inside the purchase transaction, whose client already holds the event gate
     // and has read the policy. Internal operations must not classify on a second connection.
     classify = true,
   ) {
@@ -234,7 +234,7 @@ export class AdmissionService {
   async promote(eventId: string) {
     return this.execute(eventId, 'tick', {});
   }
-  /** P5 MUST hold the PG admission lock on the same transaction's PoolClient. */
+  /** The purchase path MUST hold the PG admission lock on the same transaction's PoolClient. */
   async claim(input: ClaimIdentity): Promise<AdmissionClaim> {
     const result = await this.execute(
       input.eventId,
@@ -245,11 +245,11 @@ export class AdmissionService {
     );
     return { ...input, claimToken: result.entry!.claimToken!, deadline: result.entry!.deadline! };
   }
-  /** Only after P5 has committed/verified a matching immutable durable result. */
+  /** Only after the purchase path has committed/verified a matching immutable durable result. */
   async complete(claim: AdmissionClaim, outcome: AdmissionOutcome) {
     return this.execute(claim.eventId, 'complete', { ...claim, outcome }, claim.epoch, false);
   }
-  /** Only after P5's closed commit, never from a timeout/finally callback. */
+  /** Only after the closed commit of the purchase path, never from a timeout/finally callback. */
   async close(claim: AdmissionClaim) {
     return this.execute(claim.eventId, 'close', { ...claim }, claim.epoch, false);
   }
@@ -281,7 +281,7 @@ export class AdmissionService {
     return null;
   }
 
-  /** Internal lifecycle. P4 exposes NO activation route or environment bypass. */
+  /** Internal lifecycle. There is NO activation route or environment bypass. */
   async recover(eventId: string, observed?: AdmissionControl | null): Promise<void> {
     if (!this.isReady()) await this.verifyEnvironment();
     const old = observed === undefined ? await this.control(eventId).catch(() => null) : observed;
@@ -345,7 +345,7 @@ export class AdmissionService {
 
   async maintain(
     stopped = () => false,
-    // P5's reclaimer: decides overdue claims through the durable ledger. It must not throw.
+    // The reclaimer decides overdue claims through the durable ledger. It must not throw.
     reclaim?: (eventId: string, claims: RedisAdmissionEntry[]) => Promise<void>,
   ): Promise<void> {
     if (!this.enabled || stopped()) return;
@@ -387,7 +387,7 @@ export class AdmissionService {
           await this.recover(policy.eventId, observed);
         } else {
           await this.promote(policy.eventId);
-          // P4 can mark overdue claims, but only P5 can decide and commit durable closure.
+          // This service can mark overdue claims; only the ledger-backed reclaimer decides and commits durable closure.
           if (!stopped()) {
             const overdue = (await this.reconcile(policy.eventId)).claims ?? [];
             if (reclaim && overdue.length) await reclaim(policy.eventId, overdue);
@@ -455,7 +455,7 @@ export class AdmissionService {
 export const admissionService = new AdmissionService();
 
 /**
- * P5 gates both new seat-acquisition paths, so a protected policy no longer blocks startup. What
+ * Both new seat-acquisition paths are gated, so a protected policy no longer blocks startup. What
  * this version needs instead is the durable result ledger: without migration 013 a protected
  * purchase could not commit its result, so the product refuses to start.
  */

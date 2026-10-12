@@ -21,7 +21,7 @@ export const graphqlTypeDefs = `
   """
   이벤트 가격 등급 (표준, VIP 등)
 
-  NOTE: tier 단위 잔여 추적은 본 프로젝트의 정합성 학습 스코프 밖이다.
+  NOTE: tier 단위 잔여 추적은 이 프로젝트의 범위 밖이다.
   잔여 표시는 Event.availableSeats (이벤트 단위)에서 가져온다.
   """
   type PricingTier {
