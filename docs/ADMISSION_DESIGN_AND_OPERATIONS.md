@@ -48,7 +48,7 @@ adaptive의 비용은 뒤쪽 대기자의 화면이 최대 5초 늦게 갱신된
 | 대기열 API 한도 | 조회 120/분, 등록 10/분, 취소 10/분 (user·event·action별) | 계약 §7. 기존 구매 한도(5/분)와 별도다 |
 | 전용 Redis | `--save "" --appendonly no --maxmemory-policy noeviction` | Redis 실행 인자. 다르면 입장 제어가 준비 상태를 열지 않는다 |
 
-seed 값은 처음에 고정한 실험 가정이다. 운영 권고값이 아니며 P2 기준선에서 용량을 환산한 값도 아니다. R이나 C를 올린 후보는 P8 pilot에서 구매 시도 실패율 기준을 맞추지 못해 채택하지 않았다([ISSUE_17_VALIDATION.md](ISSUE_17_VALIDATION.md)의 pilot 절. pilot 수치는 조건 선택용이다).
+seed 값은 처음에 고정한 실험 가정이다. 운영 권고값이 아니며 P2 기준선에서 용량을 환산한 값도 아니다. R이나 C를 올린 후보는 P8 pilot에서 구매 시도 실패율 기준을 맞추지 못해 채택하지 않았다([ISSUE_17_VALIDATION.md](records/ISSUE_17_VALIDATION.md)의 pilot 절. pilot 수치는 조건 선택용이다).
 
 ## 시작, 보호 켜기와 끄기, 종료
 
@@ -90,7 +90,7 @@ COMMIT;
 
 ## 검증한 범위와 하지 않은 것
 
-- **실제로 실행한 것.** 제품 이미지 컨테이너에 가한 Redis·PostgreSQL·프로세스 장애 26개 시나리오와 headless Chrome 시나리오(P7, [ISSUE_16_VALIDATION.md](ISSUE_16_VALIDATION.md)), 같은 조건의 A/B/C 부하 비교(P8, [ISSUE_17_VALIDATION.md](ISSUE_17_VALIDATION.md)). 모두 로컬 host 한 대다.
+- **실제로 실행한 것.** 제품 이미지 컨테이너에 가한 Redis·PostgreSQL·프로세스 장애 26개 시나리오와 headless Chrome 시나리오(P7, [ISSUE_16_VALIDATION.md](records/ISSUE_16_VALIDATION.md)), 같은 조건의 A/B/C 부하 비교(P8, [ISSUE_17_VALIDATION.md](records/ISSUE_17_VALIDATION.md)). 모두 로컬 host 한 대다.
 - **합성하거나 주입한 것.** TTL·claim 기한 경과의 일부, Redis 반영 유실, 화면의 구매 오류 응답 일부는 필드를 직접 쓰거나 응답을 주입해 확인했다. 어느 것이 그런지는 각 단계의 검증 문서에 있다.
 - **하지 않은 것.** 네트워크 분할, persistence나 replica가 있는 Redis, failover, 인스턴스 4개 이상, 다른 도착률, 실제 브라우저에서의 입장 인지 지연, 이탈과 취소가 섞인 부하, 사람의 코드 리뷰.
 
@@ -175,4 +175,4 @@ node load-test/flash-sale-fixture.mjs --run-id <새 id> --arm <a|b|c> --users 10
 - 이 조건의 부하 구간은 최대 920초다(도착 20초 + drain 900초). 분석기가 요청을 모두 메모리에 올리므로 P8은 `NODE_OPTIONS=--max-old-space-size=6144`로 실행했다.
 - 결과는 `load-test/results/flash-sale/<run id>/`에 생기고 git이 무시한다. P8이 남긴 증거는 `load-test/results/flash-sale-abc-v3/`(index와 ZIP 11개)다.
 - 지표의 정의, 유효성 규칙, 종료 순서는 [측정 계약](FLASH_SALE_EVIDENCE.md)에 있다.
-- 장애 스위트(P7)는 Docker가 필요한 opt-in이고 CI에서 돌지 않는다. 명령은 [ISSUE_16_VALIDATION.md](ISSUE_16_VALIDATION.md)의 "Commands"에 있다.
+- 장애 스위트(P7)는 Docker가 필요한 opt-in이고 CI에서 돌지 않는다. 명령은 [ISSUE_16_VALIDATION.md](records/ISSUE_16_VALIDATION.md)의 "Commands"에 있다.

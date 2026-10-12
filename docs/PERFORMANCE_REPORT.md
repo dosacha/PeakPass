@@ -14,7 +14,7 @@
 
 ## 입장 제어 A/B/C 비교 (2026-10-08–09)
 
-같은 commit, 같은 Compose 파일, 같은 도착 조건에서 세 가지 조건을 3회씩 측정했습니다. 이 문서는 조건 하나를 arm이라고 부릅니다. A는 대기열 없음, B는 대기열과 고정 간격(fixed) polling, C는 같은 대기열과 적응형(adaptive) polling입니다. arm 사이에 다른 것은 이벤트의 보호 여부와 polling 방식, 그리고 그에 따라 달라지는 구매 요청의 재전송 규칙입니다(아래 "재전송 규칙"). 프로토콜과 전체 표는 [ISSUE_17_VALIDATION.md](./ISSUE_17_VALIDATION.md), 지표 정의는 [FLASH_SALE_EVIDENCE.md](./FLASH_SALE_EVIDENCE.md), 원본은 `load-test/results/flash-sale-abc-v3/index.json`에 있습니다.
+같은 commit, 같은 Compose 파일, 같은 도착 조건에서 세 가지 조건을 3회씩 측정했습니다. 이 문서는 조건 하나를 arm이라고 부릅니다. A는 대기열 없음, B는 대기열과 고정 간격(fixed) polling, C는 같은 대기열과 적응형(adaptive) polling입니다. arm 사이에 다른 것은 이벤트의 보호 여부와 polling 방식, 그리고 그에 따라 달라지는 구매 요청의 재전송 규칙입니다(아래 "재전송 규칙"). 프로토콜과 전체 표는 [ISSUE_17_VALIDATION.md](./records/ISSUE_17_VALIDATION.md), 지표 정의는 [FLASH_SALE_EVIDENCE.md](./FLASH_SALE_EVIDENCE.md), 원본은 `load-test/results/flash-sale-abc-v3/index.json`에 있습니다.
 
 ### 조건
 

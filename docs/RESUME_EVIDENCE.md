@@ -54,7 +54,7 @@
 - 불렛 2의 두 방식은 측정 전에 계약 §7에 함께 정해 둔 것이고, 고정 간격은 비교 기준이다. 측정하다가 문제를 발견해 바꾼 것이 아니다.
 - 증거 종류는 실제 HTTP, PostgreSQL, Redis다. 구매자는 k6 iteration이고 페이지의 polling controller(`frontend/admission-polling.js`)를 그대로 실행했다. 브라우저는 아니다.
 - 구현 근거: 대기열과 승격은 `src/infra/redis/admission.ts`와 `src/core/services/admission.service.ts`, 소비 원장은 `src/core/services/admission-consumption.ts`와 migration 013, polling 간격은 계약 §7과 `frontend/admission-polling.js`.
-- 프로토콜, 기준, 표 전체는 [ISSUE_17_VALIDATION.md](ISSUE_17_VALIDATION.md)의 "Formal protocol"과 "Formal results"에 있다.
+- 프로토콜, 기준, 표 전체는 [ISSUE_17_VALIDATION.md](records/ISSUE_17_VALIDATION.md)의 "Formal protocol"과 "Formal results"에 있다.
 
 ### 불렛 3 (통합 테스트)
 

@@ -169,4 +169,4 @@ npm run test:flash-sale
 npm run load-test:flash-sale -- --run-id my-run-01 --arm c --users 1000 --rate 50 --warmup-seconds 5 --pre-vus 1000 --max-vus 1000 --drain-seconds 900
 ```
 
-입력과 산출 파일, 판정 규칙의 원문은 [FLASH_SALE_EVIDENCE.md](./FLASH_SALE_EVIDENCE.md), 기준선은 [FLASH_SALE_BASELINE.md](./FLASH_SALE_BASELINE.md), A/B/C 비교의 프로토콜과 결과는 [ISSUE_17_VALIDATION.md](./ISSUE_17_VALIDATION.md)에 있습니다.
+입력과 산출 파일, 판정 규칙의 원문은 [FLASH_SALE_EVIDENCE.md](./FLASH_SALE_EVIDENCE.md), 기준선은 [FLASH_SALE_BASELINE.md](./FLASH_SALE_BASELINE.md), A/B/C 비교의 프로토콜과 결과는 [ISSUE_17_VALIDATION.md](./records/ISSUE_17_VALIDATION.md)에 있습니다.

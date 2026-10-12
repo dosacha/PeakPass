@@ -1,6 +1,6 @@
 # Issue #17 / P8 same-condition A/B/C comparison: protocol, pilots and results
 
-This is the record of P8 on the branch `claude/issue-17-p8-load-comparison`, cut from main `1bb27967b7fc654fe57cd4b2ae89eb6b63a0d509`. It is written in stages. The protocol and the pilot plan below are fixed before the runs they govern; the result sections are filled as runs finish and say which runs they come from. The measurement contract of the harness is in [FLASH_SALE_EVIDENCE.md](FLASH_SALE_EVIDENCE.md) ("v3 측정 계약"), the plan and the ledger of every ruling in [the plan](superpowers/plans/2026-10-05-issue-17-load-comparison.md).
+This is the record of P8 on the branch `claude/issue-17-p8-load-comparison`, cut from main `1bb27967b7fc654fe57cd4b2ae89eb6b63a0d509`. It is written in stages. The protocol and the pilot plan below are fixed before the runs they govern; the result sections are filled as runs finish and say which runs they come from. The measurement contract of the harness is in [FLASH_SALE_EVIDENCE.md](../FLASH_SALE_EVIDENCE.md) ("v3 측정 계약"), the plan and the ledger of every ruling in the plan.
 
 Every number in this document is an observation of local runs on one Windows host that is shared with other work. None is an operational result. Pilot numbers choose conditions and a profile; they are not results of the comparison and are not to be quoted as such.
 
